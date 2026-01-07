@@ -40,35 +40,21 @@ impl Scheduler {
         let id = task.id;
         
         // Stack Size: 8 Frames (32KB)
-        // Stack Size: 8 Frames (32KB)
         use crate::task::STACK_PAGES as STACK_FRAMES; 
-        const GUARD_FRAMES: usize = 1;
 
-        // Allocate from global frame allocator
-        let (guard_phys, stack_start_phys) = {
-            let mut allocator_guard = crate::memory::frame::FRAME_ALLOCATOR.lock();
-            let allocator = allocator_guard.as_mut().expect("Frame allocator not initialized");
-            
-            let guard = allocator.allocate_frame().expect("OOM Guard");
-            let stack_start = allocator.allocate_frame().expect("OOM Stack Start");
-            for _ in 0..(STACK_FRAMES - 1) {
-                allocator.allocate_frame().expect("OOM Stack Continuation");
-            }
-            (guard, stack_start)
-        };
+        // Allocate Kernel Stack
+        let kstack = crate::task::stack::Stack::new_kernel(STACK_FRAMES).expect("OOM Stack");
         
         // Stack grows DOWN. Top is at end of region.
-        let stack_bottom = stack_start_phys;
-        let stack_top = stack_bottom + (STACK_FRAMES * crate::memory::paging::PAGE_SIZE);
+        let stack_top = kstack.top;
+        let stack_base = kstack.base;
         
         // Zero the stack
-        // SAFETY: We just allocated this memory from the frame allocator, so we own it exclusively.
-        // The pointer is valid and aligned, and the size is correct.
+        // SAFETY: We own the allocated stack memory.
         unsafe {
-             core::ptr::write_bytes(stack_bottom as *mut u8, 0, STACK_FRAMES * crate::memory::paging::PAGE_SIZE);
+             core::ptr::write_bytes(stack_base as *mut u8, 0, STACK_FRAMES * crate::memory::paging::PAGE_SIZE);
         }
                 
-        
              let entry = task_entry_point as *const () as usize;
              let (gp, tp) = crate::task::get_kernel_gp_tp();
                 
@@ -78,10 +64,9 @@ impl Scheduler {
              task.trap_frame.sstatus = 0x120;
              task.context.gp = gp;
              task.context.tp = tp;
-             task.stack_base = Some(stack_bottom);
-             task.guard_page = Some(guard_phys);
+             task.kernel_stack = Some(kstack);
                 
-             info!("Task '{}' (ID {}): Stack 0x{:X}-0x{:X}", name, id, stack_bottom, stack_top);
+             info!("Task '{}' (ID {}): Stack 0x{:X}-0x{:X}", name, id, stack_base, stack_top);
         
         self.tasks.insert(id, task);
         self.ready_queue.push_back(id);
@@ -96,25 +81,16 @@ impl Scheduler {
         
         use crate::task::STACK_PAGES as STACK_FRAMES;
         
-        let (guard_phys, stack_start_phys) = {
-            let mut allocator_guard = crate::memory::frame::FRAME_ALLOCATOR.lock();
-            let allocator = allocator_guard.as_mut().expect("Frame allocator not initialized");
-            
-            let guard = allocator.allocate_frame().expect("OOM Guard");
-            let stack_start = allocator.allocate_frame().expect("OOM Stack Start");
-            for _ in 0..(STACK_FRAMES - 1) {
-                allocator.allocate_frame().expect("OOM Stack Continuation");
-            }
-            (guard, stack_start)
-        };
+        // Allocate Kernel Stack
+        let kstack = crate::task::stack::Stack::new_kernel(STACK_FRAMES).expect("OOM Stack");
         
-        let stack_bottom = stack_start_phys;
-        let stack_top = stack_bottom + (STACK_FRAMES * crate::memory::paging::PAGE_SIZE);
+        let stack_top = kstack.top;
+        let stack_base = kstack.base;
         
         // SAFETY: We own the allocated stack memory exclusively. The pointer is valid.
         // Setting up task context with valid register values for thread initialization.
         unsafe {
-             core::ptr::write_bytes(stack_bottom as *mut u8, 0, STACK_FRAMES * crate::memory::paging::PAGE_SIZE);
+             core::ptr::write_bytes(stack_base as *mut u8, 0, STACK_FRAMES * crate::memory::paging::PAGE_SIZE);
              
              let (gp, tp) = crate::task::get_kernel_gp_tp();
              let trampoline = crate::hal::arch::thread_trampoline as usize;
@@ -127,11 +103,10 @@ impl Scheduler {
              task.context.tp = tp;
              task.trap_frame.sepc = trampoline;
              task.trap_frame.sstatus = 0x120;
-             task.stack_base = Some(stack_bottom);
-             task.guard_page = Some(guard_phys);
+             task.kernel_stack = Some(kstack);
                 
              info!("Thread '{}' (ID {}): Stack 0x{:X}-0x{:X}, Entry 0x{:X}, Arg 0x{:X}", 
-                 name, id, stack_bottom, stack_top, entry, arg);
+                 name, id, stack_base, stack_top, entry, arg);
         }
         
         self.tasks.insert(id, task);

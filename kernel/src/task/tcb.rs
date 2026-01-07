@@ -97,10 +97,9 @@ pub struct Task {
     pub reply_value: Option<usize>,
     // Current Working Directory
     pub cwd: String,
-    // Stack allocation (base address, for deallocation)
-    pub stack_base: Option<VAddr>,
-    // Guard page address (for stack overflow detection)
-    pub guard_page: Option<VAddr>,
+    // Stack management
+    pub kernel_stack: Option<super::stack::Stack>,
+    pub user_stack: Option<super::stack::Stack>,
 }
 
 impl Task {
@@ -121,8 +120,8 @@ impl Task {
             current_caller: None,
             reply_value: None,
             cwd: String::from("/"),
-            stack_base: None,
-            guard_page: None,
+            kernel_stack: None,
+            user_stack: None,
         }
     }
     
