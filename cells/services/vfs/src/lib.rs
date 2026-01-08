@@ -13,6 +13,9 @@ use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 use driver_disk::RamDisk;
 
+// Embed Shell Binary
+static SHELL_ELF: &[u8] = include_bytes!("../../../../kernel/src/embedded/shell");
+
 // Simple RamFS File Representation
 #[derive(Clone)]
 struct RamFile {
@@ -66,6 +69,13 @@ impl VfsManager {
             String::from("hello"),
             Box::new(RamFile::new_file("hello", b"\x7fELF...Mock Hello App..."))
         );
+
+        // Add Shell executable (real)
+        bin.children.insert(
+            String::from("shell"),
+            Box::new(RamFile::new_file("shell", SHELL_ELF))
+        );
+
         root.children.insert(String::from("bin"), bin);
 
         Self {

@@ -30,6 +30,10 @@ mod sync;
 // Re-export types for convenience
 pub use types::*;
 
+// Embed Init Binary
+#[repr(align(4096))]
+static INIT_ELF: &[u8] = include_bytes!("embedded/init");
+
 /// Kernel entry point called from HAL boot code
 #[no_mangle]
 pub extern "C" fn kmain(hartid: usize, dtb: usize) -> ! {
@@ -140,38 +144,16 @@ pub extern "C" fn kmain(hartid: usize, dtb: usize) -> ! {
     task::init();
     log::info!("Scheduler initialized");
 
-    log::info!("Initializing Filesystem...");
-    if crate::fs::VIFS1.lock().is_some() {
-        log::info!("Filesystem mounted successfully.");
-    } else {
-        log::error!("Filesystem: Not mounted.");
-    }
-
-    // 7. Spawn User Shell/Init
-    log::info!("Spawning /init from filesystem...");
-    match task::spawn_from_file("/init", "init", types::CellId(1), alloc::vec![]) {
-        Ok(tid) => log::info!("Successfully spawned /init (TID: {})", tid),
-        Err(e) => {
-            log::error!("Failed to spawn /init: {:?}", e);
-            log::warn!("Attempting /INIT (case sensitivity check)...");
-            match task::spawn_from_file("/INIT", "init", types::CellId(1), alloc::vec![]) {
-                Ok(tid) => log::info!("Successfully spawned /INIT (TID: {})", tid),
-                Err(e) => {
-                     log::error!("Failed to spawn /INIT: {:?}", e);
-                     // Fallback to synthetic
-                     log::warn!("Falling back to synthetic task...");
-                     match task::spawn_synthetic("/synthetic", types::CellId(99), 0x1000) {
-                          Ok(tid) => log::info!("Successfully spawned /synthetic (TID: {})", tid),
-                          Err(e) => log::error!("Failed to spawn /synthetic: {:?}", e),
-                     }
-                }
-            }
-        }
+    // 8. Spawn Embedded Init
+    log::info!("Spawning Embedded Init...");
+    match task::spawn_from_mem(INIT_ELF, "init", types::CellId(1), alloc::vec![]) {
+        Ok(tid) => log::info!("Successfully spawned init (TID: {})", tid),
+        Err(e) => log::error!("Failed to spawn init: {:?}", e),
     }
     
     log::info!("Kernel initialization complete. Entering idle loop.");
     
-    // 7. Start multitasking
+    // 9. Start multitasking
     log::info!("Starting scheduler...");
     
     // Ensure SPP bit is set in sstatus so that context switch saves it as Supervisor Mode.
