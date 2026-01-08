@@ -30,4 +30,9 @@ impl Arch for X86_64Arch {
     fn wait_for_interrupt(&self) {
         // TODO
     }
+
+    fn interrupts_enabled(&self) -> bool {
+        // TODO
+        false
+    }
 }

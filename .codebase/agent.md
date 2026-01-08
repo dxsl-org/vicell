@@ -9,7 +9,7 @@ Trước khi code bất kỳ module nào, Agent **BẮT BUỘC** phải đọc f
 | Nếu nhiệm vụ liên quan đến... | Hãy đọc file này |
 | --- | --- |
 | Lấy code từ các dự án khác | `.codebase/00-fork.md` |
-| Triết lý Cellular & Linker Linker | `.codebase/01-architecture.md` |
+| Triết lý Cellular & Linker Linker | `.codebase/01-core.md` |
 | SAS Layout, HHDM & Metadata Registry | `.codebase/02-memory.md` |
 | Async Safety & Owned Buffers Rule | `.codebase/03-runtime.md` |
 | Multi-Arch Trait (RV32/64/128) | `.codebase/04-hardware.md` |
@@ -30,8 +30,8 @@ ViOS/
 │       ├── cell/             # LINH HỒN: Quản lý Metadata, Registry, Dependency
 │       ├── loader/           # TRÁI TIM: ELF Linker, vá địa chỉ (Relocation)
 │       ├── memory/           # Quản lý Global Heap & Paging (Nền tảng SAS)
+│       ├── task.rs           # Quản lý danh sách Task toàn cục (Task Registry)
 │       └── task/             # Executor cho Async Tasks (Không quản lý Process cũ)
-│           ├── mod.rs        # Quản lý danh sách Task toàn cục (Task Registry)
 │           ├── tcb.rs        # Định nghĩa cấu trúc Task (Registers, Stack, CellOwner)
 │           ├── stack.rs      # Quản lý vùng nhớ Stack cho từng Task (kèm Guard Pages)
 │           └── scheduler.rs  # Thuật toán điều phối
@@ -132,7 +132,7 @@ ViOS/
 
 
 ## 4. Agent Workflow
-- **Check Spec**: Đọc file trong docs/architecture/ để hiểu "Tại sao".
+- **Check Spec**: Đọc file trong .codebase/ để hiểu "Tại sao".
 - **Interface First**: Định nghĩa Trait trong libs/api trước khi code phần thực thi.
 - **Thực thi**: Code logic, chú ý xử lý Result thay vì panic! để hỗ trợ Panic Recovery.
 - **Verification**: Viết test KUnit cho mọi logic quan trọng.
