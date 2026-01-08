@@ -20,6 +20,8 @@ pub enum ViSyscall {
     Wait = 8, // Wait for task
     Yield = 104, // Linux sched_yield is 24, but we use 104 in current code
     SetTimer = 35, // Added SetTimer
+    ShmAlloc = 20, // Allocate Shared Memory
+    ShmMap = 21,   // Map Shared Memory to Task
     
     // === Logging (50-59) ===
     Log = 11,   // Current implementation uses 11
@@ -49,6 +51,8 @@ impl From<usize> for ViSyscall {
             8 => ViSyscall::Wait,
             104 => ViSyscall::Yield,
             35 => ViSyscall::SetTimer,
+            20 => ViSyscall::ShmAlloc,
+            21 => ViSyscall::ShmMap,
             11 => ViSyscall::Log,
             101 => ViSyscall::Open,
             102 => ViSyscall::Read,
@@ -72,4 +76,8 @@ pub struct ViSpawnArgs {
     pub name_ptr: usize,
     /// Length of name string.
     pub name_len: usize,
+    /// Pointer to arguments string (utf8, space separated or null separated).
+    pub args_ptr: usize,
+    /// Length of arguments string.
+    pub args_len: usize,
 }

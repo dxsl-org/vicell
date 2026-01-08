@@ -9,6 +9,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use log::info;
 use types::*;
+use api::syscall::ViSpawnArgs;
 
 
 /// Result of a System Call
@@ -60,10 +61,14 @@ pub enum Syscall {
     Exit { code: usize },
     /// 6: Exec (Spawn from file)
     Exec { path_ptr: usize, path_len: usize },
-    /// 10: SpawnFromMem (Spawn from Memory buffer)
-    SpawnFromMem { ptr: usize, len: usize, name_ptr: usize, name_len: usize },
+    /// 10: SpawnFromMem (Spawn from Memory buffer via Struct)
+    SpawnFromMem { args_ptr: usize },
     /// 8: Wait (Wait for task)
     Wait { pid: usize },
+    /// 20: ShmAlloc
+    ShmAlloc { size: usize },
+    /// 21: ShmMap
+    ShmMap { handle: usize, target_pid: usize },
     
     // --- Legacy / Compatibility Layer ---
     /// 100: Service Lookup (Find driver ID by name)
@@ -157,10 +162,6 @@ pub fn handle_syscall(caller_id: usize, syscall: Syscall) -> SyscallResult {
                 if let Some(target) = sched.tasks.get_mut(&pid) {
                     if target.state == TaskState::Terminated {
                         // Already dead? Return exit code if stored or just 0?
-                        // If we support Zombies, we get it. If simplified, assume 0.
-                        // But wait, if Terminated, we might have cleaned it up already?
-                        // Scheduler::exit_task usually removes it? No, in Exit handler we didn't remove it yet?
-                        // Let's check Exit handler logic below.
                         let code = target.exit_code.unwrap_or(0);
                         return Ok(code);
                     } else {
@@ -182,6 +183,58 @@ pub fn handle_syscall(caller_id: usize, syscall: Syscall) -> SyscallResult {
                 return Ok(sched.tasks.get(&caller_id).and_then(|t| t.reply_value).unwrap_or(0));
             }
             Ok(0)
+        }
+        Syscall::ShmAlloc { size } => {
+            // Allocate a global frame
+            // For MVP, we just allocate from frame allocator and return physical address as handle?
+            // Handle MUST be secure.
+            // We use PAddr as Handle for now (Insecure but works for single user SAS logic).
+            let mut frame_guard = crate::memory::frame::FRAME_ALLOCATOR.lock();
+            if let Some(allocator) = frame_guard.as_mut() {
+                if let Some(frame) = allocator.allocate_frame() {
+                    return Ok(frame);
+                }
+            }
+            Err(SyscallError::BufferTooSmall)
+        }
+        Syscall::ShmMap { handle, target_pid } => {
+            // Map the frame (handle) into target_pid's address space.
+            // We need to find a free VAddr in target.
+            // Simplified: Map at Identity + Offset? Or hardcoded region?
+            // Let's map at 0x8000_0000 + handle (if handle is small offset?).
+            // Handle is PhysAddr (e.g. 0x80200000).
+            // We map it to VAddr = Handle (Identity) for SAS simplicity if not already mapped.
+            // Actually, in SAS, if we use Identity Mapping for User Space (which we do for now mostly),
+            // then ShmAlloc returning PAddr is enough! The user can just use it?
+            // NO. User runs in U-mode. They can only access mapped pages.
+            // We need to ensure PAddr is mapped with U-bit.
+
+            let frame = handle;
+            let vaddr = frame; // Identity map for simplicity
+
+            // Map it for Target
+            // Permissions: R/W/U
+            use crate::memory::paging::Flags;
+            let flags = Flags::VALID | Flags::READ | Flags::WRITE | Flags::USER | Flags::ACCESSED | Flags::DIRTY;
+
+            // We need access to Frame Allocator to clone the mapping?
+            // Or just update the Page Table.
+            // Page Table is shared? SAS means One Page Table?
+            // If SAS means One Page Table, then mapping it once makes it available to ALL.
+            // ViOS SAS: "Single Address Space". Yes.
+            // So ShmMap just ensures it is mapped with U permission.
+
+            let mut frame_guard = crate::memory::frame::FRAME_ALLOCATOR.lock();
+            if let Some(allocator) = frame_guard.as_mut() {
+                 unsafe {
+                     // Check if already mapped?
+                     // We just force map.
+                     if crate::memory::paging::map_page(allocator, vaddr, frame, Flags::from_bits(flags.bits())).is_ok() {
+                         return Ok(vaddr);
+                     }
+                 }
+            }
+            Err(SyscallError::Unknown)
         }
         Syscall::FutexWait { addr, val } => {
             // Returns Ok(0) if blocked (then yield), Err(TryAgain) if val mismatch
@@ -244,12 +297,6 @@ pub fn handle_syscall(caller_id: usize, syscall: Syscall) -> SyscallResult {
                     }
                 }
             }
-            // Cleanup Logic (SAS Lease Revocation)
-            // Ideally we iterate leases and revoke.
-            // But for now, we just switch context.
-            // The task struct remains as Zombie (Terminated) if we don't remove it.
-            // If we want to clean up memory, we should do it here or in a Reaper.
-            // For MVP, we leave it as Terminated.
 
             super::yield_cpu(); 
             // Should not return
@@ -370,11 +417,18 @@ pub fn handle_syscall(caller_id: usize, syscall: Syscall) -> SyscallResult {
                  }
              }
         }
-        Syscall::SpawnFromMem { ptr, len, name_ptr, name_len } => {
+        Syscall::SpawnFromMem { args_ptr } => {
              unsafe {
-                 let data_slice = core::slice::from_raw_parts(ptr as *const u8, len);
-                 let name_slice = core::slice::from_raw_parts(name_ptr as *const u8, name_len);
+                 // Read struct from user pointer
+                 let args = &*(args_ptr as *const ViSpawnArgs);
+
+                 let data_slice = core::slice::from_raw_parts(args.buffer_addr as *const u8, args.buffer_size);
+                 let name_slice = core::slice::from_raw_parts(args.name_ptr as *const u8, args.name_len);
                  let name = core::str::from_utf8(name_slice).unwrap_or("unknown");
+
+                 // TODO: Handle args.args_ptr (Command Line Arguments)
+                 // For now, ignore args or pass them to spawn_from_mem?
+                 // spawn_from_mem needs update to take args?
 
                  let cell_id = CellId(0);
                  let drivers = alloc::vec::Vec::new();
@@ -488,8 +542,10 @@ pub extern "Rust" fn vios_syscall_dispatch(frame: &mut ViTrapFrame) {
             
         ViSyscall::Spawn => Syscall::Spawn { entry: a0, arg: a1 },
         ViSyscall::Exec => Syscall::Exec { path_ptr: a0, path_len: a1 },
-        ViSyscall::SpawnFromMem => Syscall::SpawnFromMem { ptr: a0, len: a1, name_ptr: a2, name_len: a3 },
+        ViSyscall::SpawnFromMem => Syscall::SpawnFromMem { args_ptr: a0 },
         ViSyscall::Wait => Syscall::Wait { pid: a0 },
+        ViSyscall::ShmAlloc => Syscall::ShmAlloc { size: a0 },
+        ViSyscall::ShmMap => Syscall::ShmMap { handle: a0, target_pid: a1 },
         ViSyscall::Exit => Syscall::Exit { code: a0 },
         ViSyscall::Yield => Syscall::Yield,
         ViSyscall::SetTimer => Syscall::SetTimer { deadline: a0 },

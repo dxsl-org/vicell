@@ -1,7 +1,7 @@
 #![allow(unsafe_code)]
 
 use core::arch::asm;
-use api::syscall::ViSyscall;
+use api::syscall::{ViSyscall, ViSpawnArgs};
 
 
 #[derive(Debug, Copy, Clone)]
@@ -78,13 +78,19 @@ pub fn sys_spawn(entry: usize, arg: usize) -> SyscallResult {
     }
 }
 
-pub fn sys_spawn_from_mem(data: &[u8], name: &str) -> SyscallResult {
+pub fn sys_spawn_from_mem(data: &[u8], name: &str, args: &str) -> SyscallResult {
     unsafe {
-        // a0 = data ptr, a1 = data len
-        // a2 = name ptr, a3 = name len
+        let spawn_args = ViSpawnArgs {
+            buffer_addr: data.as_ptr() as usize,
+            buffer_size: data.len(),
+            name_ptr: name.as_ptr() as usize,
+            name_len: name.len(),
+            args_ptr: args.as_ptr() as usize,
+            args_len: args.len(),
+        };
+
         let ret = syscall(ViSyscall::SpawnFromMem,
-                          data.as_ptr() as usize, data.len(),
-                          name.as_ptr() as usize, name.len());
+                          &spawn_args as *const _ as usize, 0, 0, 0);
         if ret > 0 {
             SyscallResult::Ok(ret as usize)
         } else {
@@ -97,6 +103,28 @@ pub fn sys_wait(pid: usize) -> SyscallResult {
     unsafe {
         let ret = syscall(ViSyscall::Wait, pid, 0, 0, 0);
         if ret >= 0 {
+            SyscallResult::Ok(ret as usize)
+        } else {
+            SyscallResult::Err(SyscallError::Unknown)
+        }
+    }
+}
+
+pub fn sys_shm_alloc(size: usize) -> SyscallResult {
+    unsafe {
+        let ret = syscall(ViSyscall::ShmAlloc, size, 0, 0, 0);
+        if ret > 0 {
+            SyscallResult::Ok(ret as usize)
+        } else {
+            SyscallResult::Err(SyscallError::Unknown)
+        }
+    }
+}
+
+pub fn sys_shm_map(handle: usize, target_pid: usize) -> SyscallResult {
+    unsafe {
+        let ret = syscall(ViSyscall::ShmMap, handle, target_pid, 0, 0);
+        if ret != 0 {
             SyscallResult::Ok(ret as usize)
         } else {
             SyscallResult::Err(SyscallError::Unknown)
@@ -178,10 +206,7 @@ pub fn sys_set_timer(ticks: usize) -> SyscallResult {
 
 pub fn sys_grant(target: usize, ptr: usize, len: usize, flags: usize) -> SyscallResult {
     unsafe {
-        // Assume Grant mapped to ID 12 in Kernel dispatch manually if not in enum
-        // I should update API enum, but for now I rely on Kernel's dispatch match
-        // Wait, I updated `ViSyscall` enum in previous step? No, I didn't add Grant yet.
-        // Let's assume Grant is not used by Shell for now.
+        // Assume Grant mapped to ID 12
         SyscallResult::Err(SyscallError::Unknown)
     }
 }

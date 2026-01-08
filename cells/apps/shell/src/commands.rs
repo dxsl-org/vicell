@@ -16,18 +16,31 @@ pub fn cmd_clear() -> ViResult<()> {
 pub fn cmd_exec<'a>(mut args: core::str::SplitWhitespace<'a>) -> ViResult<()> {
     let path = args.next();
     if path.is_none() {
-        ostd::io::println("Usage: exec <path>");
+        ostd::io::println("Usage: exec <path> [args...]");
         return Ok(());
     }
     let path = path.unwrap();
 
+    // Parse arguments
+    // We can't easily reconstruct the original string slice from SplitWhitespace if we don't have the original string.
+    // ViShell passes `parts` which is `SplitWhitespace`.
+    // We can iterate and join into a new String (requires heap).
+    // Or we modify ViShell to pass the raw arguments string?
+    // For now, join.
+    let mut cmd_args = String::new();
+    // Reconstruct args
+    // Note: SplitWhitespace consumes the iterator.
+    for arg in args {
+        if !cmd_args.is_empty() {
+            cmd_args.push(' ');
+        }
+        cmd_args.push_str(arg);
+    }
+
     // Read file from VFS into memory
-    // This uses the User VFS (RamDisk), bypassing Kernel VIFS1 mismatch.
     match syscall::sys_open(path) {
         Ok(fd) => {
             // Read all data
-            // Since we don't know size, we read chunks until EOF.
-            // Vector to hold data
             let mut data: Vec<u8> = Vec::new();
             let mut buf = [0u8; 512];
             loop {
@@ -50,26 +63,19 @@ pub fn cmd_exec<'a>(mut args: core::str::SplitWhitespace<'a>) -> ViResult<()> {
                 return Ok(());
             }
 
-            // Invoke SpawnFromMem
-            // We pass the slice pointer and length
             ostd::io::print("exec: spawning ");
             ostd::io::print(path);
-            ostd::io::print(" (");
-            // print len? we don't have int formatting in ostd::io::print easily unless using format!
-            ostd::io::println(" bytes)");
+            ostd::io::println("...");
 
-            match syscall::sys_spawn_from_mem(&data, path) {
+            match syscall::sys_spawn_from_mem(&data, path, &cmd_args) {
                 syscall::SyscallResult::Ok(tid) => {
-                     // Wait for task
                      ostd::io::print("exec: waiting for pid ");
                      // ostd::io::print(tid...);
                      ostd::io::println("...");
 
                      match syscall::sys_wait(tid) {
-                         syscall::SyscallResult::Ok(code) => {
-                             ostd::io::print("exec: process exited with code ");
-                             // ostd::io::println(code...);
-                             ostd::io::println(".");
+                         syscall::SyscallResult::Ok(_) => { // exit code ignored for now
+                             ostd::io::println("exec: process exited.");
                          },
                          _ => {
                              ostd::io::println("exec: wait failed (detached?)");
@@ -135,8 +141,6 @@ pub fn cmd_cat<'a>(mut args: core::str::SplitWhitespace<'a>) -> ViResult<()> {
             let mut buffer = [0u8; 256]; // Stack buffer
             let mut pending = 0; // Number of bytes pending from previous read
             loop {
-                // Read into buffer starting after pending bytes
-                // Buffer size is small, so we must be careful not to overflow if pending is large (max utf8 char is 4 bytes)
                 let _max_read = buffer.len() - pending;
                 match syscall::sys_read(fd, &mut buffer[pending..]) {
                     Ok(n) if n > 0 => {
@@ -155,20 +159,15 @@ pub fn cmd_cat<'a>(mut args: core::str::SplitWhitespace<'a>) -> ViResult<()> {
                                 }
 
                                 if let Some(error_len) = e.error_len() {
-                                    // Invalid sequence encountered
                                     ostd::io::print("\u{FFFD}"); // Replacement char
-                                    // Skip the invalid part
                                     let start = valid_len + error_len;
                                     let remaining = total - start;
-                                    // Move remaining to start of buffer
                                     for i in 0..remaining {
                                         buffer[i] = buffer[start + i];
                                     }
                                     pending = remaining;
                                 } else {
-                                    // Incomplete sequence at end
                                     let remaining = total - valid_len;
-                                    // Move remaining to start of buffer
                                     for i in 0..remaining {
                                         buffer[i] = buffer[valid_len + i];
                                     }
@@ -178,10 +177,7 @@ pub fn cmd_cat<'a>(mut args: core::str::SplitWhitespace<'a>) -> ViResult<()> {
                         }
                     },
                     Ok(0) => {
-                         // EOF
                          if pending > 0 {
-                             // Print remaining bytes as replacement chars or similar?
-                             // Just ignore for now or print replacement
                              ostd::io::print("\u{FFFD}");
                          }
                          break;
