@@ -6,6 +6,7 @@
 //! Network API traits.
 
 use crate::*;
+use alloc::boxed::Box;
 
 /// TCP/IP stack interface.
 pub trait ViTcpStack: Send + Sync {

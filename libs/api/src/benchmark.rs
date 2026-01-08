@@ -10,6 +10,7 @@
 
 use crate::*;
 use alloc::vec::Vec;
+use alloc::boxed::Box;
 
 /// Benchmark result with timing and metadata.
 #[derive(Debug, Clone)]
@@ -138,8 +139,10 @@ pub trait ViBenchmarkSuite {
     /// Run all benchmarks in suite.
     fn run_all(&mut self, iterations: u64) -> ViResult<Vec<BenchmarkResult>> {
         let mut results = Vec::new();
+        // Force type hint if needed, though usually inferred
         for bench in self.benchmarks() {
-            results.push(bench.run(iterations)?);
+            let res: BenchmarkResult = bench.run(iterations)?;
+            results.push(res);
         }
         Ok(results)
     }

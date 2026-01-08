@@ -13,8 +13,12 @@ use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 use driver_disk::RamDisk;
 
-// Embed Shell Binary
+// Embed Binaries
 static SHELL_ELF: &[u8] = include_bytes!("../../../../kernel/src/embedded/shell");
+static HELLO_ELF: &[u8] = include_bytes!("../../../../kernel/src/embedded/hello");
+static ECHO_ELF: &[u8] = include_bytes!("../../../../kernel/src/embedded/echo");
+static CAT_ELF: &[u8] = include_bytes!("../../../../kernel/src/embedded/cat");
+static LS_ELF: &[u8] = include_bytes!("../../../../kernel/src/embedded/ls");
 
 // Simple RamFS File Representation
 #[derive(Clone)]
@@ -64,16 +68,26 @@ impl VfsManager {
         // Add bin directory
         let mut bin = Box::new(RamFile::new_dir("bin"));
 
-        // Add hello executable (mock)
-        bin.children.insert(
-            String::from("hello"),
-            Box::new(RamFile::new_file("hello", b"\x7fELF...Mock Hello App..."))
-        );
-
-        // Add Shell executable (real)
+        // Add embedded apps
         bin.children.insert(
             String::from("shell"),
             Box::new(RamFile::new_file("shell", SHELL_ELF))
+        );
+        bin.children.insert(
+            String::from("hello"),
+            Box::new(RamFile::new_file("hello", HELLO_ELF))
+        );
+        bin.children.insert(
+            String::from("echo"),
+            Box::new(RamFile::new_file("echo", ECHO_ELF))
+        );
+        bin.children.insert(
+            String::from("cat"),
+            Box::new(RamFile::new_file("cat", CAT_ELF))
+        );
+        bin.children.insert(
+            String::from("ls"),
+            Box::new(RamFile::new_file("ls", LS_ELF))
         );
 
         root.children.insert(String::from("bin"), bin);

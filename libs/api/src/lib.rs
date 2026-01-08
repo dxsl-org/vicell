@@ -3,26 +3,27 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Public API traits for ViOS Cells.
-//! 
-//! This crate defines the standard interfaces that Cells implement
-//! to provide services to other Cells.
+//! Public API for ViOS.
 
 #![no_std]
 
 extern crate alloc;
-use alloc::boxed::Box;
 
+// Export types so they are available via api::* if needed,
+// and to satisfy `use crate::*` in modules if they rely on it.
 pub use types::*;
 
-pub mod fs;
-pub mod block;
-pub mod net;
-pub mod hotswap;
-pub mod vm;
-pub mod serde_helpers;
-pub mod async_io;
 pub mod allocator;
 pub mod benchmark;
+pub mod block;
 pub mod driver;
+pub mod fs;
+pub mod hotswap;
+pub mod net;
+pub mod serde_helpers;
 pub mod syscall;
+pub mod vm;
+pub mod async_io;
+pub mod config;
+
+pub use syscall::ViSyscall;

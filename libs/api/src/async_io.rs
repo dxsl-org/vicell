@@ -12,6 +12,8 @@
 use crate::*;
 use core::future::Future;
 use core::pin::Pin;
+use types::ViResult; // Fix import
+use alloc::boxed::Box; // Fix import
 
 /// Type alias for boxed futures.
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;

@@ -37,6 +37,8 @@ members = [
     # Cells - Apps
     "cells/apps/init",
     "cells/apps/shell",
+    "cells/apps/hello",
+    "cells/apps/utils",
     "cells/apps/test-isolation",
 ]
 
