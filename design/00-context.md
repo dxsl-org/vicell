@@ -3,8 +3,14 @@
 **Audience**: Developers & AI Agents
 
 
-## 🔴 ĐIỀU KHOẢN TỐI THƯỢNG (THE PRIME DIRECTIVE)
-Mọi dòng code phải tuân thủ triết lý **Cellular SAS (Single Address Space)** và **Language-Based Isolation (LBI)**. Không sử dụng tư duy Linux/Unix truyền thống.
+## 🔴 PRIME DIRECTIVE
+**ViOS uses Cellular SAS (Single Address Space) + Language-Based Isolation (LBI)**
+
+- ❌ **NOT** traditional Linux/Unix process-based thinking
+- ✅ **YES** Cellular architecture with zero-copy IPC
+- ✅ **YES** Rust type system for safety, not hardware MMU
+
+**Key Philosophy**: Software organized as **Cells** (not processes), sharing one address space, isolated by Rust's type system.
 
 
 ## 1. Bản đồ tri thức (Source of Truth)
@@ -24,7 +30,7 @@ Trước khi code bất kỳ module nào, Agent **BẮT BUỘC** phải đọc f
 | KUnit & Fault Injection | `design/10-testing.md` |
 
 
-## 2. Cấu trúc thư mục chuẩn (Đã đồng bộ)
+## 2. Cấu trúc thư mục chuẩn
 ```text
 ViOS/
 ├── kernel/                   # Nano Kernel (Runtime Linker & Manager)
