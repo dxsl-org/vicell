@@ -1,6 +1,7 @@
 pub mod syscall;
 pub mod tcb;
 pub use tcb::Task;
+pub mod stack;
 pub mod scheduler;
 pub mod drivers;
 pub mod ipc_test;
@@ -198,65 +199,54 @@ pub fn spawn_from_file(path: &str, name: &str, cell_id: CellId, allowed_drivers:
             task.trap_frame.sepc = header.entry;
             task.trap_frame.sstatus = 0x20; // SPIE=1, SPP=0 (User)
             
-            // Remap stack pages to have USER permission
-            if let Some(stack_base) = task.stack_base {
-                use hal::paging::PAGE_SIZE;
-                
-                // 1. Allocate User Stack (Separate from Kernel Stack)
-                // We need contiguous physical memory for the range mapping.
-                // Assuming FrameAllocator gives valid frames.
-                let user_stack_base = {
-                     let mut frame_guard = crate::memory::frame::FRAME_ALLOCATOR.lock();
-                     let allocator = frame_guard.as_mut().ok_or(ViError::OutOfMemory)?;
-                     
-                     let start = allocator.allocate_frame().ok_or(ViError::OutOfMemory)?;
-                     for _ in 0..STACK_PAGES {
-                         allocator.allocate_frame().ok_or(ViError::OutOfMemory)?;
-                     }
-                     // Zero the stack
-                     unsafe {
-                         core::ptr::write_bytes(start as *mut u8, 0, (STACK_PAGES + 1) * PAGE_SIZE);
-                     }
-                     start
-                };
+            // Allocate Kernel Stack
+            let kstack = match crate::task::stack::Stack::new_kernel(STACK_PAGES) {
+                Ok(s) => s,
+                Err(_) => return Err(ViError::OutOfMemory),
+            };
 
-                // 2. Map User Stack with User Permissions (Include extra page)
-                crate::memory::paging::remap_range_user(user_stack_base, STACK_PAGES + 1);
-                
-                // Top is at end of regular pages. Extra page is above it.
-                let user_stack_top = user_stack_base + (STACK_PAGES * PAGE_SIZE);
+            // Allocate User Stack
+            let ustack = match crate::task::stack::Stack::new_user(STACK_PAGES) {
+                Ok(s) => s,
+                Err(_) => return Err(ViError::OutOfMemory),
+            };
 
-                // 3. Setup TrapFrame on KERNEL Stack (stack_base)
-                // We do NOT remap stack_base. It remains Kernel-only (RWX, no User).
-                let kstack_top = stack_base + (STACK_PAGES * PAGE_SIZE);
-                let tf_ptr = kstack_top - TRAP_FRAME_SIZE;
-                
-                // Set User SP in TrapFrame
-                task.trap_frame.regs[2] = user_stack_top;
-                
-                // CRITICAL: Set User Mode Status in TrapFrame!
-                // SPP=0 (User Mode)
-                // SPIE=1 (Interrupts enabled after sret)
-                // FS=Dirty (11) => 0x6000 (Bits 13/14)
-                // SUM=0 (User doesn't use SUM)
-                // Total: 0x6020
-                task.trap_frame.sstatus = 0x6020;
+            // Use Stacks
+            let kstack_top = kstack.top;
+            let user_stack_top = ustack.top;
 
-                // Copy TrapFrame to Kernel Stack
-                unsafe {
-                    let tf_dest = &mut *(tf_ptr as *mut crate::hal::arch::ViTrapFrame);
-                    *tf_dest = task.trap_frame;
-                }
-                
-                // 4. Point Context to Kernel Stack
-                task.context.sp = tf_ptr;
-                task.context.ra = __trap_exit as usize;
-                
-                // Enable SUM (Bit 18) so Kernel can access User Pointers (e.g. Syscalls)
-                // SPP=1 (S-mode ret), SPIE=1, SUM=1
-                task.context.sstatus = 0x42120; // SUM=1, FS=1 (Initial), SPP=1, SPIE=1 
+            task.kernel_stack = Some(kstack);
+            task.user_stack = Some(ustack);
+
+            // 3. Setup TrapFrame on KERNEL Stack
+            // Top of Kernel Stack - TrapFrame
+            let tf_ptr = kstack_top - TRAP_FRAME_SIZE;
+
+            // Set User SP in TrapFrame
+            task.trap_frame.regs[2] = user_stack_top;
+
+            // CRITICAL: Set User Mode Status in TrapFrame!
+            // SPP=0 (User Mode)
+            // SPIE=1 (Interrupts enabled after sret)
+            // FS=Dirty (11) => 0x6000 (Bits 13/14)
+            // SUM=0 (User doesn't use SUM)
+            // Total: 0x6020
+            task.trap_frame.sstatus = 0x6020;
+
+            // Copy TrapFrame to Kernel Stack
+            unsafe {
+                let tf_dest = &mut *(tf_ptr as *mut crate::hal::arch::ViTrapFrame);
+                *tf_dest = task.trap_frame;
             }
             
+            // 4. Point Context to Kernel Stack
+            task.context.sp = tf_ptr;
+            task.context.ra = __trap_exit as usize;
+
+            // Enable SUM (Bit 18) so Kernel can access User Pointers (e.g. Syscalls)
+            // SPP=1 (S-mode ret), SPIE=1, SUM=1
+            task.context.sstatus = 0x42120; // SUM=1, FS=1 (Initial), SPP=1, SPIE=1
+
             info!("Spawned ELF task '{}' (ID {}) at entry 0x{:X}", name, tid, header.entry);
         }
     }
@@ -740,23 +730,37 @@ pub fn spawn_synthetic(name: &str, cell_id: CellId, entry: VAddr) -> core::resul
             task.trap_frame.sepc = entry;
             task.trap_frame.sstatus = 0x20; // User Mode (SPIE=1, SPP=0)
             
-            if let Some(stack_base) = task.stack_base {
-                crate::memory::paging::remap_range_user(stack_base, STACK_PAGES);
-                
-                let stack_top = stack_base + (STACK_PAGES * PAGE_SIZE);
-                let tf_ptr = stack_top - TRAP_FRAME_SIZE;
-                task.trap_frame.regs[2] = tf_ptr; // User SP
-                
-                unsafe {
-                    let tf_dest = &mut *(tf_ptr as *mut crate::hal::arch::ViTrapFrame);
-                    *tf_dest = task.trap_frame;
-                }
-                
-                task.context.sp = tf_ptr;
-                task.context.ra = __trap_exit as usize;
-                task.context.sstatus = 0x40120; // SUM=1
+            // Allocate Kernel Stack
+            let kstack = match crate::task::stack::Stack::new_kernel(STACK_PAGES) {
+                Ok(s) => s,
+                Err(_) => return Err(ViError::OutOfMemory),
+            };
+
+            // Allocate User Stack
+            let ustack = match crate::task::stack::Stack::new_user(STACK_PAGES) {
+                Ok(s) => s,
+                Err(_) => return Err(ViError::OutOfMemory),
+            };
+
+            // Use Stacks
+            let kstack_top = kstack.top;
+            let user_stack_top = ustack.top;
+
+            task.kernel_stack = Some(kstack);
+            task.user_stack = Some(ustack);
+
+            let tf_ptr = kstack_top - TRAP_FRAME_SIZE;
+            task.trap_frame.regs[2] = user_stack_top; // User SP
+
+            unsafe {
+                let tf_dest = &mut *(tf_ptr as *mut crate::hal::arch::ViTrapFrame);
+                *tf_dest = task.trap_frame;
             }
             
+            task.context.sp = tf_ptr;
+            task.context.ra = __trap_exit as usize;
+            task.context.sstatus = 0x40120; // SUM=1
+
             info!("Spawned Synthetic task '{}' (ID {}) at entry 0x{:X}", name, tid, entry);
         }
     }

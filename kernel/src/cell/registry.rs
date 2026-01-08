@@ -52,5 +52,47 @@ impl CellRegistry {
 
     pub fn get_by_name(&self, name: &str) -> Option<Arc<CellNode>> {
         self.name_index.get(name).and_then(|id| self.cells.get(id).cloned())
+//! Cell Registry and Dependency Graph.
+
+use types::*;
+use types::VAddr; // VAddr is in types
+use alloc::vec::Vec;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CellState {
+    Unloaded,
+    Loading,
+    Ready,
+    Running,
+    Stopped,
+    Failed,
+}
+
+/// Cell node in the dependency graph.
+pub struct CellNode {
+    /// Unique identifier.
+    pub id: CellId,
+    /// Cells this one imports from.
+    pub imports: Vec<CellId>,
+    /// Cells that import from this one.
+    pub exported_to: Vec<CellId>,
+    /// Current state.
+    pub state: CellState,
+    /// Base address in memory.
+    pub base_addr: VAddr,
+    /// Size in bytes.
+    pub size: usize,
+}
+
+impl CellNode {
+    pub fn new(id: CellId, base_addr: VAddr, size: usize) -> Self {
+        Self {
+            id,
+            imports: Vec::new(),
+            exported_to: Vec::new(),
+            state: CellState::Loading,
+            base_addr,
+            size,
+        }
     }
 }
