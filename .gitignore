@@ -17,10 +17,7 @@ Thumbs.db
 *.log
 
 # Reference materials
-.reference/
-
-# Agent workspace
-.agent/
+reference/
 
 # Disk Images
 *.img

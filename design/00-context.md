@@ -1,4 +1,7 @@
-# ViOS Project: Agent Manifest (The Constitution v2.2)
+# ViOS system context & design rules
+**Last Updated**: 2026-01-08
+**Audience**: Developers & AI Agents
+
 
 ## 🔴 ĐIỀU KHOẢN TỐI THƯỢNG (THE PRIME DIRECTIVE)
 Mọi dòng code phải tuân thủ triết lý **Cellular SAS (Single Address Space)** và **Language-Based Isolation (LBI)**. Không sử dụng tư duy Linux/Unix truyền thống.
@@ -8,17 +11,17 @@ Mọi dòng code phải tuân thủ triết lý **Cellular SAS (Single Address S
 Trước khi code bất kỳ module nào, Agent **BẮT BUỘC** phải đọc file đặc tả tương ứng:
 | Nếu nhiệm vụ liên quan đến... | Hãy đọc file này |
 | --- | --- |
-| Lấy code từ các dự án khác | `.codebase/00-fork.md` |
-| Triết lý Cellular & Linker Linker | `.codebase/01-core.md` |
-| SAS Layout, HHDM & Metadata Registry | `.codebase/02-memory.md` |
-| Async Safety & Owned Buffers Rule | `.codebase/03-runtime.md` |
-| Multi-Arch Trait (RV32/64/128) | `.codebase/04-hardware.md` |
-| Native vs WASM vs Virtualization | `.codebase/05-application.md` |
-| Zero-copy Compositing & Input | `.codebase/06-graphics.md` |
-| User-space Stack (smoltcp) | `.codebase/07-networking.md` |
-| Tickless Idle & Pointer Swizzling | `.codebase/08-power.md` |
-| Pluggable FS & Direct I/O | `.codebase/09-vfs.md` |
-| KUnit & Fault Injection | `.codebase/10-testing.md` |
+| Lấy code từ các dự án khác | `design/00-fork.md` |
+| Triết lý Cellular & Linker Linker | `design/01-core.md` |
+| SAS Layout, HHDM & Metadata Registry | `design/02-memory.md` |
+| Async Safety & Owned Buffers Rule | `design/03-runtime.md` |
+| Multi-Arch Trait (RV32/64/128) | `design/04-hardware.md` |
+| Native vs WASM vs Virtualization | `design/05-application.md` |
+| Zero-copy Compositing & Input | `design/06-graphics.md` |
+| User-space Stack (smoltcp) | `design/07-networking.md` |
+| Tickless Idle & Pointer Swizzling | `design/08-power.md` |
+| Pluggable FS & Direct I/O | `design/09-vfs.md` |
+| KUnit & Fault Injection | `design/10-testing.md` |
 
 
 ## 2. Cấu trúc thư mục chuẩn (Đã đồng bộ)
@@ -30,8 +33,8 @@ ViOS/
 │       ├── cell/             # LINH HỒN: Quản lý Metadata, Registry, Dependency
 │       ├── loader/           # TRÁI TIM: ELF Linker, vá địa chỉ (Relocation)
 │       ├── memory/           # Quản lý Global Heap & Paging (Nền tảng SAS)
-│       ├── task.rs           # Quản lý danh sách Task toàn cục (Task Registry)
 │       └── task/             # Executor cho Async Tasks (Không quản lý Process cũ)
+│           ├── mod.rs        # Quản lý danh sách Task toàn cục (Task Registry)
 │           ├── tcb.rs        # Định nghĩa cấu trúc Task (Registers, Stack, CellOwner)
 │           ├── stack.rs      # Quản lý vùng nhớ Stack cho từng Task (kèm Guard Pages)
 │           └── scheduler.rs  # Thuật toán điều phối
@@ -132,7 +135,7 @@ ViOS/
 
 
 ## 4. Agent Workflow
-- **Check Spec**: Đọc file trong .codebase/ để hiểu "Tại sao".
+- **Check Spec**: Đọc file trong design/ để hiểu "Tại sao".
 - **Interface First**: Định nghĩa Trait trong libs/api trước khi code phần thực thi.
 - **Thực thi**: Code logic, chú ý xử lý Result thay vì panic! để hỗ trợ Panic Recovery.
 - **Verification**: Viết test KUnit cho mọi logic quan trọng.
