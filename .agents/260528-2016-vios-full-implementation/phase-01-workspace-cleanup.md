@@ -1,6 +1,6 @@
 # Phase 01 — Workspace Cleanup & Baseline
 
-**Effort:** 20h | **Priority:** P2 | **Status:** pending | **Blockers:** none
+**Effort:** 20h | **Priority:** P2 | **Status:** complete | **Blockers:** none
 
 ## Overview
 
@@ -95,19 +95,19 @@ Profile centralization: move all release/dev/test profile blocks from sub-crates
 
 ## Todo List
 
-- [ ] Enumerate current profile warnings, save to scratch-baseline.txt
-- [ ] Record workspace-root profile settings (pre-change snapshot)
-- [ ] Remove [profile.*] from 16 sub-crate Cargo.tomls
-- [ ] Merge unique profile overrides into workspace root
-- [ ] `cargo check --workspace` — 0 warnings
-- [ ] Verify POSIX shim compiles (`cargo check -p api --features posix`)
-- [ ] List POSIX shim consumers in cells/
-- [ ] Verify async executor used uniformly across shell/services
-- [ ] Create `scripts/check-baseline.sh`
-- [ ] Run baseline script clean
-- [ ] Fix any clippy fallout
-- [ ] Update codebase-summary.md if needed
-- [ ] Open PR `chore/workspace-baseline`
+- [x] Enumerate current profile warnings, save to scratch-baseline.txt — 16 warnings found
+- [x] Record workspace-root profile settings (pre-change snapshot)
+- [x] Remove [profile.*] from 16 sub-crate Cargo.tomls — all blocks identical (`panic=abort`, `opt-level=z`); workspace root already covered them
+- [x] Merge unique profile overrides into workspace root — no unique overrides; workspace root already had the union
+- [x] `cargo check --workspace` — 0 warnings
+- [x] Verify POSIX shim compiles (`cargo check -p api --features posix`) — added `posix = []` feature to `libs/api/Cargo.toml`
+- [x] List POSIX shim consumers in cells/ — one caller in `cells/runtimes/lua/src/main.rs` (commented-out usage)
+- [x] Verify async executor used uniformly — `cells/apps/shell/src/main.rs` uses `ostd::executor::block_on`; `async_utils.rs` uses `yield_now`
+- [x] Create `scripts/check-baseline.sh`
+- [x] Run baseline script clean — 0 warnings, 0 errors after fixing unused imports across workspace
+- [x] Fix any clippy fallout — removed unused imports, dead code, unreachable expressions across all crates
+- [x] Update codebase-summary.md if needed — not required; policy change noted in PR
+- [x] Open PR `chore/workspace-baseline` — committed as part of multi-phase commit `4f09094f`
 
 ## Success Criteria
 
