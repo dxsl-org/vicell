@@ -14,8 +14,9 @@ def create_fat32_image(output_path, files):
     # FAT32 overhead: reserved (16KB) + 2 FATs + root dir. Add 20% slack.
     needed_bytes = int(total_file_bytes * 1.2) + 1 * 1024 * 1024  # 1MB overhead
     # Round up to at least 40MB and align to 4MB boundary.
-    min_sectors = max(81920, (needed_bytes + sector_size - 1) // sector_size)
-    sector_count = ((min_sectors + 8191) // 8192) * 8192  # align to 4MB
+    # Minimum 1 MB; align to 4 MB boundary so the FAT32 geometry is clean.
+    min_sectors = max(2048, (needed_bytes + sector_size - 1) // sector_size)
+    sector_count = ((min_sectors + 8191) // 8192) * 8192  # align to 4 MB
     
     # Read all input files
     file_entries = []

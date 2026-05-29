@@ -1,29 +1,30 @@
-# Generate Disk Image — FAT32 primary filesystem + cell bootstrap table.
+# Generate disk images for ViOS.
 #
-# Layout of disk_v3.img:
-#   LBA       0 – 81 999 : FAT32 filesystem (~42 MB), served by the VFS Cell.
-#   LBA  82 000 +        : Cell bootstrap table (header + entries + raw ELFs),
-#                          read by the kernel early loader before VFS is up.
+# Two separate images are produced:
 #
-# The bootstrap table lets init spawn VFS, config, and shell via SpawnFromPath
-# without embedding those ELFs in the init binary.
+#   kernel\src\embedded\kernel_fs.img  (~8 MB, FAT32)
+#       Embedded in the kernel binary via ramdisk.rs (include_bytes!).
+#       Contains release-built cell ELFs + /hostname + /readme.
+#       Served by the kernel's internal filesystem (sys_open / ReadDir).
+#
+#   disk_v3.img  (~40 MB, blank FAT32 area + cell bootstrap table)
+#       Passed to QEMU as a VirtIO block device (-drive file=disk_v3.img).
+#       LBA 82000+: Cell bootstrap table read by the early loader.
+#       SpawnFromPath uses this table to load VFS, config, shell.
 
 $kernel_root = Get-Location
 $tools_dir   = "$kernel_root\tools"
 $target_dir  = "$kernel_root\target\riscv64gc-unknown-none-elf\debug"
 $rel_dir     = "$kernel_root\target\riscv64gc-unknown-none-elf\release"
 
-# 1. Build all cells
-Write-Host "Building cells..."
-cargo build -p app-init
-cargo build -p app-shell
-cargo build -p service-vfs
+# 1. Build release cells (needed for kernel_fs.img and bootstrap table)
+Write-Host "Building release cells..."
+cargo build --release -p app-init -p app-shell -p service-vfs -p service-config 2>&1 | Select-Object -Last 3
 
-cargo build -p service-config
+# Build debug cells for bootstrap table (faster; SpawnFromPath loads these at boot)
+Write-Host "Building debug cells for bootstrap table..."
+cargo build -p service-vfs -p service-config -p app-shell
 cargo build -p app-bench        # Phase 22: benchmarking cell
-cargo build -p app-utils        # Phase 17b: standard utilities (wc, head, tail, grep, sort, sed, …)
-cargo build -p app-sys-tools    # Phase 17b: system tools (ps, uname, date, free, env, shutdown)
-cargo build -p app-net-tools    # Phase 17b: network tools (ping, curl, nc, wget — stubs)
 
 # 2. Paths
 $init_bin   = "$target_dir\app-init"
@@ -55,10 +56,29 @@ if (-not (Test-Path $bench_bin)) {
     $bench_bin = $null
 }
 
-# 3. Create a blank disk image (40MB = 81920 sectors).
-# The FAT32 region is reserved for future use by the VFS Cell once it can
-# access VirtIO block sectors directly.  For now, SpawnFromPath reads cells
-# exclusively from the bootstrap table in step 4.
+# 3a. Generate kernel_fs.img (small embedded FAT32, ~8 MB, with release cells).
+#     This image is embedded in the kernel binary via ramdisk.rs.
+Write-Host "Generating kernel_fs.img (embedded FAT32, release cells)..."
+$tmpDir = "$env:TEMP\vios_kfs"
+New-Item -ItemType Directory -Force $tmpDir | Out-Null
+Set-Content -Path "$tmpDir\hostname" -Value "vios" -NoNewline -Encoding ascii
+Set-Content -Path "$tmpDir\readme"   -Value "Welcome to ViOS!" -NoNewline -Encoding ascii
+$kfs_args = @(
+    "kernel\src\embedded\kernel_fs.img",
+    "$rel_dir\app-init",   "init",
+    "$rel_dir\app-shell",  "shell",
+    "$rel_dir\service-vfs","vfs",
+    "$rel_dir\service-config","config",
+    "$tmpDir\hostname", "hostname",
+    "$tmpDir\readme",   "readme"
+)
+if ($lua_bin) { $kfs_args += @($lua_bin, "lua") }
+python "$tools_dir\mkfat32.py" @kfs_args 2>&1
+Remove-Item -Recurse -Force $tmpDir
+$kfs_mb = [Math]::Round((Get-Item "kernel\src\embedded\kernel_fs.img").Length/1MB,1)
+Write-Host "  kernel_fs.img: ${kfs_mb} MB"
+
+# 3b. Create a blank disk image (40MB = 81920 sectors) for VirtIO block.
 Write-Host "Creating blank disk image (disk_v3.img)..."
 $diskSize = 81920 * 512     # 40 MB — matches CELL_TABLE_BASE_LBA = 82000
 $blankImg = New-Object byte[] $diskSize

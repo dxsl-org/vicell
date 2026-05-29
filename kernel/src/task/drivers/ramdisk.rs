@@ -6,10 +6,23 @@ use types::{ViError, ViResult};
 #[allow(non_camel_case_types)]
 // pub struct viRamDisk; // Removed duplicate
 
-// Embed the real FAT32 disk image created by build script
-// Path from kernel/src/task/drivers/ramdisk.rs to workspace root
-// Using 40MB image to ensure FAT32 compliance (> 65525 clusters)
-static DISK_IMAGE: &[u8] = include_bytes!("../../../../disk_v3.img"); // Force Rebuild 73
+// Embed the small kernel-internal FAT32 image.
+//
+// This image contains only the files the kernel's own filesystem serves:
+//   /bin/{init,shell,vfs,config,lua}  — release-built cell ELFs
+//   /hostname, /readme               — system metadata
+//
+// The VirtIO block device (disk_v3.img) is a SEPARATE disk that holds the
+// cell bootstrap table used by the early loader for SpawnFromPath.
+// Keeping the embedded FS small (~8 MB) prevents the kernel binary
+// from bloating to 52 MB when disk_v3.img was embedded here.
+//
+// To regenerate this image run:
+//   scripts\update-embedded.ps1          # builds release cells
+//   python tools\mkfat32.py kernel\src\embedded\kernel_fs.img ...
+// Path is relative to this source file (kernel/src/task/drivers/ramdisk.rs).
+// kernel_fs.img lives in kernel/src/embedded/kernel_fs.img.
+static DISK_IMAGE: &[u8] = include_bytes!("../../embedded/kernel_fs.img");
 
 const SECTOR_SIZE: usize = 512;
 

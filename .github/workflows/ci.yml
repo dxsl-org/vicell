@@ -105,8 +105,8 @@ jobs:
         run: chmod +x target/riscv64gc-unknown-none-elf/release/vios-kernel
 
       - name: Run boot test
-        # Uses 512M RAM (required: release kernel ~52MB + 64MB heap).
-        # Checks for FAT32 mount (always present) or full shell prompt (if disk available).
+        # 256M: kernel is now 4.4 MB (kernel_fs.img embedded separately).
+        # Checks for FAT32 mount (always present) or full shell prompt.
         run: bash scripts/qemu-boot-test.sh target/riscv64gc-unknown-none-elf/release/vios-kernel
 
   unit-tests:

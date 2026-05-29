@@ -19,8 +19,11 @@ fn main() {
     fs::create_dir_all(&embedded_out).expect("create embedded OUT_DIR");
 
     let embedded_src = PathBuf::from("src/embedded");
+    // kernel_fs.img is the embedded FAT32 image (~8 MB release cells).
+    // The others are kept for reference but kernel_fs.img is what ramdisk.rs embeds.
     let cells = [
         "init", "vfs", "shell", "lua", "config", "cat", "echo", "hello", "ls",
+        "kernel_fs.img",
     ];
 
     for cell in &cells {
