@@ -1,4 +1,5 @@
 #![no_std]
+#![no_main]
 // #[no_mangle] on main() requires removing #![forbid(unsafe_code)] for the same
 // reason as other Cell entry points.  All logic in submodules is unsafe-free.
 

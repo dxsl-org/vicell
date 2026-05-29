@@ -40,10 +40,14 @@ unsafe fn lua_to_str<'a>(L: *mut LuaState, idx: c_int, buf: &'a mut [u8]) -> Opt
 
 // ─── os.execute binding ───────────────────────────────────────────────────
 
-/// `os.execute(cmd)` — spawn cmd via SpawnFromPath("/bin/shell").
+/// `os.execute(cmd)` — spawn `cmd` as an ELF binary via `SpawnFromPath`.
 ///
-/// In v1.0, the shell is invoked as the interpreter; `cmd` is the argument.
-/// Returns 0 on success, non-zero on error.  Lua signature: `os.execute(str)`.
+/// If `cmd` looks like an absolute path (`/bin/foo`) it is spawned directly.
+/// Otherwise we prepend `/bin/` to find the binary.  Arguments are not yet
+/// supported (Phase 17a); the binary is spawned with no args.
+///
+/// Returns exit code as an integer (0 = success, 1 = spawn failed).
+/// Returns `true` with no arg to indicate a shell is available.
 #[no_mangle]
 pub unsafe extern "C" fn vios_os_execute(L: *mut LuaState) -> c_int {
     let mut path_buf = [0u8; MAX_CMD];
@@ -55,12 +59,30 @@ pub unsafe extern "C" fn vios_os_execute(L: *mut LuaState) -> c_int {
         unsafe { crate::ffi::lua_pushboolean(L, 1) };
         return 1;
     }
-    // Attempt to spawn via the shell — args passing is Phase 17a; for now log.
-    ostd::io::print("[lua] os.execute: ");
-    ostd::io::println(cmd);
-    // Push exit code 0 (success stub).
+
+    // Resolve path: absolute paths used as-is; bare names prefixed with /bin/.
+    let mut resolved = alloc::string::String::new();
+    let path = if cmd.starts_with('/') {
+        cmd
+    } else {
+        resolved.push_str("/bin/");
+        resolved.push_str(cmd.split_whitespace().next().unwrap_or(cmd));
+        resolved.as_str()
+    };
+
+    // Spawn the binary.  Wait semantics are not yet implemented — SpawnFromPath
+    // enqueues the task; we return immediately with exit code 0 on success.
+    let exit_code = match ostd::syscall::sys_spawn_from_path(path) {
+        ostd::syscall::SyscallResult::Ok(_tid) => 0i64,
+        ostd::syscall::SyscallResult::Err(_) => {
+            ostd::io::print("[lua] os.execute: failed to spawn '");
+            ostd::io::print(path);
+            ostd::io::println("'");
+            1i64
+        }
+    };
     // SAFETY: L is non-null.
-    unsafe { crate::ffi::lua_pushinteger(L, 0) };
+    unsafe { crate::ffi::lua_pushinteger(L, exit_code) };
     1
 }
 

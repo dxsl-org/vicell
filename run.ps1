@@ -22,11 +22,19 @@ if (-not (Test-Path $kernel)) {
 
 Write-Host "Starting ViOS in QEMU (Nographic Mode)..."
 Write-Host "Tip: Press 'Ctrl-a' then 'x' to exit QEMU."
-Write-Host "Boot: OpenSBI → kernel (4.4MB) → init → VFS → config → shell (ViOS>)"
+Write-Host "Boot: OpenSBI → kernel (4.4MB) → init → VFS → config → input → shell (ViOS>)"
 Write-Host ""
 
-# kernel_fs.img (4 MB FAT32 with release cells) is embedded in the kernel binary.
-# disk_v3.img (40 MB blank + bootstrap table) is the VirtIO block disk.
+# Full VirtIO hardware configuration:
+#   virt-blk: disk_v3.img (bootstrap table with cell ELFs)
+#   virt-net:  user-mode network, DHCP assigns 10.0.2.15 to ViOS
+#   virt-gpu:  GPU framebuffer (no graphical display in -nographic mode, but compositor can use it)
+#   virt-input: VirtIO keyboard for the input service (separate from UART)
+#
+# Note: -nographic sends serial/UART to stdin/stdout; VirtIO keyboard is for graphical mode.
 & $qemu -machine virt -m 128M -nographic -bios default -kernel $kernel `
         -drive file=$disk,format=raw,id=hd0,if=none `
-        -device virtio-blk-device,drive=hd0
+        -device virtio-blk-device,drive=hd0 `
+        -netdev user,id=net0 `
+        -device virtio-net-device,netdev=net0 `
+        -device virtio-keyboard-device

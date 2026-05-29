@@ -45,7 +45,16 @@ pub extern "C" fn main() {
 
     ostd::task::yield_now();
 
-    // 4. Spawn Shell
+    // 4. Spawn Network Service (TCP/IP stack — non-fatal, needs VirtIO NIC).
+    println("Init: Spawning Network Service...");
+    match ostd::syscall::sys_spawn_from_path("/bin/net") {
+        ostd::syscall::SyscallResult::Ok(_) => println("Init: Network Service spawned."),
+        _ => println("Init: INFO — Network service not found (no VirtIO NIC or binary missing)."),
+    }
+
+    ostd::task::yield_now();
+
+    // 5. Spawn Shell
     println("Init: Spawning Shell...");
     match ostd::syscall::sys_spawn_from_path("/bin/shell") {
         ostd::syscall::SyscallResult::Ok(_) => println("Init: Shell spawned successfully."),
