@@ -76,7 +76,9 @@ pub extern "C" fn x86_64_syscall_dispatch() {
 
 use core::arch::global_asm;
 
-// The syscall_entry stub uses AT&T syntax (global_asm default on x86_64).
+// The syscall_entry stub is written in AT&T syntax. Rust's global_asm!
+// defaults to Intel syntax on every target, so we MUST pass
+// options(att_syntax) or the `%reg` / src,dst operand order fails to parse.
 // On SYSCALL entry: RCX = user RIP, R11 = user RFLAGS, RSP = user RSP.
 global_asm!(r#"
     .section .text
@@ -108,4 +110,4 @@ syscall_entry:
     movq  %gs:8, %rsp
     swapgs
     sysretq
-"#);
+"#, options(att_syntax));
