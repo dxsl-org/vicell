@@ -7,10 +7,12 @@ fn main() {
     let target_arch = std::env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
     let (ld_script, rerun_path) = match target_arch.as_str() {
         "aarch64" => ("kernel/linker-aarch64.ld", "kernel/linker-aarch64.ld"),
+        "x86_64"  => ("kernel/linker-x86-64.ld",  "kernel/linker-x86-64.ld"),
         _         => ("kernel/linker.ld",          "kernel/linker.ld"),
     };
     println!("cargo:rustc-link-arg=-T{ld_script}");
     println!("cargo:rerun-if-changed={rerun_path}");
+    println!("cargo:rerun-if-changed=kernel/linker-x86-64.ld");
 
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());
     let embedded_out = out_dir.join("embedded");
