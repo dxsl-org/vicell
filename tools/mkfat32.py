@@ -1,199 +1,250 @@
+"""mkfat32.py — Minimal FAT32 image creator with subdirectory support.
+
+Usage:
+    python mkfat32.py <output.img> [<src_path> <dst_path>] ...
+
+Where dst_path can include directory components: e.g. /bin/init, /etc/hostname.
+All intermediate directories are created automatically.
+
+FAT32 geometry: 1 sector/cluster (512 bytes), auto-sized to fit all files.
+"""
+
 import struct
 import os
 import sys
+from collections import defaultdict
 
-def create_fat32_image(output_path, files):
-    # Parameters — auto-size the disk to fit all input files with 20% slack.
-    sector_size = 512
-    reserved_sectors = 32
-    fats = 2
-    root_cluster = 2
 
-    # Compute total file data size and choose a disk size that fits.
-    total_file_bytes = sum(os.path.getsize(src) for src, _ in files if os.path.exists(src))
-    # FAT32 overhead: reserved (16KB) + 2 FATs + root dir. Add 20% slack.
-    needed_bytes = int(total_file_bytes * 1.2) + 1 * 1024 * 1024  # 1MB overhead
-    # Round up to at least 40MB and align to 4MB boundary.
-    # Minimum 1 MB; align to 4 MB boundary so the FAT32 geometry is clean.
-    min_sectors = max(2048, (needed_bytes + sector_size - 1) // sector_size)
-    sector_count = ((min_sectors + 8191) // 8192) * 8192  # align to 4 MB
-    
-    # Read all input files
-    file_entries = []
-    total_data_size = 0
+# ── FAT32 constants ───────────────────────────────────────────────────────────
+
+SECTOR_SIZE    = 512
+CLUSTER_SIZE   = SECTOR_SIZE      # 1 sector per cluster
+RESERVED       = 32               # reserved sectors (boot + FSInfo + backup)
+FATS           = 2
+ATTR_ARCHIVE   = 0x20
+ATTR_DIRECTORY = 0x10
+EOC            = 0x0FFFFFFF       # end-of-chain marker
+DATE_DEFAULT   = 0x5700           # 2026-11-16 encoded (year-1980=46, mon=11, day=16)
+TIME_DEFAULT   = 0x8C00           # 17:32:00
+
+
+# ── Directory-entry helpers ───────────────────────────────────────────────────
+
+def make_83_name(name: str) -> bytes:
+    """Convert a simple name (no path) to 8.3 format, padded with spaces."""
+    name = name.upper()
+    if '.' in name:
+        base, ext = name.rsplit('.', 1)
+    else:
+        base, ext = name, ''
+    return (base[:8].ljust(8) + ext[:3].ljust(3)).encode('ascii')
+
+
+def dir_entry(name83: bytes, cluster: int, size: int, attr: int = ATTR_ARCHIVE) -> bytes:
+    """Build a 32-byte FAT32 directory entry."""
+    high = (cluster >> 16) & 0xFFFF
+    low  =  cluster        & 0xFFFF
+    return (
+        name83 +
+        struct.pack('<B',  attr) +          # attributes
+        struct.pack('<B',  0) +             # NTRes
+        struct.pack('<B',  0) +             # CrtTimeTenth
+        struct.pack('<H',  TIME_DEFAULT) +  # CrtTime
+        struct.pack('<H',  DATE_DEFAULT) +  # CrtDate
+        struct.pack('<H',  DATE_DEFAULT) +  # LstAccDate
+        struct.pack('<H',  high) +          # FstClusHI
+        struct.pack('<H',  TIME_DEFAULT) +  # WrtTime
+        struct.pack('<H',  DATE_DEFAULT) +  # WrtDate
+        struct.pack('<H',  low) +           # FstClusLO
+        struct.pack('<I',  size)            # FileSize
+    )
+
+
+def dot_entries(self_cluster: int, parent_cluster: int) -> bytes:
+    """. and .. entries for a subdirectory."""
+    return (
+        dir_entry(b'.          ', self_cluster,   0, ATTR_DIRECTORY) +
+        dir_entry(b'..         ', parent_cluster, 0, ATTR_DIRECTORY)
+    )
+
+
+# ── Main ──────────────────────────────────────────────────────────────────────
+
+def create_fat32_image(output_path: str, files: list[tuple[str, str]]):
+    """
+    Create a FAT32 disk image at *output_path* containing *files*.
+
+    *files* is a list of (source_path, dest_path) pairs where dest_path may
+    include directory components, e.g. '/bin/init' or '/etc/hostname'.
+    """
+
+    # ── 1. Load file data ────────────────────────────────────────────────────
+    file_data = {}   # dest_path → bytes
     for src, dst in files:
-        with open(src, 'rb') as f:
-            data = f.read()
-            file_entries.append({
-                'src': src,
-                'dst': dst,
-                'data': data,
-                'size': len(data)
-            })
-    
-    # Calculate Cluster Size
-    cluster_size = 512 # 1 sector (needed for FAT32 on 40MB)
-    sectors_per_cluster = cluster_size // sector_size
-    
-    # Calculate required FAT size
-    # Total sectors - Reserved - FATs = Data Sectors
-    # But we don't know FAT size yet.
-    # Approx: clusters = total / spc
-    approx_clusters = sector_count // sectors_per_cluster
-    # entries = clusters. size = entries * 4.
-    fat_size_bytes = approx_clusters * 4
-    fat_sectors = (fat_size_bytes + sector_size - 1) // sector_size
-    # align to 32 sectors for safety? Not needed but good.
-    fat_sectors = (fat_sectors + 31) // 32 * 32
-    data_start_sector = reserved_sectors + (fats * fat_sectors)
-    
-    with open(output_path, 'wb+') as f:
-        # 1. Fill with zeros
-        f.seek((sector_count * sector_size) - 1)
-        f.write(b'\x00')
-        f.seek(0)
-        
-        # 2. Boot Sector ... (Standard)
-        f.write(b'\xEB\x58\x90') # Jump
-        f.write(b'MSWIN4.1') # OEM
-        f.write(struct.pack('<H', sector_size))
-        f.write(struct.pack('<B', sectors_per_cluster))
-        f.write(struct.pack('<H', reserved_sectors))
-        f.write(struct.pack('<B', fats))
-        f.write(struct.pack('<H', 0))
-        f.write(struct.pack('<H', 0))
-        f.write(b'\xF8')
-        f.write(struct.pack('<H', 0))
-        f.write(struct.pack('<H', 32)) # SectorsPerTrack
-        f.write(struct.pack('<H', 64)) # Heads
-        f.write(struct.pack('<I', 0))
-        f.write(struct.pack('<I', sector_count))
-        
-        # FAT32 Ext
-        f.write(struct.pack('<I', fat_sectors))
-        f.write(struct.pack('<H', 0))
-        f.write(struct.pack('<H', 0))
-        f.write(struct.pack('<I', root_cluster))
-        f.write(struct.pack('<H', 1)) # FS Info
-        f.write(struct.pack('<H', 6)) # Backup BS
-        f.write(b'\x00' * 12)
-        f.write(struct.pack('<B', 0x80))
-        f.write(b'\x00')
-        f.write(b'\x29')
-        f.write(struct.pack('<I', 0x12345678))
-        f.write(b'NO NAME    ')
-        f.write(b'FAT32   ')
-        
-        f.seek(510)
-        f.write(b'\x55\xAA')
-        
-        # 3. FS Info
-        f.seek(sector_size * 1)
-        f.write(b'RRaA')
-        f.seek(sector_size * 1 + 484)
-        f.write(b'rrAa')
-        f.write(struct.pack('<I', 0xFFFFFFFF))
-        f.write(struct.pack('<I', 0xFFFFFFFF))
-        f.write(b'\x00' * 12) # Reserved2
-        f.write(b'\x00\x00\x55\xAA')
-        
-        # Read Boot Sector (Sector 0) and replicate to Backup Boot Sector (Sector 6)
-        f.seek(0)
-        boot_sector = f.read(512)
-        f.seek(6 * sector_size)
-        f.write(boot_sector)
-        
-        # 4. FAT Tables & Data Placement
-        fat_data = bytearray(fat_sectors * sector_size)
-        
-        # Init FAT entries 0 and 1 (reserved).
-        struct.pack_into('<I', fat_data, 0, 0x0FFFFFF8)
-        struct.pack_into('<I', fat_data, 4, 0x0FFFFFFF)
+        dst = dst.lstrip('/')   # normalise: remove leading slash
+        if not os.path.exists(src):
+            print(f"WARNING: {src} not found — skipped", file=sys.stderr)
+            continue
+        with open(src, 'rb') as fh:
+            file_data[dst] = fh.read()
 
-        # Root directory: use as many clusters as needed (32 bytes/entry, 512 bytes/cluster = 16 per cluster).
-        num_files = len(file_entries)
-        root_dir_clusters = max(1, (num_files + 15) // 16)  # 16 entries per cluster
-        for i in range(root_dir_clusters):
-            if i < root_dir_clusters - 1:
-                struct.pack_into('<I', fat_data, (2 + i) * 4, 3 + i)   # chain
-            else:
-                struct.pack_into('<I', fat_data, (2 + i) * 4, 0x0FFFFFFF)  # EOC
+    # ── 2. Compute disk geometry ─────────────────────────────────────────────
+    total_bytes = sum(len(d) for d in file_data.values())
+    needed      = int(total_bytes * 1.2) + 2 * 1024 * 1024   # 2 MB FAT+dir overhead
+    min_sectors = max(2048, (needed + SECTOR_SIZE - 1) // SECTOR_SIZE)
+    sector_count = ((min_sectors + 8191) // 8192) * 8192      # align to 4 MB
 
-        # Assign clusters to files (start after root dir clusters).
-        current_data_cluster = 2 + root_dir_clusters
-        
-        clusters_map = {} # dst -> start_cluster
-        
-        for entry in file_entries:
-            size = entry['size']
-            needed = (size + cluster_size - 1) // cluster_size
-            start_cluster = current_data_cluster
-            clusters_map[entry['dst']] = start_cluster
-            
-            for i in range(needed):
-                next_c = current_data_cluster + 1
-                if i == needed - 1:
-                    next_c = 0x0FFFFFFF # EOC
-                struct.pack_into('<I', fat_data, current_data_cluster * 4, next_c)
-                current_data_cluster += 1
-                
-        # Write FATs
-        f.seek(reserved_sectors * sector_size)
-        f.write(fat_data)
-        f.seek((reserved_sectors + fat_sectors) * sector_size)
-        f.write(fat_data)
+    approx_clusters = sector_count
+    fat_sectors = (approx_clusters * 4 + SECTOR_SIZE - 1) // SECTOR_SIZE
+    fat_sectors = ((fat_sectors + 31) // 32) * 32             # align to 16 KB
+    data_start  = RESERVED + FATS * fat_sectors               # first data sector
 
-        # 5. Root Directory (Cluster 2)
-        cluster2_offset = data_start_sector * sector_size
-        f.seek(cluster2_offset)
-        
-        for entry in file_entries:
-            name = entry['dst'].upper()
-            if '.' in name:
-                base, ext = name.split('.')
-            else:
-                base, ext = name, ""
-            base = base[:8].ljust(8)
-            ext = ext[:3].ljust(3)
-            
-            f.write(base.encode('ascii'))
-            f.write(ext.encode('ascii'))
-            f.write(b'\x20')
-            f.write(b'\x00')
-            f.write(b'\x00')
-            f.write(struct.pack('<H', 0))
-            f.write(struct.pack('<H', 0))
-            f.write(struct.pack('<H', 0))
-            # FAT32 stores cluster number split: HIGH (bits 31-16) then LOW (bits 15-0).
-            start        = clusters_map[entry['dst']]
-            high_cluster = (start >> 16) & 0xFFFF
-            low_cluster  =  start        & 0xFFFF
-            f.write(struct.pack('<H', high_cluster)) # High Cluster
-            f.write(struct.pack('<H', 0))
-            f.write(struct.pack('<H', 0))
+    # ── 3. Cluster allocator ─────────────────────────────────────────────────
+    fat = bytearray(fat_sectors * SECTOR_SIZE)
+    struct.pack_into('<I', fat, 0, 0x0FFFFFF8)   # entry 0
+    struct.pack_into('<I', fat, 4, 0x0FFFFFFF)   # entry 1
 
-            f.write(struct.pack('<H', low_cluster)) # Low Cluster
-            f.write(struct.pack('<I', entry['size']))
+    next_cluster = [2]   # mutable int via list
 
-        # 6. Write File Data
-        for entry in file_entries:
-            start = clusters_map[entry['dst']]
-            offset = data_start_sector * sector_size + (start - 2) * cluster_size
-            f.seek(offset)
-            f.write(entry['data'])
+    def alloc_chain(num_clusters: int) -> int:
+        """Allocate a chain of *num_clusters* clusters; return start cluster."""
+        if num_clusters == 0:
+            return 0
+        start = next_cluster[0]
+        for i in range(num_clusters):
+            c = next_cluster[0]
+            next_cluster[0] += 1
+            nxt = next_cluster[0] if i < num_clusters - 1 else EOC
+            struct.pack_into('<I', fat, c * 4, nxt)
+        return start
 
-    print(f"Created FAT32 image at {output_path} with {len(files)} files.")
+    def cluster_offset(cluster: int) -> int:
+        """Byte offset of *cluster* in the image."""
+        return (data_start + (cluster - 2)) * SECTOR_SIZE
 
-if __name__ == "__main__":
-    if len(sys.argv) < 2: # Need at least output
-        print("Usage: mkfat32.py <output_img> [<src> <dst>]...")
+    # ── 4. Build directory tree ──────────────────────────────────────────────
+    # dir_files[dir_path] → list of (filename, cluster, size, attr)
+    dir_files = defaultdict(list)   # '' = root
+
+    # Discover all directories needed
+    dirs = {''}    # root always exists
+    for dst in file_data:
+        parts = dst.split('/')
+        for i in range(len(parts) - 1):
+            dirs.add('/'.join(parts[:i+1]))
+
+    # Assign clusters to each directory (1 cluster = 16 entries max for first cluster)
+    dir_cluster = {'': alloc_chain(1)}   # root at cluster 2
+    for d in sorted(dirs):
+        if d == '':
+            continue
+        dir_cluster[d] = alloc_chain(1)
+
+    # Register subdirectories in their parent dirs
+    for d in sorted(dirs):
+        if d == '':
+            continue
+        parent = d.rsplit('/', 1)[0] if '/' in d else ''
+        name   = d.rsplit('/', 1)[-1]
+        dir_files[parent].append((name, dir_cluster[d], 0, ATTR_DIRECTORY))
+
+    # Allocate clusters for files and register them in their parent dirs
+    file_cluster = {}
+    for dst, data in file_data.items():
+        num_c = max(1, (len(data) + CLUSTER_SIZE - 1) // CLUSTER_SIZE)
+        fc    = alloc_chain(num_c)
+        file_cluster[dst] = fc
+        parent = dst.rsplit('/', 1)[0] if '/' in dst else ''
+        name   = dst.rsplit('/', 1)[-1]
+        dir_files[parent].append((name, fc, len(data), ATTR_ARCHIVE))
+
+    # ── 5. Write image ───────────────────────────────────────────────────────
+    with open(output_path, 'wb+') as img:
+        # a) Zero-fill
+        img.seek(sector_count * SECTOR_SIZE - 1)
+        img.write(b'\x00')
+        img.seek(0)
+
+        # b) Boot sector
+        img.write(b'\xEB\x58\x90' + b'MSWIN4.1')
+        img.write(struct.pack('<H', SECTOR_SIZE))
+        img.write(struct.pack('<B', 1))             # sectors/cluster
+        img.write(struct.pack('<H', RESERVED))
+        img.write(struct.pack('<B', FATS))
+        img.write(struct.pack('<H', 0))             # root entry count (FAT32=0)
+        img.write(struct.pack('<H', 0))             # total sectors 16-bit (FAT32=0)
+        img.write(b'\xF8')                          # media descriptor
+        img.write(struct.pack('<H', 0))             # FAT size 16-bit (FAT32=0)
+        img.write(struct.pack('<H', 63))            # sectors/track
+        img.write(struct.pack('<H', 255))           # heads
+        img.write(struct.pack('<I', 0))             # hidden sectors
+        img.write(struct.pack('<I', sector_count))  # total sectors 32-bit
+        # FAT32 extended BPB
+        img.write(struct.pack('<I', fat_sectors))
+        img.write(struct.pack('<H', 0))             # ext flags
+        img.write(struct.pack('<H', 0))             # FS version
+        img.write(struct.pack('<I', 2))             # root cluster
+        img.write(struct.pack('<H', 1))             # FSInfo sector
+        img.write(struct.pack('<H', 6))             # backup boot sector
+        img.write(b'\x00' * 12)
+        img.write(b'\x80\x00\x29')
+        img.write(struct.pack('<I', 0x12345678))    # volume serial
+        img.write(b'VIOS       ')                   # volume label
+        img.write(b'FAT32   ')
+        img.seek(510)
+        img.write(b'\x55\xAA')
+
+        # c) FSInfo (sector 1)
+        img.seek(SECTOR_SIZE)
+        img.write(b'RRaA' + b'\x00' * 480)
+        img.seek(SECTOR_SIZE + 484)
+        img.write(b'rrAa')
+        img.write(struct.pack('<I', 0xFFFFFFFF))   # free count unknown
+        img.write(struct.pack('<I', 0xFFFFFFFF))   # next free unknown
+        img.write(b'\x00' * 12 + b'\x00\x00\x55\xAA')
+
+        # d) Backup boot sector (sector 6)
+        img.seek(0); bs = img.read(SECTOR_SIZE)
+        img.seek(6 * SECTOR_SIZE); img.write(bs)
+
+        # e) FAT tables
+        img.seek(RESERVED * SECTOR_SIZE)
+        img.write(fat)
+        img.seek((RESERVED + fat_sectors) * SECTOR_SIZE)
+        img.write(fat)
+
+        # f) Directory entries
+        for dir_path, entries in dir_files.items():
+            dc    = dir_cluster[dir_path]
+            off   = cluster_offset(dc)
+            img.seek(off)
+
+            # . and .. for non-root directories
+            if dir_path != '':
+                parent_path = dir_path.rsplit('/', 1)[0] if '/' in dir_path else ''
+                img.write(dot_entries(dc, dir_cluster[parent_path]))
+
+            for name, cluster, size, attr in entries:
+                img.write(dir_entry(make_83_name(name), cluster, size, attr))
+
+        # g) File data
+        for dst, data in file_data.items():
+            fc  = file_cluster[dst]
+            off = cluster_offset(fc)
+            img.seek(off)
+            img.write(data)
+
+    ndirs  = len(dirs) - 1  # exclude root
+    nfiles = len(file_data)
+    print(f"Created FAT32 image at {output_path}: "
+          f"{nfiles} file(s), {ndirs} director(ies).")
+
+
+if __name__ == '__main__':
+    if len(sys.argv) < 2:
+        print('Usage: mkfat32.py <output.img> [<src> <dst>] ...')
         sys.exit(1)
-        
-    out = sys.argv[1]
-    files = []
-    args = sys.argv[2:]
-    for i in range(0, len(args), 2):
-        if i+1 < len(args):
-            files.append((args[i], args[i+1]))
-            
-    create_fat32_image(out, files)
+    out   = sys.argv[1]
+    args  = sys.argv[2:]
+    pairs = [(args[i], args[i+1]) for i in range(0, len(args) - 1, 2)]
+    create_fat32_image(out, pairs)

@@ -65,14 +65,14 @@ Set-Content -Path "$tmpDir\hostname" -Value "vios" -NoNewline -Encoding ascii
 Set-Content -Path "$tmpDir\readme"   -Value "Welcome to ViOS!" -NoNewline -Encoding ascii
 $kfs_args = @(
     "kernel\src\embedded\kernel_fs.img",
-    "$rel_dir\app-init",   "init",
-    "$rel_dir\app-shell",  "shell",
-    "$rel_dir\service-vfs","vfs",
-    "$rel_dir\service-config","config",
-    "$tmpDir\hostname", "hostname",
-    "$tmpDir\readme",   "readme"
+    "$rel_dir\app-init",       "/bin/init",
+    "$rel_dir\app-shell",      "/bin/shell",
+    "$rel_dir\service-vfs",    "/bin/vfs",
+    "$rel_dir\service-config", "/bin/config",
+    "$tmpDir\hostname",        "/etc/hostname",
+    "$tmpDir\readme",          "/readme.txt"
 )
-if ($lua_bin) { $kfs_args += @($lua_bin, "lua") }
+if ($lua_bin) { $kfs_args += @($lua_bin, "/bin/lua") }
 python "$tools_dir\mkfat32.py" @kfs_args 2>&1
 Remove-Item -Recurse -Force $tmpDir
 $kfs_mb = [Math]::Round((Get-Item "kernel\src\embedded\kernel_fs.img").Length/1MB,1)
