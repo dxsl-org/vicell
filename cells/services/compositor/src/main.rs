@@ -1,4 +1,5 @@
 #![no_std]
+#![no_main]
 // #[no_mangle] on main() requires removing global forbid — all submodules stay unsafe-free.
 
 //! Compositor Service Cell.

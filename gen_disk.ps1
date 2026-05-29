@@ -14,27 +14,29 @@
 
 $kernel_root = Get-Location
 $tools_dir   = "$kernel_root\tools"
-$target_dir  = "$kernel_root\target\riscv64gc-unknown-none-elf\debug"
 $rel_dir     = "$kernel_root\target\riscv64gc-unknown-none-elf\release"
 
-# 1. Build release cells (needed for kernel_fs.img and bootstrap table)
+# 1. Build ALL cells in release mode.
+# Release binaries are 10-100x smaller than debug, which matters because
+# SpawnFromPath copies the full ELF into the 16MB kernel heap.
+# Debug VFS=5.7MB, release VFS=3MB; Debug net=4.2MB, release net=~1MB.
 Write-Host "Building release cells..."
-cargo build --release -p app-init -p app-shell -p service-vfs -p service-config 2>&1 | Select-Object -Last 3
+cargo build --release `
+    -p app-init -p app-shell `
+    -p service-vfs -p service-config `
+    -p service-input -p service-net -p service-compositor 2>&1 | Select-Object -Last 5
+cargo build --release -p app-bench 2>&1 | Select-Object -Last 3
 
-# Build debug cells for bootstrap table (faster; SpawnFromPath loads these at boot)
-Write-Host "Building debug cells for bootstrap table..."
-cargo build -p service-vfs -p service-config -p app-shell -p service-input -p service-net
-cargo build -p app-bench        # Phase 22: benchmarking cell
-
-# 2. Paths
-$init_bin   = "$target_dir\app-init"
-$shell_bin  = "$target_dir\app-shell"
-$vfs_bin    = "$target_dir\service-vfs"
-$config_bin = "$target_dir\service-config"
+# 2. Paths — all bootstrap table entries use RELEASE builds.
+$init_bin   = "$rel_dir\app-init"
+$shell_bin  = "$rel_dir\app-shell"
+$vfs_bin    = "$rel_dir\service-vfs"
+$config_bin = "$rel_dir\service-config"
 $lua_bin    = "$rel_dir\lua"
-$bench_bin  = "$target_dir\bench"       # Phase 22 benchmark cell
-$input_bin  = "$target_dir\service-input"  # Phase 14: input service cell
-$net_bin    = "$target_dir\service-net"    # Phase 15: network service cell
+$bench_bin  = "$rel_dir\bench"             # Phase 22 benchmark cell
+$input_bin  = "$rel_dir\service-input"     # Phase 14: input service cell
+$net_bin    = "$rel_dir\service-net"       # Phase 15: network service cell
+$comp_bin   = "$rel_dir\service-compositor" # Phase 16: compositor + GPU
 
 foreach ($pair in @(
     @{ Path = $init_bin;   Name = "app-init" },
@@ -101,6 +103,7 @@ if ($lua_bin)   { $table_args += "/bin/lua=$lua_bin" }
 if ($bench_bin) { $table_args += "/bin/bench=$bench_bin" }
 if (Test-Path $input_bin) { $table_args += "/bin/input=$input_bin" }
 if (Test-Path $net_bin)   { $table_args += "/bin/net=$net_bin" }
+if (Test-Path $comp_bin)  { $table_args += "/bin/compositor=$comp_bin" }
 python "$tools_dir\write-cell-table.py" @table_args
 
 Write-Host "Done. disk_v3.img is ready."

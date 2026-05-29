@@ -8,8 +8,6 @@ types = { path = "../../../libs/types" }
 api = { path = "../../../libs/api" }
 ostd = { path = "../../../libs/ostd" }
 
-[features]
-default = []
-
-[lib]
-crate-type = ["staticlib"]
+[[bin]]
+name = "service-compositor"
+path = "src/main.rs"

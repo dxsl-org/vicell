@@ -54,7 +54,16 @@ pub extern "C" fn main() {
 
     ostd::task::yield_now();
 
-    // 5. Spawn Shell
+    // 5. Spawn Compositor (software blending + GPU framebuffer — non-fatal).
+    println("Init: Spawning Compositor...");
+    match ostd::syscall::sys_spawn_from_path("/bin/compositor") {
+        ostd::syscall::SyscallResult::Ok(_) => println("Init: Compositor spawned."),
+        _ => println("Init: INFO — Compositor not found (no VirtIO GPU or binary missing)."),
+    }
+
+    ostd::task::yield_now();
+
+    // 6. Spawn Shell
     println("Init: Spawning Shell...");
     match ostd::syscall::sys_spawn_from_path("/bin/shell") {
         ostd::syscall::SyscallResult::Ok(_) => println("Init: Shell spawned successfully."),
