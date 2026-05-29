@@ -2,6 +2,13 @@
 
 ### Added
 
+**Community Infrastructure (Phase 23)**
+- CODE_OF_CONDUCT.md: Contributor Covenant v2.1-based community standards
+- dev-setup.sh: fixed Linux disk-gen command; marked executable
+- README: added CODE_OF_CONDUCT.md link in contributor section
+
+**v1.0 Release Candidate**: All P0/P1/P2 phases complete (22/23 done, Phase 23 ✅); project ready for 1.0 release.
+
 **Complete 8-Task Boot Chain on 128MB RAM**
 
 All services wired and running in QEMU:

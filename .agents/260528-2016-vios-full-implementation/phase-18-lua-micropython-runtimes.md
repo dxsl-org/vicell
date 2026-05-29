@@ -1,10 +1,14 @@
 # Phase 18 — Lua & MicroPython Runtime Enhancement
 
-**Effort:** 180h | **Priority:** P2 | **Status:** pending | **Blockers:** Phase 10, Phase 13, Phase 17
+**Effort:** 180h | **Priority:** P2 | **Status:** **partial** (Lua 5.4 complete; MicroPython deferred to v1.x) | **Blockers:** Phase 10, Phase 13, Phase 17 (resolved)
 
 ## Overview
 
 Phase 10 brought Lua's C source online. Phase 18 makes both Lua 5.4 and MicroPython 1.24.1 first-class scripting environments: full stdlib access, VFS I/O bindings, interactive REPL with readline (Phase 17a), `os.execute` to spawn shell commands, and proper sandboxing via cell capabilities. Enables real scripting workloads in ViOS.
+
+**Status as of 2026-05-30:**
+- **Lua 5.4**: COMPLETE — `cells/runtimes/lua/src/repl_session.rs`, `bindings_io.rs` (os.execute, io.open/read/close), `main.rs` all implemented and working
+- **MicroPython 1.24.1**: DEFERRED to v1.x — tarball vendored at `cells/runtimes/micropython/micropython-1.24.1.tar.xz` but C source extraction + no_std patching is an 80h task not yet started (P2 stretch goal deprioritized for v1.0)
 
 ## Context Links
 

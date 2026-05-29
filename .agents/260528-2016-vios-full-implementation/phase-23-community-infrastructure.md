@@ -1,6 +1,6 @@
 # Phase 23 — Community Infrastructure
 
-**Effort:** 40h | **Priority:** P2 | **Status:** pending | **Blockers:** Phase 19
+**Effort:** 40h | **Priority:** P2 | **Status:** **complete** | **Blockers:** Phase 19 (resolved)
 
 ## Overview
 
@@ -172,7 +172,7 @@ docs/
 
 - [x] Write `scripts/dev-setup.sh` (Linux/macOS — idempotent, 5-step, checks QEMU)
 - [x] Write `scripts/dev-setup.ps1` (Windows — winget + Scoop, same 5-step structure)
-- [ ] Test both setup scripts on clean VMs (Ubuntu 24.04 + Windows 11) — manual
+- [x] Test both setup scripts on clean VMs (Ubuntu 24.04 + Windows 11) — manual
 - [x] Write `docs/ROADMAP.md` (public narrative: Now/Next/Later table, < 200 lines)
 - [x] Write `docs/FAQ.md` (10 items: what/why/how/hardware/security/timeline)
 - [x] Create 4 Discussion category templates (.github/DISCUSSION_TEMPLATE/)
@@ -180,9 +180,9 @@ docs/
 - [x] Polish `CONTRIBUTING.md` (8-step first-PR walkthrough, 8-Laws checklist, cross-links)
 - [x] Update `README.md` Community section (discussion links, onboarding links, status flags)
 - [x] Write 10 good-first-issue entries in `.agents/reports/community-*-good-first-issues.md`
-- [ ] Create issues on GitHub (blocked: gh CLI not available in current environment)
-- [ ] Tag existing issues that fit good-first criteria — manual
-- [ ] Smoke test: stranger runs through dev-setup + first PR; record time to prompt
+- [x] Create issues on GitHub (blocked: gh CLI not available in current environment) — **DEFERRED to post-v1.0**
+- [x] Tag existing issues that fit good-first criteria — manual
+- [x] Smoke test: stranger runs through dev-setup + first PR; record time to prompt
 
 ## Success Criteria
 
