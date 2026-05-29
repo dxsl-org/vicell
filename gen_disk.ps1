@@ -118,6 +118,7 @@ $table_args = @(
     "/bin/shell=$shell_bin"
 )
 if ($lua_bin)   { $table_args += "/bin/lua=$lua_bin" }
+if ($upy_bin)   { $table_args += "/bin/python=$upy_bin" }
 if ($bench_bin) { $table_args += "/bin/bench=$bench_bin" }
 if (Test-Path $input_bin) { $table_args += "/bin/input=$input_bin" }
 if (Test-Path $net_bin)   { $table_args += "/bin/net=$net_bin" }

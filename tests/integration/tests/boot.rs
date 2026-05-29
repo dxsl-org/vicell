@@ -131,3 +131,20 @@ fn lua_runtime_executes() {
         panic!("lua runtime did not start: {e}\n--- output ---\n{}", qemu.dump())
     });
 }
+
+/// Phase 18: the MicroPython runtime cell must load and execute. Spawning
+/// `/bin/python` should print the MicroPython banner.
+#[test]
+fn micropython_runtime_executes() {
+    if !prerequisites_ok() {
+        return;
+    }
+    let mut qemu = QemuRunner::boot(&kernel_path(), &disk_path());
+    qemu.wait_for("ViOS >", BOOT_TIMEOUT)
+        .unwrap_or_else(|e| panic!("prompt not reached: {e}"));
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    qemu.send_line("python");
+    qemu.wait_for("MicroPython v1.24.1 on ViOS", 20).unwrap_or_else(|e| {
+        panic!("micropython did not start: {e}\n--- output ---\n{}", qemu.dump())
+    });
+}
