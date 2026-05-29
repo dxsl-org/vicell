@@ -3,10 +3,13 @@ name = "micropython"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "micropython"
+path = "src/main.rs"
+
 [dependencies]
-api = { path = "../../../libs/api" }
+api  = { path = "../../../libs/api" }
 ostd = { path = "../../../libs/ostd" }
-cty = "0.2"
 
 [build-dependencies]
 cc = "1.0"

@@ -47,6 +47,7 @@ members = [
 
     # Cells - Runtimes
     "cells/runtimes/lua",
+    "cells/runtimes/micropython",
 ]
 
 [workspace.package]

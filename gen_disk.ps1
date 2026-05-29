@@ -24,7 +24,8 @@ Write-Host "Building release cells..."
 cargo build --release `
     -p app-init -p app-shell `
     -p service-vfs -p service-config `
-    -p service-input -p service-net -p service-compositor 2>&1 | Select-Object -Last 5
+    -p service-input -p service-net -p service-compositor `
+    -p micropython 2>&1 | Select-Object -Last 5
 cargo build --release -p app-bench 2>&1 | Select-Object -Last 3
 
 # 1b. Update kernel embedded cells (init, shell, vfs, config) from release builds.
@@ -43,6 +44,7 @@ $shell_bin  = "$rel_dir\app-shell"
 $vfs_bin    = "$rel_dir\service-vfs"
 $config_bin = "$rel_dir\service-config"
 $lua_bin    = "$rel_dir\lua"
+$upy_bin    = "$rel_dir\micropython"       # Phase 18: MicroPython runtime cell
 $bench_bin  = "$rel_dir\bench"             # Phase 22 benchmark cell
 $input_bin  = "$rel_dir\service-input"     # Phase 14: input service cell
 $net_bin    = "$rel_dir\service-net"       # Phase 15: network service cell
@@ -63,6 +65,11 @@ foreach ($pair in @(
 if (-not (Test-Path $lua_bin)) {
     Write-Host "Warning: Lua binary not found — skipping Lua in FAT32 image."
     $lua_bin = $null
+}
+
+if (-not (Test-Path $upy_bin)) {
+    Write-Host "Warning: MicroPython binary not found — skipping python in FAT32 image."
+    $upy_bin = $null
 }
 
 if (-not (Test-Path $bench_bin)) {
@@ -86,7 +93,8 @@ $kfs_args = @(
     "$tmpDir\hostname",        "/etc/hostname",
     "$tmpDir\readme",          "/readme.txt"
 )
-if ($lua_bin) { $kfs_args += @($lua_bin, "/bin/lua") }
+if ($lua_bin)  { $kfs_args += @($lua_bin,  "/bin/lua") }
+if ($upy_bin)  { $kfs_args += @($upy_bin,  "/bin/python") }
 python "$tools_dir\mkfat32.py" @kfs_args 2>&1
 Remove-Item -Recurse -Force $tmpDir
 $kfs_mb = [Math]::Round((Get-Item "kernel\src\embedded\kernel_fs.img").Length/1MB,1)

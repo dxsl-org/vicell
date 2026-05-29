@@ -3,53 +3,55 @@
 
 extern crate ostd;
 extern crate api;
-extern crate cty;
 
 use ostd::prelude::*;
 
-// FFI to MicroPython
+// MicroPython embed API — provided by embed_util.c (ports/embed/port).
+// mp_embed_init  : initialise GC heap + Python runtime
+// mp_embed_deinit: teardown
+// pyexec_friendly_repl: interactive REPL (shared/runtime/pyexec.c)
 extern "C" {
-    fn mp_init();
-    fn mp_deinit();
-    
-    // We might need to manually trigger execution of a script or REPL
-    // function pyexec_friendly_repl() is standard for repl
-    fn pyexec_friendly_repl() -> cty::c_int;
+    fn mp_embed_init(
+        gc_heap: *mut u8,
+        gc_heap_size: usize,
+        stack_top: *mut u8,
+    );
+    fn mp_embed_deinit();
+
+    /// Blocking REPL loop. Returns when the interpreter exits (Ctrl-D / sys.exit).
+    fn pyexec_friendly_repl() -> i32;
+
+    /// Execute a Python string (used for startup script if desired).
+    fn mp_embed_exec_str(src: *const u8);
 }
 
-// Memory area for MicroPython Heap
-static mut HEAP: [u8; 128 * 1024] = [0; 128 * 1024]; // 128KB heap
+/// GC heap for the Python interpreter.
+/// 256 KB is sufficient for most REPL workloads.
+static mut HEAP: [u8; 256 * 1024] = [0u8; 256 * 1024];
 
 #[no_mangle]
 pub extern "C" fn main(_argc: isize, _argv: *const *const u8) -> isize {
-    println!("MicroPython v1.24.1 on ViOS");
+    println("MicroPython v1.24.1 on ViOS (Cellular SAS)");
+    println("Type \"help()\" for more information.");
 
+    // Use a local variable's address as the stack-top marker for the GC
+    // root scanner. The scanner walks from here up to the stack base
+    // recorded by mp_stack_set_top inside mp_embed_init.
+    let stack_anchor: u8 = 0;
+
+    // SAFETY: HEAP is a static array only touched here; no concurrent access
+    // possible because this cell runs single-threaded.
     unsafe {
-        // Initialize GC heap
-        // mp_stack_ctrl_init(); // optional
-        
-        // gc_init(heap, heap + len)
-        extern "C" {
-            fn gc_init(start: *mut cty::c_void, end: *mut cty::c_void);
-        }
-        
-        let heap_ptr = HEAP.as_mut_ptr() as *mut cty::c_void;
-        let heap_end = heap_ptr.add(HEAP.len());
-        gc_init(heap_ptr, heap_end);
+        mp_embed_init(
+            HEAP.as_mut_ptr(),
+            HEAP.len(),
+            &stack_anchor as *const u8 as *mut u8,
+        );
 
-        mp_init();
-        
-        // Execute REPL
         pyexec_friendly_repl();
-        
-        mp_deinit();
-    }
-    
-    0
-}
 
-// Callbacks required by MicroPython runtime that might not be in POSIX shim
-#[no_mangle]
-pub extern "C" fn nlr_jump_fail(_val: *mut cty::c_void) {
-    panic!("MicroPython NLR Jump Fail");
+        mp_embed_deinit();
+    }
+
+    0
 }
