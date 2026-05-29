@@ -72,7 +72,10 @@ unsafe fn try_eval(L: *mut LuaState, code: &str) -> bool {
         return false;
     }
 
-    let rc = unsafe { crate::ffi::lua_pcall(L, 0, crate::ffi::LUA_MULTRET, 0) };
+    // lua_pcall(L,0,MULTRET,0) == lua_pcallk(L,0,MULTRET,0, 0, NULL)
+    let rc = unsafe {
+        crate::ffi::lua_pcallk(L, 0, crate::ffi::LUA_MULTRET, 0, 0, core::ptr::null_mut())
+    };
     if rc != LUA_OK {
         print_error(L);
         return false;

@@ -34,11 +34,18 @@ extern "C" {
 
     /// Call the function at the top of the stack with `nargs` arguments.
     /// `LUA_MULTRET` for `nresults` accepts any number of results.
-    pub fn lua_pcall(
+    ///
+    /// Note: `lua_pcall` is a macro in lua.h that forwards to `lua_pcallk`
+    /// with no continuation; we bind the real `lua_pcallk` symbol directly.
+    /// `ctx`/`k` are the continuation context/function — pass 0/null for a
+    /// plain protected call.
+    pub fn lua_pcallk(
         L: *mut LuaState,
         nargs: c_int,
         nresults: c_int,
         errfunc: c_int,
+        ctx: isize,
+        k: *mut core::ffi::c_void,
     ) -> c_int;
 
     // ── Stack inspection ─────────────────────────────────────────────────────

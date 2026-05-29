@@ -41,11 +41,50 @@ fn main() {
         build.file(format!("{src_dir}/{file}"));
     }
 
-    // ViOS glue: portable write/abort/setjmp stubs that do not require newlib.
+    // ViOS glue: vios_write/abort + safe POSIX stubs (system/getenv/tmpnam).
     build.file(format!("{glue_dir}/lua_vios_glue.c"));
 
     build.compile("lua54");
 
+    // Link picolibc/newlib from the riscv-none-elf-gcc toolchain so the C
+    // runtime symbols Lua needs (setjmp, longjmp, strchr, frexp, fwrite,
+    // strtod, sprintf, _impure_ptr, ...) resolve.  Without this the cell
+    // fails to link with "undefined symbol: setjmp" etc.
+    if target.contains("riscv") {
+        link_picolibc();
+    }
+
     println!("cargo:rerun-if-changed={src_dir}");
     println!("cargo:rerun-if-changed={glue_dir}");
+}
+
+/// Locate picolibc/newlib + libgcc from riscv-none-elf-gcc and emit the
+/// linker flags needed to resolve C runtime symbols.  Uses
+/// `--allow-multiple-definition` because compiler_builtins (from Rust core)
+/// also defines memcpy/memset/etc.; compiler_builtins wins (linked first).
+fn link_picolibc() {
+    let libc = run_gcc(&["--print-file-name=libc.a"]);
+    let libgcc = run_gcc(&["--print-libgcc-file-name"]);
+    for p in [&libc, &libgcc] {
+        if let Some(dir) = std::path::Path::new(p).parent() {
+            let d = dir.to_string_lossy();
+            if !d.is_empty() && d != "." {
+                println!("cargo:rustc-link-search=native={d}");
+            }
+        }
+    }
+    println!("cargo:rustc-link-lib=static=c");
+    println!("cargo:rustc-link-lib=static=m");
+    println!("cargo:rustc-link-lib=static=gcc");
+    println!("cargo:rustc-link-arg=--allow-multiple-definition");
+}
+
+fn run_gcc(args: &[&str]) -> String {
+    let mut all = vec!["-march=rv64gc", "-mabi=lp64d"];
+    all.extend_from_slice(args);
+    std::process::Command::new("riscv-none-elf-gcc")
+        .args(&all)
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_default()
 }

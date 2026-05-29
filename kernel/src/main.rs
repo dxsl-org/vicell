@@ -130,9 +130,14 @@ pub extern "C" fn kmain(hartid: usize, dtb: usize) -> ! {
     // Rationale: kernel_fs.img is ~4 MB so the heap needs to be > 4 MB.
     // 16 MB gives plenty of room for the RAM-disk copy + all kernel data structures
     // (BTreeMaps for tasks, capabilities, page table frames, etc.).
-    // 16 MB = 4 096 frames of 4 KB each → requires only 16 MB of physical RAM beyond
-    // the kernel binary, so the system boots on 128 MB QEMU instances.
-    const HEAP_FRAMES: usize = 4_096;
+    // 32 MB = 8 192 frames of 4 KB each.  Sized to hold simultaneously:
+    //   - the embedded RAM disk copy (kernel_fs.img, ~8 MB with lua + python)
+    //   - the VirtIO GPU framebuffer (1280×800×4 ≈ 4 MB)
+    //   - cell ELFs loaded via SpawnFromPath + kernel structures
+    // 16 MB was too tight once lua + python entered kernel_fs.img (GPU
+    // framebuffer alloc OOM'd, hanging the boot at the GPU probe).
+    // 128 MB QEMU instances have ample room for a 32 MB heap.
+    const HEAP_FRAMES: usize = 8_192;
     let heap_start = {
         let mut allocator_guard = memory::frame::FRAME_ALLOCATOR.lock();
         let allocator = allocator_guard
@@ -145,7 +150,7 @@ pub extern "C" fn kmain(hartid: usize, dtb: usize) -> ! {
         start
     };
     puts("TRACE: frames allocated, calling init_heap\n");
-    let heap_size = HEAP_FRAMES * 4096; // 16 MB — matches frames above
+    let heap_size = HEAP_FRAMES * 4096; // 32 MB — matches frames above
     unsafe {
         memory::heap::init_heap(heap_start, heap_size);
     }
