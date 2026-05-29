@@ -105,6 +105,31 @@ pub fn sys_spawn_from_mem(data: &[u8], name: &str, args: &str) -> SyscallResult 
     }
 }
 
+/// Spawn a cell by loading its ELF from a VFS path (e.g. `/bin/shell`).
+///
+/// The kernel reads the ELF from disk or the bootstrap table, parses it,
+/// and spawns a new task.  Returns the new cell's task ID on success.
+///
+/// # Errors
+/// Returns `SyscallError::Unknown` if the path is not found or the ELF is invalid.
+pub fn sys_spawn_from_path(path: &str) -> SyscallResult {
+    // SAFETY: path is a valid UTF-8 str; kernel copies it out before returning.
+    unsafe {
+        let ret = syscall(
+            ViSyscall::SpawnFromPath,
+            path.as_ptr() as usize,
+            path.len(),
+            0,
+            0,
+        );
+        if ret > 0 {
+            SyscallResult::Ok(ret as usize)
+        } else {
+            SyscallResult::Err(SyscallError::Unknown)
+        }
+    }
+}
+
 pub fn sys_wait(pid: usize) -> SyscallResult {
     unsafe {
         let ret = syscall(ViSyscall::Wait, pid, 0, 0, 0);

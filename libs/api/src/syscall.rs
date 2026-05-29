@@ -17,6 +17,9 @@ pub enum ViSyscall {
     Spawn = 5,
     Exec = 6,          // Deprecated/Legacy
     SpawnFromMem = 10, // New Spawn from Memory (Struct based)
+    /// Spawn a cell by reading its ELF from a VFS path.
+    /// ABI: a0 = path_ptr, a1 = path_len; returns cell id or error code.
+    SpawnFromPath = 12,
     Wait = 8,          // Wait for task
     Yield = 104,       // Linux sched_yield is 24, but we use 104 in current code
     SetTimer = 35,     // Added SetTimer
@@ -56,6 +59,7 @@ impl From<usize> for ViSyscall {
             5 => ViSyscall::Spawn,
             6 => ViSyscall::Exec,
             10 => ViSyscall::SpawnFromMem,
+            12 => ViSyscall::SpawnFromPath,
             8 => ViSyscall::Wait,
             104 => ViSyscall::Yield,
             35 => ViSyscall::SetTimer,

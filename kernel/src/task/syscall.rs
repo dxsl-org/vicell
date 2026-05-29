@@ -156,6 +156,9 @@ pub enum Syscall {
     Exec { path_ptr: usize, path_len: usize },
     /// 10: SpawnFromMem (Spawn from Memory buffer via Struct)
     SpawnFromMem { args_ptr: usize },
+    /// 12: SpawnFromPath (Spawn cell by filesystem path)
+    /// ABI: path_ptr in a0, path_len in a1.
+    SpawnFromPath { path_ptr: usize, path_len: usize },
     /// 8: Wait (Wait for task)
     Wait { pid: usize },
     /// 20: ShmAlloc
@@ -596,6 +599,28 @@ pub fn handle_syscall(caller_id: usize, syscall: Syscall) -> SyscallResult {
                 }
             }
         }
+        Syscall::SpawnFromPath { path_ptr, path_len } => {
+            // Reject empty or over-long paths at the trust boundary.
+            if path_len == 0 || path_len > crate::loader::disk_layout::MAX_CELL_PATH {
+                return Err(SyscallError::InvalidInput);
+            }
+            validate_user_buf(path_ptr, path_len, crate::loader::disk_layout::MAX_CELL_PATH)?;
+            // SAFETY: path_ptr is a valid user buffer (validated above); SUM=1
+            // lets S-mode read U-mode pages.  Slice lives only in this frame.
+            let path_str = unsafe {
+                let slice = core::slice::from_raw_parts(path_ptr as *const u8, path_len);
+                core::str::from_utf8(slice).map_err(|_| SyscallError::InvalidInput)?
+            };
+            if !path_str.starts_with('/') {
+                return Err(SyscallError::InvalidInput);
+            }
+            crate::loader::spawn_from_path(path_str).map_err(|e| match e {
+                types::ViError::NotFound => SyscallError::FileNotFound,
+                types::ViError::OutOfMemory => SyscallError::Unknown,
+                _ => SyscallError::InvalidInput,
+            })
+        }
+
         Syscall::SpawnFromMem { args_ptr } => {
             if args_ptr == 0 {
                 return Err(SyscallError::InvalidInput);
@@ -760,6 +785,7 @@ pub extern "Rust" fn vios_syscall_dispatch(frame: &mut ViTrapFrame) {
         ViSyscall::Spawn => Syscall::Spawn { entry: a0, arg: a1 },
         ViSyscall::Exec => Syscall::Exec { path_ptr: a0, path_len: a1 },
         ViSyscall::SpawnFromMem => Syscall::SpawnFromMem { args_ptr: a0 },
+        ViSyscall::SpawnFromPath => Syscall::SpawnFromPath { path_ptr: a0, path_len: a1 },
         ViSyscall::Wait => Syscall::Wait { pid: a0 },
         ViSyscall::ShmAlloc => Syscall::ShmAlloc { size: a0 },
         ViSyscall::ShmMap => Syscall::ShmMap { handle: a0, target_pid: a1 },

@@ -1,45 +1,77 @@
-//! kernel/src/loader.rs
-//! Cell loader and linker interfaces (v2.2 - Modern Style).
+//! Cell loader — ELF parsing, relocation, and path-based spawning.
 
-use types::*; // Dùng VAddr, CellId, ViResult từ libs/types
+use types::*;
 
-// Khai báo các module con (Luật 5: foo.rs ngang hàng thư mục foo/)
-pub mod elf; // Xử lý cấu trúc file ELF
+pub mod disk_layout;
+pub mod early;
+pub mod elf;
+pub mod reloc;
 pub use elf::ElfLoader;
-pub mod reloc; // Xử lý vá địa chỉ (Relocation)
 
-/// ELF parser trait - Đã sửa lỗi u64 -> usize để hỗ trợ RV32
+/// ELF parser trait.
 pub trait ElfParser {
-    /// Parse ELF header.
+    /// Parse ELF header, returning entry point and section-header offset.
     fn parse_header(&self, data: &[u8]) -> ViResult<ElfHeader>;
 
-    /// Get section by name.
+    /// Return the raw bytes of a named section, or `ViError::NotFound`.
     fn get_section<'a>(&self, data: &'a [u8], name: &str) -> ViResult<&'a [u8]>;
 }
 
-/// ELF header (v2.2 - Multi-Arch Ready)
+/// Parsed ELF header fields needed by the spawner.
 pub struct ElfHeader {
-    /// Entry point address. Dùng VAddr để tự nhảy theo kiến trúc (32/64 bit).
+    /// Entry point virtual address.
     pub entry: VAddr,
-    /// Section header offset. Dùng usize vì offset phụ thuộc độ rộng bus.
+    /// Section header table file offset (used for relocation lookups).
     pub shoff: usize,
 }
 
-/// Symbol table entry - Sử dụng kiểu dữ liệu chuẩn từ libs/types
-pub struct Symbol {
-    pub name: &'static str,
-    pub addr: VAddr,  // Đã đổi từ VirtAddr sang VAddr
-    pub cell: CellId, // Định danh Cell sở hữu symbol này
+/// Spawn a cell by reading its ELF from a filesystem path.
+///
+/// Resolution order:
+/// 1. If the early-boot cell table has been probed (via `early::EarlyLoader::probe`),
+///    reads the ELF directly from the block device at the known LBA.
+/// 2. Otherwise returns `ViError::NotFound` — the caller must ensure the early
+///    table is probed before calling `spawn_from_path` during bootstrapping.
+///
+/// After the ELF is loaded into memory, relocations are applied and the cell is
+/// enqueued via `crate::task::spawn_from_mem`.
+///
+/// # Errors
+/// - `ViError::NotFound` — path absent from the bootstrap table.
+/// - `ViError::InvalidInput` — malformed ELF or unsupported relocation.
+/// - `ViError::OutOfMemory` — cannot allocate frames for segments.
+pub fn spawn_from_path(path: &str) -> ViResult<usize> {
+    // Validate path: must be non-empty, start with '/', length bounded.
+    if path.is_empty() || !path.starts_with('/') || path.len() > disk_layout::MAX_CELL_PATH {
+        log::error!("[loader] invalid path {:?}", path);
+        return Err(ViError::InvalidInput);
+    }
+
+    log::info!("[loader] SpawnFromPath: {}", path);
+
+    // Read ELF bytes from the early bootstrap table.
+    let elf_bytes = early::EarlyLoader::read_file(path)?;
+
+    // Apply relocations (base = 0 for fixed-VA cells; non-zero for PIE cells).
+    // For cells with no .rela.dyn section, get_section returns NotFound — skip.
+    let base: VAddr = 0; // fixed-VA cells compiled with shell.ld; PIE support is future work
+    let elf_loader = ElfLoader;
+    if let Ok(rela_section) = elf_loader.get_section(&elf_bytes, ".rela.dyn") {
+        reloc::apply_relocations(base, rela_section)?;
+    }
+
+    // Extract cell name from the last path component (e.g. "/bin/shell" → "shell").
+    let name = path.rsplit('/').next().unwrap_or(path);
+
+    // Spawn via the existing in-memory spawn path (ELF parse + segment map).
+    crate::task::spawn_from_mem(&elf_bytes, name, CellId(0), alloc::vec::Vec::new())
+        .map_err(|_| ViError::OutOfMemory)
 }
 
-/// Linker trait - Trái tim của quá trình nạp Cell
+/// Linker trait (reserved for future dynamic-linking support).
+#[allow(dead_code)] // reason: trait body used by future Cell hot-swap (Phase 20)
 pub trait Linker {
-    /// Load a Cell from object file. Trả về ViResult thay vì panic!
     fn load_cell(&mut self, data: &[u8]) -> ViResult<CellId>;
-
-    /// Resolve a symbol by name.
     fn resolve_symbol(&self, name: &str) -> ViResult<VAddr>;
-
-    /// Unload a Cell (Hỗ trợ Panic Recovery)
     fn unload_cell(&mut self, id: CellId) -> ViResult<()>;
 }

@@ -174,6 +174,13 @@ pub extern "C" fn kmain(hartid: usize, dtb: usize) -> ! {
     task::drivers::init();
     puts("TRACE: drivers done\n");
 
+    // Probe the cell bootstrap table so SpawnFromPath works during init.
+    // Failure is non-fatal: init will log warnings if it cannot spawn cells.
+    match crate::loader::early::EarlyLoader::probe() {
+        Ok(()) => puts("[loader] cell bootstrap table loaded\n"),
+        Err(_) => puts("[loader] WARN: cell table not found — disk image may lack bootstrap section\n"),
+    }
+
     fs::init(); // Re-enabled with RAM disk
     log_info("Kernel subsystems initialized successfully.");
 
