@@ -16,16 +16,8 @@ pub static BLOCK_DEVICE: Spinlock<Option<SafeVirtIOBlk>> = Spinlock::new(None);
 /// IRQ number assigned to the block device during probing (slot_index + 1 for QEMU VirtIO MMIO).
 static BLOCK_DEVICE_IRQ: Spinlock<u32> = Spinlock::new(0);
 
-// Block Driver Implementation
-// Helper for direct debugging
-fn puts(s: &str) {
-    for c in s.bytes() {
-        let _ = crate::hal::sbi::console_putchar(c);
-    }
-}
-
 pub fn init_driver() {
-    puts("[DEBUG] VirtIO Block: Probing start...\n");
+    log::debug!("VirtIO Block: probing MMIO slots...");
 
     for i in 0..VIRTIO_MAX_DEVICES {
         let addr = VIRTIO0 + i * VIRTIO_MMIO_INTERVAL;
@@ -39,20 +31,17 @@ pub fn init_driver() {
         match unsafe { MmioTransport::new(header) } {
             Ok(transport) => {
                 if transport.device_type() == DeviceType::Block {
-                    puts("[DEBUG] VirtIO Block: Found Block Device. Calling new()...\n");
-
                     match VirtIOBlk::<VirtioHal, MmioTransport>::new(transport) {
                         Ok(blk) => {
-                            puts("[DEBUG] VirtIO Block: new() returned Ok. Locking global...\n");
                             let mut locked_dev = BLOCK_DEVICE.lock();
                             *locked_dev = Some(SafeVirtIOBlk(blk));
                             // Record which IRQ this slot maps to (QEMU: slot i → IRQ i+1).
                             *BLOCK_DEVICE_IRQ.lock() = (i as u32) + 1;
-                            puts("[DEBUG] VirtIO Block: Driver initialized successfully!\n");
+                            log::info!("VirtIO Block: initialized at MMIO slot {}", i);
                             return; // Only support 1 block device for now
                         }
-                        Err(_) => {
-                            puts("[DEBUG] VirtIO Block: new() returned Error\n");
+                        Err(e) => {
+                            log::warn!("VirtIO Block: init error at slot {}: {:?}", i, e);
                         }
                     }
                 }
@@ -62,7 +51,7 @@ pub fn init_driver() {
             }
         }
     }
-    puts("[WARN] VirtIO Block: No device found.\n");
+    log::debug!("VirtIO Block: no device found in MMIO range");
 }
 
 /// Called from the trap handler when any VirtIO MMIO IRQ fires (IRQs 1-8).

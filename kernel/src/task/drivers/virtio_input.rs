@@ -30,11 +30,9 @@ pub fn init_driver() {
         match unsafe { MmioTransport::new(header) } {
             Ok(transport) => {
                 if transport.device_type() == DeviceType::Input {
-                    log::info!("VirtIO: Found device at 0x{:X} type Input", addr);
-                    log::info!("VirtIO: Input device found. Initializing...");
                     match VirtIOInput::<VirtioHal, MmioTransport>::new(transport) {
                         Ok(input) => {
-                            log::info!("VirtIO: Input Driver initialized successfully!");
+                            log::info!("VirtIO Input: initialized at MMIO slot {}", i);
                             // Record the IRQ number (QEMU VirtIO MMIO: slot i → IRQ i+1).
                             *INPUT_DEVICE_IRQ.lock() = (i as u32) + 1;
                             *KEYBOARD_DRIVER.lock() = Some(VirtIOInputDriver {

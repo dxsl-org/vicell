@@ -18,15 +18,15 @@ impl viConsole {
     pub fn poll(&mut self) -> bool {
         let mut received = false;
 
-        // 1. Poll SBI/UART (Physical Serial)
+        // 1. Poll SBI/UART (Physical Serial) — primary input for -nographic QEMU.
         let c = crate::hal::sbi::console_getchar();
         if c > 0 {
-            log::info!("Console: Input c={}", c);
+            log::trace!("Console: UART byte {}", c); // trace-level: don't flood on every keystroke
             self.buffer.push_back(c as u8);
             received = true;
         }
 
-        // 2. Poll VirtIO Keyboard
+        // 2. Poll VirtIO Keyboard — used when a graphical display is attached.
         crate::task::drivers::virtio_input::poll_events();
         if let Some(drv) = crate::task::drivers::virtio_input::KEYBOARD_DRIVER
             .lock()
@@ -38,7 +38,7 @@ impl viConsole {
                         crate::task::drivers::input_map::scancode_to_ascii(event.code, event.value)
                     {
                         if c as u8 > 0 {
-                            log::info!("Console: VirtIO Input c={}", c);
+                            log::trace!("Console: VirtIO key {}", c);
                             self.buffer.push_back(c as u8);
                             received = true;
                         }
