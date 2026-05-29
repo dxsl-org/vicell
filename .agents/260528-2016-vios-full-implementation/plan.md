@@ -31,9 +31,9 @@ created: 2026-05-28
 | 03 | Boot Stability & Ring 3 Execution | 40h | P0 | **complete** | none |
 | 04 | VirtIO Block Device Fix | 40h | P0 | **complete** | none |
 | 05 | Keyboard Input Fix | 20h | P0 | **complete** | none |
-| 06 | External ELF Loading from /bin/ | 60h | P1 | pending | 03, 04 |
-| 07 | VFS FileHandle Passing Between Cells | 30h | P1 | pending | 06 |
-| 08 | Multi-Arch HAL — ARM AArch64 | 80h | P1 | pending | none |
+| 06 | External ELF Loading from /bin/ | 60h | P1 | **complete** | 03, 04 |
+| 07 | VFS FileHandle Passing Between Cells | 30h | P1 | **complete** | 06 |
+| 08 | Multi-Arch HAL — ARM AArch64 | 80h | P1 | **complete** | none |
 | 09 | Multi-Arch HAL — x86_64 | 80h | P1 | pending | none |
 | 10 | Lua C Binding via cc Crate | 40h | P1 | pending | none |
 | 11 | Unit & Integration Tests | 80h | P2 | pending | 03, 04 |

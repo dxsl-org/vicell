@@ -1,37 +1,83 @@
+//! AArch64 HAL facade.
+//!
+//! All sub-modules containing AArch64 assembly are gated on
+//! `#[cfg(target_arch = "aarch64")]` so the workspace compiles for other targets.
+
 use hal_arch_trait::Arch;
 
+// Sub-modules only compile when targeting AArch64.
+#[cfg(target_arch = "aarch64")] pub mod boot;
+#[cfg(target_arch = "aarch64")] pub mod context;
+#[cfg(target_arch = "aarch64")] pub mod gic;
+#[cfg(target_arch = "aarch64")] pub mod paging;
+#[cfg(target_arch = "aarch64")] pub mod timer;
+#[cfg(target_arch = "aarch64")] pub mod trap;
+#[cfg(target_arch = "aarch64")] pub mod uart_pl011;
+
+#[cfg(target_arch = "aarch64")] pub use context::CpuContext as Context;
+#[cfg(target_arch = "aarch64")] pub use paging::PageTable;
+#[cfg(target_arch = "aarch64")] pub use paging::PAGE_SIZE;
+
+// ── Stub for non-AArch64 targets ─────────────────────────────────────────────
+
+/// AArch64 architecture stub.
 pub struct AArch64Arch;
 
-// TODO: Implement Arch trait for AArch64
 pub type PlatformArch = AArch64Arch;
 pub static ARCH: PlatformArch = AArch64Arch;
 
+#[cfg(not(target_arch = "aarch64"))]
 impl Arch for AArch64Arch {
-    type Context = usize; // TODO: Define real context
+    type Context = usize;
+    fn init(&self) {}
+    unsafe fn switch_context(&self, _old: *mut Self::Context, _new: *const Self::Context) {}
+    fn enable_interrupts(&self) {}
+    fn disable_interrupts(&self) {}
+    fn wait_for_interrupt(&self) {}
+    fn interrupts_enabled(&self) -> bool { false }
+}
+
+// ── Full implementation for AArch64 target ────────────────────────────────────
+
+#[cfg(target_arch = "aarch64")]
+impl Arch for AArch64Arch {
+    type Context = context::CpuContext;
 
     fn init(&self) {
-        // TODO: Initialize AArch64
+        trap::init();
     }
 
-    unsafe fn switch_context(&self, _old: *mut Self::Context, _new: *const Self::Context) {
-        // TODO: Implement context switching
-        unimplemented!("AArch64 context switch not implemented");
+    unsafe fn switch_context(&self, old: *mut Self::Context, new: *const Self::Context) {
+        // SAFETY: invariant upheld by caller.
+        unsafe { context::switch(old, new); }
     }
 
     fn enable_interrupts(&self) {
-        // TODO
+        // SAFETY: daifclr is a standard EL1 control write.
+        unsafe { core::arch::asm!("msr daifclr, #2", options(nomem, nostack)); }
     }
 
     fn disable_interrupts(&self) {
-        // TODO
+        // SAFETY: daifset is a standard EL1 control write.
+        unsafe { core::arch::asm!("msr daifset, #2", options(nomem, nostack)); }
     }
 
     fn wait_for_interrupt(&self) {
-        // TODO
+        // SAFETY: wfi has no side-effects on memory.
+        unsafe { core::arch::asm!("wfi", options(nomem, nostack)); }
     }
 
     fn interrupts_enabled(&self) -> bool {
-        // TODO
-        false
+        let daif: u64;
+        // SAFETY: reading DAIF modifies no state.
+        unsafe { core::arch::asm!("mrs {}, daif", out(reg) daif, options(nomem, nostack)); }
+        (daif & (1 << 7)) == 0
     }
+}
+
+/// Store the kernel-stack top in TPIDR_EL1 (AArch64 only).
+#[cfg(target_arch = "aarch64")]
+pub fn set_kernel_stack(sp: usize) {
+    // SAFETY: TPIDR_EL1 is EL1-private; writing from EL1 is safe.
+    unsafe { core::arch::asm!("msr tpidr_el1, {}", in(reg) sp, options(nomem, nostack)); }
 }

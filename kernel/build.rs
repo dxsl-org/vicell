@@ -3,8 +3,14 @@ use std::path::PathBuf;
 use std::process::Command;
 
 fn main() {
-    println!("cargo:rustc-link-arg=-Tkernel/linker.ld");
-    println!("cargo:rerun-if-changed=kernel/linker.ld");
+    // Choose linker script based on target architecture.
+    let target_arch = std::env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
+    let (ld_script, rerun_path) = match target_arch.as_str() {
+        "aarch64" => ("kernel/linker-aarch64.ld", "kernel/linker-aarch64.ld"),
+        _         => ("kernel/linker.ld",          "kernel/linker.ld"),
+    };
+    println!("cargo:rustc-link-arg=-T{ld_script}");
+    println!("cargo:rerun-if-changed={rerun_path}");
 
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());
     let embedded_out = out_dir.join("embedded");

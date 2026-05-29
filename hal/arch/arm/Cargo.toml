@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 hal-arch-trait = { path = "../../traits/arch" }
+hal-paging     = { path = "../../traits/paging" }
 types = { path = "../../../libs/types" }
 
 [features]
