@@ -1,4 +1,5 @@
 #![no_std]
+#![no_main]
 // Note: #[no_mangle] on main() is required by the ViOS ELF loader and triggers
 // unsafe_attr, so we cannot use #![forbid(unsafe_code)] globally here.
 // All business logic in the submodules is unsafe-free.

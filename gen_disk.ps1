@@ -23,7 +23,7 @@ cargo build --release -p app-init -p app-shell -p service-vfs -p service-config 
 
 # Build debug cells for bootstrap table (faster; SpawnFromPath loads these at boot)
 Write-Host "Building debug cells for bootstrap table..."
-cargo build -p service-vfs -p service-config -p app-shell
+cargo build -p service-vfs -p service-config -p app-shell -p service-input
 cargo build -p app-bench        # Phase 22: benchmarking cell
 
 # 2. Paths
@@ -33,6 +33,7 @@ $vfs_bin    = "$target_dir\service-vfs"
 $config_bin = "$target_dir\service-config"
 $lua_bin    = "$rel_dir\lua"
 $bench_bin  = "$target_dir\bench"       # Phase 22 benchmark cell
+$input_bin  = "$target_dir\service-input"  # Phase 14: input service cell
 
 foreach ($pair in @(
     @{ Path = $init_bin;   Name = "app-init" },
@@ -97,6 +98,7 @@ $table_args = @(
 )
 if ($lua_bin)   { $table_args += "/bin/lua=$lua_bin" }
 if ($bench_bin) { $table_args += "/bin/bench=$bench_bin" }
+if (Test-Path $input_bin) { $table_args += "/bin/input=$input_bin" }
 python "$tools_dir\write-cell-table.py" @table_args
 
 Write-Host "Done. disk_v3.img is ready."

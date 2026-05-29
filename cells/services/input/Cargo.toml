@@ -8,5 +8,6 @@ types = { path = "../../../libs/types" }
 api = { path = "../../../libs/api" }
 ostd = { path = "../../../libs/ostd" }
 
-[lib]
-crate-type = ["staticlib"]
+[[bin]]
+name = "service-input"
+path = "src/main.rs"

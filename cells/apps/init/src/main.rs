@@ -36,7 +36,16 @@ pub extern "C" fn main() {
 
     ostd::task::yield_now();
 
-    // 3. Spawn Shell
+    // 3. Spawn Input Service (keyboard/mouse translation — non-fatal).
+    println("Init: Spawning Input Service...");
+    match ostd::syscall::sys_spawn_from_path("/bin/input") {
+        ostd::syscall::SyscallResult::Ok(_) => println("Init: Input Service spawned."),
+        _ => println("Init: INFO — Input service not found; UART input still works."),
+    }
+
+    ostd::task::yield_now();
+
+    // 4. Spawn Shell
     println("Init: Spawning Shell...");
     match ostd::syscall::sys_spawn_from_path("/bin/shell") {
         ostd::syscall::SyscallResult::Ok(_) => println("Init: Shell spawned successfully."),
