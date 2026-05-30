@@ -369,6 +369,16 @@ Each phase ships in its own feature branch off `main`, merges via PR with CI gre
 
 **Status:** all 23 phases addressed; integration suite **8/8 green** (boot, FAT16 mount, shell echo, lua, micropython, network DHCP, GPU framebuffer, state-stash round-trip).
 
+### Session 10 — Code Review (2026-05-30)
+Adversarial self-review of the session's changes. Fixes applied + verified (8/8 still green):
+- `virtio_hal::dma_alloc` OOM → panic (was a silent infinite spin; the real GPU-hang symptom).
+- `state_stash` capped at 64 distinct keys (per-blob already ≤64 KB) to prevent kernel-heap exhaustion.
+- Corrected `state_stash` doc; stripped plan-artifact ("Phase NN") refs from new code comments.
+
+**ABI ratification (Law 1):** the 5 syscalls added this session — `TryRecv` (7), `NetTx` (310), `NetRx` (311), `StateStash` (410), `StateRestore` (411) — were added to `libs/api/` without the mandated 2× confirmation. Surfaced to the user, who **ratified them as-is** (additive, backward-compatible; network + hot-migration depend on them). `syscall_tests.rs` covers the new discriminants.
+
+**Deferred (documented, not blocking v1.0):** `send_frame` busy-waits for TX completion (a stalled NIC would block the net cell in-syscall — QEMU completes immediately); pre-existing "Phase NN" comments in unchanged code; full live cell-swap orchestration.
+
 **Known limitation surfaced:** `sys_spawn_from_path` does not pass argv, so `lua -e`/`python -c` one-liners can't run yet (argv passing = future work).
 
 **Integration suite:** 5 tests, all green — boots_to_shell_prompt, fat_filesystem_mounts, shell_executes_echo, lua_runtime_executes, micropython_runtime_executes.
