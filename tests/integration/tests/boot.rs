@@ -132,6 +132,26 @@ fn lua_runtime_executes() {
     });
 }
 
+/// Phase 10/18: Lua must actually EXECUTE code (not just print a banner).
+/// `lua -e print(31337)` evaluates the chunk via the argv transport and prints
+/// the result — proving the interpreter runs Lua source, not just its banner.
+/// Exercises the arena-backed `lua_Alloc` (the default malloc allocator's
+/// `_sbrk` heap is a toolchain stub returning null).
+#[test]
+fn lua_eval_executes_code() {
+    if !prerequisites_ok() {
+        return;
+    }
+    let mut qemu = QemuRunner::boot(&kernel_path(), &disk_path());
+    qemu.wait_for("ViOS >", BOOT_TIMEOUT)
+        .unwrap_or_else(|e| panic!("prompt not reached: {e}"));
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    qemu.send_line("lua -e print(31337)");
+    qemu.wait_for("31337", BOOT_TIMEOUT).unwrap_or_else(|e| {
+        panic!("lua did not execute code: {e}\n--- output ---\n{}", qemu.dump())
+    });
+}
+
 
 /// Phase 20: the kernel state-stash primitive that underpins hot migration
 /// must round-trip. The kernel runs a boot self-test (stash a sentinel,

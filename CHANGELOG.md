@@ -4,9 +4,19 @@
 
 A function-based audit replaced the earlier file-existence "100% complete"
 claim. Each phase is now verified by a runnable QEMU integration test
-(`tests/integration/`, 8/8 green): boot-to-shell, FAT16 mount, interactive
-shell echo, Lua REPL, MicroPython REPL, network DHCP lease, GPU framebuffer,
-and the hot-migration state-stash round-trip.
+(`tests/integration/`, 9/9 green): boot-to-shell, FAT16 mount, interactive
+shell echo, Lua REPL, **Lua code execution** (`lua -e print(31337)` → `31337`),
+MicroPython REPL, network DHCP lease, GPU framebuffer, and the hot-migration
+state-stash round-trip.
+
+Lua now genuinely **executes code**, not just prints a banner. The C heap was
+the blocker: picolibc's allocator (incl. the reentrant `_malloc_r` on printf's
+float path) grows the heap via `_sbrk`, a toolchain nosys stub returning NULL →
+the first chunk write faulted at `addr=0x8`. Fixed with a linker `--wrap=_sbrk`
+backed by a static heap in the Lua glue (wins regardless of link order, unlike a
+symbol override under `--allow-multiple-definition`). QEMU RAM raised 128 MB →
+256 MB so the C runtimes' multi-MB arenas no longer push cumulative frame
+allocation into the RAM-ceiling fault.
 
 Real bugs found and fixed during the audit:
 - **Lua** did not link (`lua_pcall` is a macro → bind `lua_pcallk`; link picolibc).

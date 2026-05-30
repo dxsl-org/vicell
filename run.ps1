@@ -34,7 +34,9 @@ Write-Host ""
 # Note: -nographic sends serial/UART to stdin/stdout; VirtIO keyboard is for graphical mode.
 # Full VirtIO hardware: block, NIC (DHCP → 10.0.2.15), keyboard, and GPU
 # (framebuffer setup needs the 32 MB heap; it allocates a ~4 MB framebuffer).
-& $qemu -machine virt -m 128M -nographic -bios default -kernel $kernel `
+# 256 MB RAM: the C runtimes (Lua/MicroPython) carry multi-MB BSS arenas;
+# with 128 MB cumulative frame allocation reached the RAM ceiling and faulted.
+& $qemu -machine virt -m 256M -nographic -bios default -kernel $kernel `
         -drive file=$disk,format=raw,id=hd0,if=none `
         -device virtio-blk-device,drive=hd0 `
         -netdev user,id=net0 `

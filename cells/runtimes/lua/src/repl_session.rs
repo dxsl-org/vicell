@@ -56,6 +56,17 @@ pub unsafe fn run_repl(L: *mut LuaState) {
     }
 }
 
+/// Compile and run a single chunk of Lua source (used for `lua -e <code>`).
+/// Returns `true` on success; prints the Lua error and returns `false` on failure.
+///
+/// # Safety
+/// `L` must be a valid, non-null Lua state.
+#[allow(non_snake_case)]
+pub unsafe fn eval(L: *mut LuaState, code: &str) -> bool {
+    // SAFETY: forwarded to try_eval which upholds the same contract on L.
+    unsafe { try_eval(L, code) }
+}
+
 /// Returns `true` if `code` compiled and ran successfully.
 ///
 /// # Safety

@@ -17,7 +17,9 @@ pub const LUA_MULTRET: c_int = -1;
 extern "C" {
     // ── Lifecycle ────────────────────────────────────────────────────────────
 
-    /// Create a new Lua state using Lua's default allocator.
+    /// Create a new Lua state using Lua's default allocator. That allocator
+    /// uses the C malloc family, whose heap is backed by the glue's
+    /// `__wrap__sbrk` static arena (the toolchain `_sbrk` stub returns null).
     pub fn luaL_newstate() -> *mut LuaState;
 
     /// Open all standard libraries into `L`.

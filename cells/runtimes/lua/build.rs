@@ -83,6 +83,11 @@ fn link_picolibc() {
     println!("cargo:rustc-link-lib=static=m");
     println!("cargo:rustc-link-lib=static=gcc");
     println!("cargo:rustc-link-arg=--allow-multiple-definition");
+    // Redirect every `_sbrk` reference (including libc's internal `_sbrk_r`)
+    // to our heap-backed `__wrap__sbrk`. The toolchain's `_sbrk` stub returns
+    // null, which faults malloc; --wrap wins regardless of link order, unlike
+    // a plain symbol override under --allow-multiple-definition.
+    println!("cargo:rustc-link-arg=--wrap=_sbrk");
 }
 
 fn run_gcc(args: &[&str]) -> String {

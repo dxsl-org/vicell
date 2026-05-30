@@ -71,7 +71,7 @@ impl QemuRunner {
         let child = Command::new(qemu_binary())
             .args([
                 "-machine", "virt",
-                "-m", "128M",
+                "-m", "256M",
                 "-nographic",
                 "-bios", "default",
                 "-kernel", kernel,

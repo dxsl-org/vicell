@@ -591,3 +591,60 @@ verify script execution. ~21 of 23 phases are genuinely functional; Lua/Python
 - Shell interactive I/O (Phase 17) is required for v1.0 (adds ~20h debugging + fix for serial echo)
 - Network completeness (Phase 15 DHCP verification) is required (adds ~10h testing + packet trace)
 - GPU hardware support (Phase 16) is required (adds ~40h driver debug + queue timeout handling)
+
+---
+
+### Session 12 — Lua code execution verified end-to-end (2026-05-30)
+
+**Outcome:** All **9/9 QEMU integration tests pass**, including a new assertion that
+Lua *executes code* (not just prints its banner): `lua -e print(31337)` outputs `31337`.
+
+#### Root cause (the multi-layer `_sbrk` fault)
+
+The Lua cell faulted whenever it allocated through the C heap. The chain:
+
+```
+luaL_newstate / luaL_openlibs / printf-dtoa
+        → malloc / _malloc_r
+        → _sbrk_r
+        → _sbrk         (toolchain nosys stub: `li a0,0; ret` → returns NULL)
+        → first chunk-header write at NULL+8  → store page fault, addr=0x8
+```
+
+Two distinct faults were observed and fixed:
+
+1. **RAM-ceiling fault (`stval=0x88000000`)** — under 128 MB, cumulative frame
+   allocation (32 MB heap + 4 MB RAM-disk + 7 cells, each runtime carrying a
+   multi-MB BSS arena) reached the RAM ceiling; a stack/buffer at `0x88000000`
+   (one past the 128 MB identity map) faulted. **Fix:** boot QEMU with **256 MB**
+   (`run.ps1` + integration harness). Allocations now stay well below the ceiling.
+
+2. **Null-heap fault (`addr=0x8`)** — picolibc's allocator (including the
+   reentrant `_malloc_r` that printf's float path calls directly) grows the heap
+   via `_sbrk`, which the toolchain stubs to return NULL. Overriding `malloc` /
+   `_malloc_r` by symbol definition does **not** work: the build links with
+   `--allow-multiple-definition`, under which the libc archive copy wins by link
+   order. **Fix:** linker `--wrap=_sbrk` (build.rs) → every `_sbrk` reference,
+   including libc-internal `_sbrk_r`, is rewritten to `__wrap__sbrk`, a static
+   8 MB heap arena in the glue (`lua_vios_glue.c`). With a real heap, picolibc's
+   own malloc/realloc/free run unmodified — no allocator reimplementation.
+
+#### Changes
+
+- `cells/runtimes/lua/glue/lua_vios_glue.c` — replaced the arena `lua_Alloc` +
+  malloc-family overrides with a single `__wrap__sbrk` static heap.
+- `cells/runtimes/lua/build.rs` — added `--wrap=_sbrk`.
+- `cells/runtimes/lua/src/main.rs` / `ffi.rs` — reverted to `luaL_newstate`
+  (default allocator now works); removed the obsolete `lua_newstate`/`vios_lua_alloc` FFI.
+- `run.ps1`, `tests/integration/src/lib.rs` — 128 MB → 256 MB.
+- `tests/integration/tests/boot.rs` — `lua_eval_executes_code` un-ignored; now a
+  passing assertion that Lua runs source.
+
+#### Status correction
+
+- **Phase 10 (Lua C binding)** and **Phase 18 (Lua runtime)**: Lua now genuinely
+  **executes code**, verified by an automated QEMU test — upgrading the earlier
+  honest "banner-only ≠ code-exec" caveat. MicroPython still prints its banner;
+  its code-exec path is untested (likely the same `_sbrk` fix applies).
+- Known follow-up: the eval path **parks** instead of returning — the kernel's
+  cell-exit path does not yet unmap a returning cell in the single address space.
