@@ -59,7 +59,7 @@ created: 2026-05-28
 | 07 | VFS FileHandle Passing Between Cells | 30h | P1 | **complete** | 06 |
 | 08 | Multi-Arch HAL — ARM AArch64 | 80h | P1 | **complete** | none |
 | 09 | Multi-Arch HAL — x86_64 | 80h | P1 | **complete** | none |
-| 10 | Lua C Binding via cc Crate | 40h | P1 | **complete** | none |
+| 10 | Lua C Binding via cc Crate | 40h | P1 | **partial** | none |
 | 11 | Unit & Integration Tests | 80h | P2 | **mostly** | 03, 04 |
 | 12 | Security Audit Infrastructure | 80h | P1 | **complete** | 02 |
 | 13 | Complete VFS Service | 100h | P2 | **complete** | 04, 06 |
@@ -67,7 +67,7 @@ created: 2026-05-28
 | 15 | Complete Network Service | 200h | P2 | **complete** | 04 |
 | 16 | Complete Compositor & GPU | 150h | P2 | **complete** | 14 |
 | 17 | Enhanced Shell & Standard Utilities | 320h | P2 | **complete** | 13, 14, 15 |
-| 18 | Lua & MicroPython Runtime Enhancement | 180h | P2 | **complete** | 10, 13, 17 |
+| 18 | Lua & MicroPython Runtime Enhancement | 180h | P2 | **partial** | 10, 13, 17 |
 | 19 | Documentation Automation | 40h | P2 | **complete** | 02, 11 |
 | 20 | Hot Migration & Advanced IPC | 180h | P3 | **complete** | 06, 13 |
 | 21 | RV32 & ARM AArch32 HAL | 160h | P3 | **complete** | 08 |
@@ -378,6 +378,36 @@ Adversarial self-review of the session's changes. Fixes applied + verified (8/8 
 **ABI ratification (Law 1):** the 5 syscalls added this session — `TryRecv` (7), `NetTx` (310), `NetRx` (311), `StateStash` (410), `StateRestore` (411) — were added to `libs/api/` without the mandated 2× confirmation. Surfaced to the user, who **ratified them as-is** (additive, backward-compatible; network + hot-migration depend on them). `syscall_tests.rs` covers the new discriminants.
 
 **Deferred (documented, not blocking v1.0):** `send_frame` busy-waits for TX completion (a stalled NIC would block the net cell in-syscall — QEMU completes immediately); pre-existing "Phase NN" comments in unchanged code; full live cell-swap orchestration.
+
+### Session 11 — argv transport + Lua-eval honesty correction (2026-05-30)
+**Trigger:** "tiếp tục" (opened Phase 10 / Lua). Implemented argv passing so the
+shell can hand a command line to spawned cells: `ostd::sys_set_spawn_args` /
+`sys_spawn_args` over a reserved state-stash slot; shell forwards parsed args.
+The transport is verified working (Lua received + parsed `-e print(31337)`).
+
+**Honest correction (important):** wiring `lua -e` exposed that executing ANY
+Lua chunk **faults the kernel** (store page fault at 0x8 — null-pointer deref
+during chunk execution, suspected picolibc sprintf/reentrancy globals never
+initialised because cells enter Rust `main` directly, skipping C-runtime init).
+The runtime "verification" in Sessions 6–9 only asserted the **startup banner**,
+never an actual eval — so this was masked.
+
+- **Phase 10 (Lua)** → downgraded `complete` → **partial**: C binding builds,
+  links, opens libs, prints banner; **code execution is broken** (C-runtime
+  init). The `lua -e` eval path was reverted so it can't panic the kernel.
+- **Phase 18 (runtimes)** → downgraded `complete` → **partial**: both Lua and
+  MicroPython load and print banners, but neither is verified to **execute**
+  a script/REPL line (the banner tests don't exercise eval; MicroPython's
+  exec path is likewise unverified and may share the C-runtime-init gap).
+
+**Real remaining work (v1.x):** initialise the C runtime for cc-compiled cells
+(picolibc `_impure_ptr`/locale, `__libc_init_array`) so Lua/MicroPython can run
+code; then wire `lua -e` / `python -c` argv evaluation on the (working) transport.
+
+**Status:** integration suite still **8/8 green** — but those 8 verify boot,
+FS mount, shell input, runtime *load*, DHCP, GPU, and state-stash; they do NOT
+verify script execution. ~21 of 23 phases are genuinely functional; Lua/Python
+*code execution* (10, 18) is the honest outstanding gap.
 
 **Known limitation surfaced:** `sys_spawn_from_path` does not pass argv, so `lua -e`/`python -c` one-liners can't run yet (argv passing = future work).
 
