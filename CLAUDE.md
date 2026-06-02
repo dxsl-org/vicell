@@ -65,18 +65,18 @@
 
 | Task Area | Read First |
 |-----------|------------|
-| **Fork code from other projects** | `docs/00-fork.md` |
-| **Cellular philosophy & Linker** | `docs/01-core.md` |
-| **Memory (SAS, HHDM, Registry)** | `docs/02-memory.md` |
-| **Async safety & Owned Buffers** | `docs/03-runtime.md` |
-| **Multi-arch HAL (RV32/64/128)** | `docs/04-hardware.md` |
-| **Native/WASM/VM applications** | `docs/05-application.md` |
-| **Graphics & Compositor** | `docs/06-graphics.md` |
-| **Network stack** | `docs/07-networking.md` |
-| **Power management** | `docs/08-power.md` |
-| **Filesystem (VFS)** | `docs/09-vfs.md` |
-| **Testing strategy** | `docs/10-testing.md` |
-| **Shell** | `docs/11-shell.md` |
+| **Fork code from other projects** | `docs/specs/00-fork.md` |
+| **Cellular philosophy & Linker** | `docs/specs/01-core.md` |
+| **Memory (SAS, HHDM, Registry)** | `docs/specs/02-memory.md` |
+| **Async safety & Owned Buffers** | `docs/specs/03-runtime.md` |
+| **Multi-arch HAL (RV32/64/128)** | `docs/specs/04-hardware.md` |
+| **Native/WASM/VM applications** | `docs/specs/05-application.md` |
+| **Graphics & Compositor** | `docs/specs/06-graphics.md` |
+| **Network stack** | `docs/specs/07-networking.md` |
+| **Power management** | `docs/specs/08-power.md` |
+| **Filesystem (VFS)** | `docs/specs/09-vfs.md` |
+| **Testing strategy** | `docs/specs/10-testing.md` |
+| **Shell** | `docs/specs/11-shell.md` |
 
 ---
 
@@ -144,14 +144,14 @@ impl Drop for ResourceHandle {
 
 ## 📖 Complete Documentation
 
-**Full Rules & Details**: [`docs/00-context.md`](./docs/00-context.md)
+**Full Rules & Details**: [`docs/specs/00-context.md`](./docs/specs/00-context.md)
 
 **For Developers**:
-- [ARCHITECTURE.md](./docs/ARCHITECTURE.md) - System design
-- [CODING_GUIDE.md](./docs/CODING_GUIDE.md) - How to write code
-- [PATTERNS.md](./docs/PATTERNS.md) - Common patterns
-- [API.md](./docs/API.md) - Complete API reference
-- [ONBOARDING.md](./docs/ONBOARDING.md) - Getting started
+- [system-architecture.md](./docs/system-architecture.md) - System design
+- [code-standards.md](./docs/code-standards.md) - How to write code
+- [patterns.md](./docs/patterns.md) - Common patterns
+- [api-reference.md](./docs/api-reference.md) - Complete API reference
+- [getting-started.md](./docs/getting-started.md) - Getting started
 
 ---
 
@@ -198,7 +198,7 @@ cargo build --release
 
 **Version**: 0.2.0
 **Last Updated**: 2026-05-21
-**Full Rules**: See [`docs/00-context.md`](./docs/00-context.md) for complete specifications
+**Full Rules**: See [`docs/specs/00-context.md`](./docs/specs/00-context.md) for complete specifications
 
 ---
 

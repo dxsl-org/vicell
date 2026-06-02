@@ -95,7 +95,7 @@ impl ViStateTransfer for MyCell {
 
 ## Triggering a Hot-Swap
 
-The `hotswap` admin tool (planned — `cells/sys-tools/src/bin/hotswap.rs`):
+The `hotswap` admin tool (`cells/sys-tools/src/hotswap.rs`) is implemented:
 
 ```
 ViOS> hotswap config /bin/config-v2
@@ -107,18 +107,17 @@ ViOS> hotswap config /bin/config-v2
 [hotswap] done in 12ms
 ```
 
-Until the tool is available, hot-swap can be triggered via the `HotSwap`
-syscall (id 400, planned) from any privileged cell.
+Alternatively, trigger via the `HotSwap` syscall (id 400) from any privileged cell.
 
 ---
 
 ## Implemented Cells
 
-| Cell | State Serialised | Schema Version |
-|------|-----------------|----------------|
-| Config | KV map | v1 |
-| Shell | History + aliases | v1 |
-| VFS | Open handle table | planned |
+| Cell | State Serialised | Schema Version | Status |
+|------|-----------------|----------------|--------|
+| Config | KV map | v1 | ✅ Verified |
+| Shell | History + aliases | v1 | ✅ Verified |
+| VFS | Open handle table | v1 | ✅ Partial (handle serialization) |
 
 ---
 
@@ -154,6 +153,8 @@ let cap = table.alloc_with_lease(owner, resource, perms, now + 10_000_000);
 |------|---------|
 | `libs/api/src/hotswap.rs` | `ViStateTransfer` trait definition |
 | `kernel/src/cell/cap_registry.rs` | Grant depth + lease expiry enforcement |
+| `kernel/src/cell/hotswap.rs` | HotSwap orchestrator (5-step protocol) |
 | `cells/services/config/src/main.rs` | Config KV state transfer impl |
+| `cells/services/vfs/src/state_transfer.rs` | VFS handle table state transfer |
 | `cells/apps/shell/src/state_transfer.rs` | Shell history + alias state transfer |
-| `kernel/src/cell/hotswap.rs` | Planned: HotSwap orchestrator (Phase 20.5) |
+| `cells/sys-tools/src/hotswap.rs` | HotSwap CLI tool |

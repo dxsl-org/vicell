@@ -110,9 +110,29 @@
 
 ---
 
+## [2026-06-03] Status Update — Phases 10, 14, 15, 16, 18, 20 Verified (0.2.1-dev)
+
+**Verification**:
+- Phase 10 (External ELF Loading): ✅ `spawn_from_path` verified, shell/config/vfs load from `/bin/`
+- Phase 14 (Keyboard): ✅ Multi-key input, no deadlock, history + arrow keys working
+- Phase 15 (Network): ✅ DHCP verified (10.0.2.15 assignment), data-path stubs (CONNECT/SEND/RECV return 0xFF)
+- Phase 16 (Compositor): ✅ Basic framebuffer, GPU opt-in (setup_framebuffer gates integration)
+- Phase 18 (MicroPython): ✅ Runtime REPL verified, 256KB heap, VFS I/O FFI working
+- Phase 20 (HotSwap): ✅ 5-step orchestrator verified, shell/config/vfs hot-swap tested, state transfer working
+
+**Documentation Updates**:
+- Updated all docs to reflect v0.2.1-dev status
+- Corrected HAL status: RV64 full, AArch64 + x86_64 full (Ring-3 smoke), RV32 + AArch32 stubs
+- Updated kernel LOC: ~8,700 (from ~5,300)
+- Codebase total: ~21,473 LOC
+- MicroPython marked as verified (not "planned")
+- HotSwap marked as implemented (not "planned")
+
+---
+
 ## [2026-05-29] Phases 11–23 — Major Feature Wave (0.2.1-dev)
 
-**Changes** (key deliverables across all 23 phases):
+**Changes** (key deliverables across all phases):
 
 ### Libraries / API
 - `libs/api/src/input.rs` — `InputEvent`, `KeyEvent`, `KeySym`, `Modifiers`, `MouseButton` types

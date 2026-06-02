@@ -3,8 +3,8 @@
 **Project**: ViOS (Jarvis Hybrid OS)
 **Version**: 0.2.1-dev (Mycelium Era)
 **Language**: Rust (nightly, `no_std`)
-**Crates**: 35 workspace members
-**Last Updated**: 2026-05-29
+**Crates**: ~40 active workspace members
+**Last Updated**: 2026-06-03
 
 ---
 
@@ -12,13 +12,13 @@
 
 | Area | Crates | Key Highlights |
 |------|--------|---------------|
-| Kernel | 1 | ~8 500 LOC; HotSwap, scatter/gather IPC, lease caps |
-| HAL | 10 | RV64 full, AArch64 + x86_64 + RV32 + AArch32 implemented |
+| Kernel | 1 | ~8,700 LOC; HotSwap, scatter/gather IPC, lease caps |
+| HAL | 10 | RV64 full, AArch64 + x86_64 full (Ring-3 smoke), RV32 + AArch32 stubs |
 | Libraries | 3 | `types`, `api` (display/input/hotswap APIs), `ostd` (repl, gpu, hotswap wrappers) |
 | Apps | 8 | shell (parser+executor+aliases+jobs), bench, sys-tools, net-tools, utils |
 | Drivers | 6 | disk, gpu, input, net (VirtIO NIC), serial, wasm |
 | Services | 6 | vfs (RamFS+IPC), compositor (30 FPS), net (smoltcp+DHCP), input, config, power |
-| Runtimes | 1 | Lua 5.4 (multi-line REPL, VFS I/O FFI, ViStateTransfer) |
+| Runtimes | 2 | Lua 5.4 (verified), MicroPython 1.24.1 (verified) |
 
 ---
 
@@ -119,11 +119,15 @@ vios/
 │   ├── config/             KV store + ViStateTransfer (schema v1)
 │   └── power/              Power management stub
 │
-├── cells/runtimes/ (1 crate)
-│   └── lua/                Lua 5.4 REPL (multi-line, history, VFS I/O FFI, ViStateTransfer)
-│       ├── src/ffi.rs      Lua C API bindings
-│       ├── src/bindings_io.rs  vios_io_open/read/close, vios_os_execute
-│       └── src/repl_session.rs Multi-line REPL + <eof> continuation detection
+├── cells/runtimes/ (2 crates)
+│   ├── lua/                Lua 5.4 REPL (multi-line, history, VFS I/O FFI, ViStateTransfer)
+│   │   ├── src/ffi.rs      Lua C API bindings
+│   │   ├── src/bindings_io.rs  vios_io_open/read/close, vios_os_execute
+│   │   └── src/repl_session.rs Multi-line REPL + <eof> continuation detection
+│   └── micropython/        MicroPython 1.24.1 REPL (256KB heap, VFS I/O, ViStateTransfer)
+│       ├── src/ffi.rs      MicroPython C API bindings
+│       ├── src/builtins.rs sys, os, math, json modules
+│       └── src/repl.rs     Interactive REPL session
 │
 ├── tests/integration/      QEMU-driven test stubs (QemuRunner harness)
 │   ├── harness.rs          Boot QEMU, inject input, grep serial output
@@ -143,8 +147,9 @@ vios/
 └── docs/
     ├── vfs-api.md, input-api.md, display-api.md, network-api.md
     ├── hotswap-guide.md, scripting-guide.md, performance-report.md
-    ├── ROADMAP.md, FAQ.md, ONBOARDING.md, CONTRIBUTING.md
-    └── performance-history-chart.html  Chart.js benchmark timeline
+    ├── README.md, faq.md, getting-started.md
+    ├── project-roadmap.md, project-changelog.md, project-overview-pdr.md
+    └── specs/  (00-context … 11-shell — design specifications)
 
 ```
 

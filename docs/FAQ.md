@@ -98,7 +98,7 @@ Email the maintainers at the address in `SECURITY.md` (root of repo).  We follow
 
 1. **GitHub Discussions** — Q&A category for questions; Show-and-Tell for projects
 2. **GitHub Issues** — bug reports and feature requests only
-3. **`docs/ONBOARDING.md`** — step-by-step setup + common errors table
+3. **`docs/getting-started.md`** — step-by-step setup + common errors table
 4. **Code comments** — public items have rustdoc; start with `kernel/src/main.rs`
 
 Please search existing issues and discussions before opening a new one.

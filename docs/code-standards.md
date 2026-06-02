@@ -3,7 +3,7 @@
 **Scope**: Rust code across kernel, HAL, libraries, and Cells  
 **Edition**: 2021  
 **Nightly**: Required for `no_std` bare-metal features  
-**Last Updated**: 2026-05-28
+**Last Updated**: 2026-06-03
 
 ---
 
@@ -292,7 +292,7 @@ pub async fn open(path: &str, flags: u32) -> ViResult<FileHandle> { }
 - Document all public traits, functions, types
 - Include # Arguments, # Returns, # Errors sections
 - Add examples for complex logic
-- Link to related specs: `See docs/03-runtime.md for async safety rules.`
+- Link to related specs: `See docs/specs/03-runtime.md for async safety rules.`
 
 ### Safety Comments
 
@@ -486,7 +486,7 @@ pub trait ViAsyncFileSystem {
 ## See Also
 
 - **CLAUDE.md** — Quick agent reference
-- **CODING_GUIDE.md** — Deep patterns & examples
-- **ARCHITECTURE.md** — System design
-- **API.md** — Full trait reference
-- Specs: **docs/0X-*.md** — Feature specifications
+- **patterns.md** — Deep patterns & examples
+- **system-architecture.md** — System design
+- **api-reference.md** — Full trait reference
+- Specs: **docs/specs/0X-*.md** — Feature specifications

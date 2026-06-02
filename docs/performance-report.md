@@ -96,5 +96,5 @@ ViOS> /bin/bench
 4. Define a PDR target constant and `meets_target()` check
 5. Update this document with the new metric row
 
-See `docs/10-testing.md` for the integration test framework that complements these
+See `docs/specs/10-testing.md` for the integration test framework that complements these
 benchmarks.

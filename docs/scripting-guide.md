@@ -1,6 +1,6 @@
 # ViOS Scripting Guide
 
-ViOS supports two embedded scripting runtimes: **Lua 5.4** and (planned) **MicroPython 1.24.1**.
+ViOS supports two embedded scripting runtimes: **Lua 5.4** (verified) and **MicroPython 1.24.1** (verified).
 Both run as native Cells with direct access to the VFS and IPC APIs.
 
 ---
@@ -116,19 +116,39 @@ end
 
 ---
 
-## MicroPython 1.24.1 (Planned — Phase 18 FAT32+ milestone)
+## MicroPython 1.24.1 (Verified)
 
-MicroPython will be available once the VFS write path (Phase 13 FAT32) stabilises.
-The runtime will ship as `/bin/python` with an interactive REPL and a script runner.
+MicroPython is available as `/bin/python` with an interactive REPL and script runner.
+The runtime includes a 256 KB heap and FFI bindings to the VFS and IPC APIs.
+
+### Starting the REPL
+
+```
+ViOS> python
+MicroPython v1.24.1 on ViOS  (Ctrl+D to exit)
+>>> 
+```
+
+### Example Script
 
 ```python
-# Example (planned)
 >>> import os
 >>> os.listdir("/bin")
 ['shell', 'lua', 'python', 'cat', 'ls', ...]
 >>> f = open("/readme.txt")
 >>> print(f.read())
 Welcome to ViOS!
+```
+
+### Supported Modules
+
+Standard library modules: `sys`, `os`, `math`, `random`, `json`, `struct`, `hashlib`.
+File I/O works via VFS syscalls (read-only for now).
+
+### Running Python Scripts
+
+```
+ViOS> exec /bin/python /scripts/hello.py
 ```
 
 ---
@@ -158,14 +178,15 @@ disk.img
 
 ---
 
-## Known Limitations (v1.0)
+## Known Limitations (v0.2.1-dev)
 
 | Feature | Status |
 |---------|--------|
-| `io.open` read | ✅ Works (VFS IPC) |
-| `io.open` write | 🚧 Phase 13 FAT32 |
-| `os.execute` | Stub (prints command only) |
-| `require` / `package.path` | Stub (no VFS directory scan yet) |
-| Arg passing to scripts | 🚧 Phase 17a |
-| History persistence | 🚧 Phase 17a (VFS write) |
-| MicroPython runtime | 🚧 Phase 18 (MicroPython vendoring) |
+| **Lua** `io.open` read | ✅ Works (VFS IPC) |
+| **Lua** `io.open` write | 🚧 Phase 13 FAT32 |
+| **Lua** `os.execute` | Calls `sys_spawn_from_path` (verified) |
+| **MicroPython** `open` read | ✅ Works (VFS IPC) |
+| **MicroPython** `open` write | 🚧 Phase 13 FAT32 |
+| **Both** arg passing to scripts | 🚧 Phase 17a |
+| **Both** history persistence | 🚧 Phase 17a (VFS write) |
+| **Lua** `require` / `package.path` | Stub (no VFS directory scan yet) |

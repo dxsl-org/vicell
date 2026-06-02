@@ -850,9 +850,9 @@ pub fn open_v2(&self, path: &str, mode: OpenMode) -> ViResult<Box<dyn ViFile>>;
 
 ## Related Documentation
 
-- [Architecture](./ARCHITECTURE.md) - System design and components
-- [Coding Guide](./CODING_GUIDE.md) - How to implement APIs
-- [Services Documentation](./SERVICES.md) - System services using these APIs
+- [Architecture](./system-architecture.md) - System design and components
+- [Coding Guide](./code-standards.md) - How to implement APIs
+- [Patterns](./patterns.md) - Common code patterns
 
 ---
 

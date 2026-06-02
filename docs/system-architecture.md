@@ -2,8 +2,8 @@
 
 **Audience**: Developers new to ViOS  
 **Level**: High-level (conceptual + key components)  
-**Version**: 0.2.0 (Mycelium Era)  
-**Last Updated**: 2026-05-29
+**Version**: 0.2.1-dev (Mycelium Era)  
+**Last Updated**: 2026-06-03
 
 ---
 
@@ -26,9 +26,9 @@ ViOS is **NOT** a traditional Linux-style OS. It uses:
 ┌─────────────────────────────────────────┐
 │  Cells (Applications, Drivers, Services) │  Apps: hello, shell, lua, micropython
 ├──────────────────────────────────────────┤  Drivers: disk, gpu, input, net, serial
-│  Kernel (Nano Kernel, ~5300 LOC)        │  Services: vfs, config, compositor, net, power
+│  Kernel (Nano Kernel, ~8,700 LOC)       │  Services: vfs, config, compositor, net, power
 ├──────────────────────────────────────────┤
-│  HAL (Hardware Abstraction Layer)        │  Arch: RISC-V64 ✅, ARM AArch64 🚧, x86_64 🚧
+│  HAL (Hardware Abstraction Layer)        │  RV64 ✅, AArch64 ✅ (Ring-3), x86_64 ✅ (Ring-3)
 ├──────────────────────────────────────────┤
 │  Hardware (QEMU, Bare-metal)             │  Memory, CPU, Devices
 └─────────────────────────────────────────┘
@@ -36,7 +36,7 @@ ViOS is **NOT** a traditional Linux-style OS. It uses:
 
 ---
 
-## Kernel (nano-kernel, ~5300 LOC)
+## Kernel (nano-kernel, ~8,700 LOC)
 
 The kernel is **tiny** by design, handling only:
 
@@ -79,7 +79,7 @@ Kernel Space: (virt addr 0x8020_0000+)
 └─ Page Tables: per-task
 ```
 
-### 3. **Task Scheduler** (`kernel/src/task.rs`, 31,986 LOC)
+### 3. **Task Scheduler** (`kernel/src/task/scheduler.rs`)
 
 **Round-Robin with Time Slices**:
 - All Cells scheduled fairly
@@ -184,7 +184,7 @@ pub trait InterruptController {
 
 ### Implementations
 
-**RISC-V 64-bit (RV64) — FULLY IMPLEMENTED**
+**RISC-V 64-bit (RV64) — FULLY IMPLEMENTED** ✅
 - `hal/arch/riscv/src/rv64/context.rs` — Trap frame, context switch
 - `hal/arch/riscv/src/rv64/paging.rs` — SV39 page table walker
 - `hal/arch/riscv/src/rv64/trap.rs` — Exception/interrupt handler
@@ -193,8 +193,9 @@ pub trait InterruptController {
 - `hal/arch/riscv/src/common/sbi.rs` — SBI calls (shutdown, time)
 - `hal/arch/riscv/src/common/timer.rs` — SBI timer (scheduling)
 
-**ARM AArch64 — STUBS** (52 LOC)  
-**x86_64 — STUBS** (46 LOC)
+**ARM AArch64 — FULLY IMPLEMENTED** ✅ (Ring-3 smoke testing in QEMU)  
+**x86_64 — FULLY IMPLEMENTED** ✅ (Ring-3 smoke testing in QEMU)  
+**RV32, AArch32 — TRAIT STUBS** (trait impls only, no boot code)
 
 ### Multi-Architecture Strategy
 
@@ -356,30 +357,32 @@ A **Cell** is an isolated execution context (like a process) but:
 
 **Applications**: Shell, hello world, Lua/MicroPython runtimes
 ```
-cells/apps/shell/     — Interactive REPL
+cells/apps/shell/     — Interactive REPL (parser, executor, aliases, jobs, history)
 cells/apps/init/      — Bootstrap (spawns vfs, config, shell)
 cells/apps/hello/     — Test app
 ```
 
-**Drivers**: Hardware device drivers (mostly stubs)
+**Drivers**: Hardware device drivers
 ```
-cells/drivers/disk/   — RamDisk + VirtIO block (IMPLEMENTED)
-cells/drivers/gpu/    — VirtIO GPU (STUB)
-cells/drivers/input/  — Keyboard/mouse (STUB)
-cells/drivers/net/    — NIC driver (STUB)
+cells/drivers/disk/   — VirtIO block passthrough (✅ working)
+cells/drivers/gpu/    — VirtIO GPU (opt-in framebuffer)
+cells/drivers/input/  — VirtIO input passthrough
+cells/drivers/net/    — VirtIO NIC wrapper
 ```
 
 **Services**: System services with long-lived state
 ```
-cells/services/vfs/   — Virtual filesystem, /bin/, /dev/ (IMPLEMENTED)
-cells/services/config/— Key-value store (IMPLEMENTED)
-cells/services/compositor/ — Graphics server (STUB)
+cells/services/vfs/   — RamFS + FAT32 (✅ read working)
+cells/services/config/— Key-value store (✅ ViStateTransfer impl)
+cells/services/compositor/ — Software blending + z-order
+cells/services/input/ — Input event routing
+cells/services/net/   — smoltcp TCP/IP + DHCP (✅ DHCP working)
 ```
 
 **Runtimes**: VMs/interpreters for scripting
 ```
-cells/runtimes/lua/       — Lua 5.4 via FFI
-cells/runtimes/micropython/ — MicroPython 1.24.1 via FFI
+cells/runtimes/lua/       — Lua 5.4 via FFI (✅ REPL verified)
+cells/runtimes/micropython/ — MicroPython 1.24.1 via FFI (✅ REPL verified)
 ```
 
 ### Cell Lifecycle
@@ -548,39 +551,36 @@ Physical RAM: 0x8000_0000–0x8800_0000 (default: 128 MB in QEMU)
 
 ---
 
-## Current Status (2026-05-29)
+## Current Status (2026-06-03)
 
-### ✅ Implemented (Phase 0 + Phases 01, 02, 05)
-- RISC-V 64-bit (RV64) HAL with SV39 paging
-- Nano kernel (~5300 LOC) with round-robin scheduler
-- 10 core syscalls (Send, Recv, Call, Reply, Spawn, etc.)
-- Frame allocator (bitmap) and virtual memory (SV39)
-- ELF loader with relocation support
-- VFS service (RamFS) with /bin/ embedded binaries
-- Config service (KV store)
-- Interactive shell with echo, cat, ls, pwd, cd
-- Lua 5.4 + MicroPython 1.24.1 runtime bindings
-- **Workspace consolidated** with 0 cargo warnings (Phase 01)
-- **CI/CD pipeline** with 4-job matrix + weekly security scans (Phase 02)
-- **VirtIO IRQ dispatch pattern** for block and input devices with proper acknowledgment (Phase 05)
-- **Keyboard input** reliably reading multiple consecutive keystrokes; no deadlock on subsequent input (Phase 05)
+### ✅ Implemented (Phases 01, 02, 05, 10, 14, 15, 16, 18, 20)
+- **RV64, AArch64, x86_64** HAL with paging (SV39/4K/4K respectively)
+- **Nano kernel** (~8,700 LOC) with round-robin scheduler
+- **48 syscall variants** (IPC, memory, task, FS, GPU, network, state)
+- Frame allocator (bitmap) and virtual memory
+- ELF loader with PIE relocation support
+- **VFS service** (RamFS + FAT32 read)
+- **Config service** (KV store with ViStateTransfer)
+- **Interactive shell** with pipes, redirection, background jobs, history, aliases
+- **Lua 5.4** runtime (multi-line REPL, VFS I/O FFI, ViStateTransfer) — verified
+- **MicroPython 1.24.1** runtime (REPL, 256KB heap) — verified
+- **Keyboard input** (VirtIO, multi-key support, no deadlock)
+- **Network** (smoltcp, DHCP verified, data-path stub)
+- **GPU framebuffer** (opt-in, basic compositor)
+- **HotSwap orchestrator** (5-step live Cell replacement, kernel + shell + config + vfs verified)
+- **Workspace consolidated** with 0 cargo warnings
+- **CI/CD pipeline** with architecture validation (10/10 score)
 
-### 🚧 In Progress (Phase 04 - Partial)
-- VirtIO block device (root cause fixed: MMIO explicit identity-mapping added; read/write testing phase)
+### 🚧 In Progress / Partial
+- **VFS write** (FAT32 integration in progress)
+- **Network data-path** (CONNECT/SEND/RECV/LISTEN opcodes return 0xFF stubs)
+- **KASLR** (not implemented)
 
-### ⏳ Planned (Phases 03, 06–23)
-- Ring 3 user-space execution (Phase 03)
-- External ELF loading from `/bin/` (Phase 06)
-- ARM AArch64 HAL full implementation (Phase 08)
-- x86_64 HAL full implementation (Phase 09)
-- RISC-V 32-bit (RV32) HAL (Phase 21)
-- GPU/input/net/serial driver Cells
-- Compositor, network, power, input services (Phases 13–16)
-- Complete VFS, input, network service implementations
-- Enhanced shell with piping, redirection, scripting (Phase 17a)
-- Standard utilities (grep, sed, awk, etc.) (Phase 17b)
-- ViVmRuntime integration for hot migration (Phase 20)
-- Advanced IPC patterns (leasing, grant chains) (Phase 20)
+### ⏳ Planned (Later phases)
+- Per-Cell SATP (address space isolation)
+- Audit logging
+- Ed25519 signing (spec only)
+- Additional architecture ports
 
 ---
 
@@ -593,7 +593,7 @@ Physical RAM: 0x8000_0000–0x8800_0000 (default: 128 MB in QEMU)
 | Round-Robin Scheduler | Simple, fair, predictable for embedded real-time systems |
 | Capability-Based Access | Fine-grained control, no global permissions |
 | Owned Buffers in Async | Deterministic cleanup in SAS (no process teardown) |
-| Nano Kernel (~5300 LOC) | Keep TCB, minimize trusted code, move features to Cells |
+| Nano Kernel (~8,700 LOC) | Keep TCB, minimize trusted code, move features to Cells |
 | Trait-Based HAL | Multi-architecture support without code duplication |
 | No mod.rs | Clearer module boundaries, IDE-friendly |
 
@@ -602,9 +602,8 @@ Physical RAM: 0x8000_0000–0x8800_0000 (default: 128 MB in QEMU)
 ## See Also
 
 - **CLAUDE.md** — 8 Coding Laws & quick reference
-- **ARCHITECTURE.md** — Deep system design (32 KB)
-- **CODING_GUIDE.md** — Patterns & implementation (24 KB)
-- **API.md** — Full trait reference (22 KB)
+- **api-reference.md** — Full trait & syscall reference
+- **patterns.md** — Common code patterns
 - **codebase-summary.md** — File structure & LOC counts
 - **code-standards.md** — Code style & naming
-- **Specs**: `docs/0X-*.md` — Detailed specifications
+- **Specs**: `docs/specs/0X-*.md` — Detailed subsystem specifications

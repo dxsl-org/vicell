@@ -71,28 +71,28 @@ v0.2.0 Mycelium Era
 
 | Document | Level | Topic |
 |----------|-------|-------|
-| [ARCHITECTURE.md](./docs/ARCHITECTURE.md) | Advanced | Complete system design |
-| [CODING_GUIDE.md](./docs/CODING_GUIDE.md) | Intermediate | Patterns & best practices |
-| [API.md](./docs/API.md) | Reference | Full trait reference |
-| [ONBOARDING.md](./docs/ONBOARDING.md) | Beginner | Getting started guide |
-| [PATTERNS.md](./docs/PATTERNS.md) | Intermediate | Common code patterns |
+| [getting-started.md](./docs/getting-started.md) | Beginner | Setup, build, first contribution |
+| [api-reference.md](./docs/api-reference.md) | Reference | Full trait & syscall reference |
+| [patterns.md](./docs/patterns.md) | Intermediate | Common code patterns |
+| [security-model.md](./docs/security-model.md) | Advanced | STRIDE model & known limitations |
+| [faq.md](./docs/faq.md) | All levels | Architecture questions answered |
 
-**Specifications** (read before coding):
+**Design Specifications** (read before coding):
 
 | Doc | Topic |
 |-----|-------|
-| [00-context.md](./docs/00-context.md) | Prime directive & overview |
-| [01-core.md](./docs/01-core.md) | Cellular philosophy & linker |
-| [02-memory.md](./docs/02-memory.md) | SAS, HHDM, memory registry |
-| [03-runtime.md](./docs/03-runtime.md) | Async safety & owned buffers |
-| [04-hardware.md](./docs/04-hardware.md) | Multi-arch HAL (RV, ARM, x86) |
-| [05-application.md](./docs/05-application.md) | Native/WASM/VM applications |
-| [06-graphics.md](./docs/06-graphics.md) | Graphics & compositor |
-| [07-networking.md](./docs/07-networking.md) | Network stack |
-| [08-power.md](./docs/08-power.md) | Power management |
-| [09-vfs.md](./docs/09-vfs.md) | Filesystem (VFS) |
-| [10-testing.md](./docs/10-testing.md) | Testing strategy |
-| [11-shell.md](./docs/11-shell.md) | Shell design |
+| [specs/00-context.md](./docs/specs/00-context.md) | Prime directive & overview |
+| [specs/01-core.md](./docs/specs/01-core.md) | Cellular philosophy & linker |
+| [specs/02-memory.md](./docs/specs/02-memory.md) | SAS, HHDM, memory registry |
+| [specs/03-runtime.md](./docs/specs/03-runtime.md) | Async safety & owned buffers |
+| [specs/04-hardware.md](./docs/specs/04-hardware.md) | Multi-arch HAL (RV, ARM, x86) |
+| [specs/05-application.md](./docs/specs/05-application.md) | Native/WASM/VM applications |
+| [specs/06-graphics.md](./docs/specs/06-graphics.md) | Graphics & compositor |
+| [specs/07-networking.md](./docs/specs/07-networking.md) | Network stack |
+| [specs/08-power.md](./docs/specs/08-power.md) | Power management |
+| [specs/09-vfs.md](./docs/specs/09-vfs.md) | Filesystem (VFS) |
+| [specs/10-testing.md](./docs/specs/10-testing.md) | Testing strategy |
+| [specs/11-shell.md](./docs/specs/11-shell.md) | Shell design |
 
 ---
 
@@ -100,7 +100,7 @@ v0.2.0 Mycelium Era
 
 ```
 vios/
-├── kernel/             Nano kernel (~5300 LOC)
+├── kernel/             Nano kernel (~8,700 LOC)
 ├── hal/                Hardware Abstraction Layer
 │   ├── core/           Facade
 │   ├── traits/         Pure trait definitions
@@ -196,7 +196,7 @@ ViOS is open-source (see [LICENSE](./LICENSE) when available).
 
 **Before coding:**
 1. Read [CLAUDE.md](./CLAUDE.md) — auto-loaded guidelines
-2. Read relevant spec in `docs/0X-*.md`
+2. Read relevant spec in `docs/specs/0X-*.md`
 3. Read [code-standards.md](./docs/code-standards.md) — coding rules
 4. Create a branch: `git checkout -b feature/my-feature`
 
@@ -236,10 +236,10 @@ cargo test --all --release
 **New contributor?**
 
 1. Run `./scripts/dev-setup.sh` (Linux/macOS) or `.\scripts\dev-setup.ps1` (Windows)
-2. Read [docs/ONBOARDING.md](docs/ONBOARDING.md) — setup guide + common errors
+2. Read [docs/getting-started.md](docs/getting-started.md) — setup guide + common errors
 3. Read [CONTRIBUTING.md](CONTRIBUTING.md) — step-by-step first PR walkthrough
-4. Browse [docs/FAQ.md](docs/FAQ.md) — architecture questions answered
-5. Check [docs/ROADMAP.md](docs/ROADMAP.md) — where the project is headed
+4. Browse [docs/faq.md](docs/faq.md) — architecture questions answered
+5. Check [docs/project-roadmap.md](docs/project-roadmap.md) — where the project is headed
 6. Review [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) — community standards
 
 We aim to respond to PRs and new issues within **3 business days**.
