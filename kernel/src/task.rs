@@ -667,6 +667,16 @@ pub fn ipc_recv(
                 core::ptr::copy_nonoverlapping(app_src, app_dst, copy_len);
             }
 
+            // Wake the sender so it can proceed (call sys_recv for the reply,
+            // or continue execution if it didn't need a reply).
+            // Without this, the sender stays blocked in Sending state forever
+            // after we copy its message — the IPC protocol has no other
+            // mechanism to unblock it unless ipc_reply is used.
+            if let Some(sender_task) = sched.tasks.get_mut(&sender_id) {
+                sender_task.state = TaskState::Ready;
+                sched.ready_queue.push_back(sender_id);
+            }
+
             if let Some(caller) = sched.tasks.get_mut(&caller_id) {
                 caller.current_caller = Some(sender_id);
             }
@@ -730,6 +740,15 @@ pub fn ipc_try_recv(
             let copy_len = core::cmp::min(src_len, buf_len);
             unsafe {
                 core::ptr::copy_nonoverlapping(app_src, app_dst, copy_len);
+            }
+
+            // Wake the sender so it can call sys_recv to receive our reply.
+            // Without this, the sender stays in Sending state — when we call
+            // sys_send(sender, reply) the sender is not in Recv state and the
+            // reply send blocks, creating a deadlock.
+            if let Some(sender_task) = sched.tasks.get_mut(&sender_id) {
+                sender_task.state = TaskState::Ready;
+                sched.ready_queue.push_back(sender_id);
             }
 
             if let Some(caller) = sched.tasks.get_mut(&caller_id) {

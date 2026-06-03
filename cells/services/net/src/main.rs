@@ -132,9 +132,6 @@ pub fn main() {
         }
 
         // ── Receive one IPC message (non-blocking) ────────────────────────────
-        // Must NOT block: the loop has to keep pumping RX frames and polling
-        // DHCP. A blocking recv would park the cell forever (no IPC arrives
-        // during DHCP) and the lease would never complete.
         match sys_try_recv(0, &mut buf) {
             SyscallResult::Ok(sender) if sender > 0 => {
                 handle_ipc(

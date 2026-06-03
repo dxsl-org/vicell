@@ -645,15 +645,18 @@ pub fn handle_syscall(caller_id: usize, syscall: Syscall) -> SyscallResult {
                     core::slice::from_raw_parts(name_ptr as *const u8, name_len)
                 ).map_err(|_| SyscallError::InvalidInput)?
             };
-            // Hardcoded spawn-order lookup (init=1, then init's sys_spawn_from_path calls
-            // in sequence). Replace with a dynamic registry in v0.3.
+            // Hardcoded spawn-order lookup. The kernel spawns init (ID 1) and a
+            // user_hello smoke-test task (ID 2) before the init binary runs.
+            // Init then spawns in sequence: vfs=3, config=4, input=5, net=6,
+            // compositor=7, shell=8. Verified from QEMU serial log.
+            // Replace with a dynamic registry in v0.3.
             let id: usize = match name {
-                "vfs"         => 2,
-                "config"      => 3,
-                "input"       => 4,
-                "net"         => 5,
-                "compositor"  => 6,
-                "shell"       => 7,
+                "vfs"        => 3,
+                "config"     => 4,
+                "input"      => 5,
+                "net"        => 6,
+                "compositor" => 7,
+                "shell"      => 8,
                 _ => return Err(SyscallError::FileNotFound),
             };
             Ok(id)

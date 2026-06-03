@@ -1,14 +1,16 @@
 #![no_std]
 #![no_main]
-extern crate alloc;
 extern crate ostd;
 
-use alloc::vec::Vec;
 use ostd::io::{print, println};
 use ostd::syscall::{sys_recv, sys_send, sys_spawn_args, sys_yield, SyscallResult};
 
-/// Net service cell task ID — matches init's fourth sys_spawn_from_path call.
-const NET_ENDPOINT: usize = 5;
+/// Net service cell task ID.
+///
+/// The kernel spawns `init` (ID 1) and a `user_hello` smoke-test task (ID 2)
+/// before the init binary runs. Init then spawns: vfs=3, config=4, input=5,
+/// net=6, compositor=7, shell=8. Verified from QEMU serial log.
+const NET_ENDPOINT: usize = 6;
 
 /// IPC opcodes (mirrors cells/services/net/src/poll_driver.rs cell_opcodes).
 const SOCKET_TCP:   u8 = 0x10;
@@ -16,17 +18,22 @@ const CONNECT:      u8 = 0x12;
 const SEND_OP:      u8 = 0x13;
 const RECV_OP:      u8 = 0x14;
 const CLOSE:        u8 = 0x15;
-const SOCKET_STATE: u8 = 0x19; // Phase B opcode — Phase 1
+const SOCKET_STATE: u8 = 0x19; // Phase B opcode
+
+/// Maximum accumulated response size (stack-allocated, no heap required).
+///
+/// The SAS (Single Address Space) design means all cells share one VA region.
+/// Using `extern crate alloc` (ostd's 4 MB static heap) causes the BSS segment
+/// to overlap with other cells' already-mapped pages, producing instruction page
+/// faults. A fixed stack buffer avoids that 4 MB BSS entirely.
+///
+/// HTTP/1.0 test response is <50 bytes; 4096 bytes is ample headroom.
+const RESP_BUF: usize = 4096;
 
 /// curl http://IP[:PORT][/path]
 ///
-/// HTTP/1.0 GET client. Sends a minimal request, accumulates the response on
-/// the heap, and prints the status line + body to serial.
-///
-/// Limitation: response byte-count detection uses zero-scan (`rposition` on a
-/// zeroed buffer). This is reliable for ASCII HTTP (no embedded 0x00 bytes in
-/// headers or typical text bodies). Binary responses would be truncated at the
-/// first zero byte — a RECV2 opcode with explicit length is a future fix.
+/// HTTP/1.0 GET client. Accumulates up to RESP_BUF bytes of response on the
+/// stack and prints the status line + body.
 #[no_mangle]
 pub fn main() {
     // ── Parse argv ───────────────────────────────────────────────────────────
@@ -54,9 +61,7 @@ pub fn main() {
         None => { println("curl: invalid IPv4 host"); return; }
     };
 
-    // ── Guard: HTTP request must fit in the IPC payload budget (~391 bytes) ──
-    // Request = "GET <path> HTTP/1.0\r\nHost: <host>\r\nConnection: close\r\n\r\n"
-    // Fixed overhead = 4+11+6+2+19+2 = 44 bytes; add 9 for IPC header.
+    // ── Guard: HTTP request must fit in the IPC payload budget ───────────────
     let overhead = b"GET ".len() + b" HTTP/1.0\r\n".len()
         + b"Host: ".len() + b"\r\nConnection: close\r\n\r\n".len();
     if 9 + overhead + path.len() + host.len() > 400 {
@@ -107,10 +112,7 @@ pub fn main() {
     let send_len = pos;
     let request_len = send_len - 9;
 
-    // ── Retry SEND until smoltcp confirms bytes buffered (TCP must reach ──────
-    // Established first — SEND replies 0 while the handshake is in flight).
-    // SEND reply is a 4-byte LE count (set by the net cell); sys_recv fills the
-    // buffer, so u32::from_le_bytes(cnt) gives the real written count.
+    // ── Retry SEND until TCP reaches Established ──────────────────────────────
     for _ in 0..500 {
         sys_send(NET_ENDPOINT, &send_msg[..send_len]);
         let mut cnt = [0u8; 4];
@@ -124,37 +126,44 @@ pub fn main() {
         }
     }
 
-    // ── Accumulate HTTP response ─────────────────────────────────────────────
-    // sys_recv returns sender_id (not byte count). Zero the buffer each
-    // iteration and use rposition scan to find how many bytes were written.
-    let mut response: Vec<u8> = Vec::new();
+    // ── Accumulate HTTP response into fixed stack buffer ──────────────────────
+    // sys_recv returns sender_id (not byte count). Zero buffer each iteration
+    // and use rposition scan for data boundary (zero-scan, ASCII-safe).
+    //
+    // Fixed buffer avoids the 4 MB alloc BSS that conflicts with other cells'
+    // VA mappings in the shared SAS page table.
+    let mut response = [0u8; RESP_BUF];
+    let mut resp_len: usize = 0;
 
     let mut recv_msg = [0u8; 13];
     recv_msg[0] = RECV_OP;
     recv_msg[1..9].copy_from_slice(&cap_id.to_le_bytes());
-    recv_msg[9..13].copy_from_slice(&2048u32.to_le_bytes());
+    recv_msg[9..13].copy_from_slice(&512u32.to_le_bytes()); // 512B chunks
 
     for _ in 0..500 {
-        let mut buf = [0u8; 2048]; // zeroed each iteration — zero-scan relies on this
+        let mut buf = [0u8; 512]; // zeroed each iteration — zero-scan relies on this
         sys_send(NET_ENDPOINT, &recv_msg);
         match sys_recv(0, &mut buf) {
             SyscallResult::Ok(_) => {
                 let n = buf.iter().rposition(|&b| b != 0).map(|i| i + 1).unwrap_or(0);
                 if n > 0 {
-                    response.extend_from_slice(&buf[..n]);
+                    let copy = n.min(RESP_BUF - resp_len);
+                    response[resp_len..resp_len + copy].copy_from_slice(&buf[..copy]);
+                    resp_len += copy;
+                    if resp_len >= RESP_BUF { break; }
                 } else {
-                    // 0-byte RECV: query TCP state to distinguish "no data yet"
-                    // (Established) from "server closed" (CloseWait/Closed).
+                    // 0-byte RECV: check state to distinguish "no data yet" vs FIN.
                     let st = query_state(cap_id);
                     if st == 0x06 || st == 0x00 {
-                        // CloseWait or Closed: drain once more — data can be
-                        // buffered in smoltcp alongside the arriving FIN.
-                        let mut final_buf = [0u8; 2048];
+                        // CloseWait/Closed: drain one final RECV before exiting.
+                        let mut final_buf = [0u8; 512];
                         sys_send(NET_ENDPOINT, &recv_msg);
                         if let SyscallResult::Ok(_) = sys_recv(0, &mut final_buf) {
                             let fn_ = final_buf.iter()
                                 .rposition(|&b| b != 0).map(|i| i + 1).unwrap_or(0);
-                            if fn_ > 0 { response.extend_from_slice(&final_buf[..fn_]); }
+                            let copy = fn_.min(RESP_BUF - resp_len);
+                            response[resp_len..resp_len + copy].copy_from_slice(&final_buf[..copy]);
+                            resp_len += copy;
                         }
                         break;
                     }
@@ -166,19 +175,18 @@ pub fn main() {
     }
 
     // ── Print status line + body ─────────────────────────────────────────────
-    if let Some(header_end) = response.windows(4).position(|w| w == b"\r\n\r\n") {
-        // Status line = first line up to first \r.
-        let status_end = response.iter().position(|&b| b == b'\r').unwrap_or(header_end);
-        if let Ok(status) = core::str::from_utf8(&response[..status_end]) {
+    let resp = &response[..resp_len];
+    if let Some(header_end) = resp.windows(4).position(|w| w == b"\r\n\r\n") {
+        let status_end = resp.iter().position(|&b| b == b'\r').unwrap_or(header_end);
+        if let Ok(status) = core::str::from_utf8(&resp[..status_end]) {
             println(status);
         }
-        // Body = everything after the blank line.
-        let body = &response[header_end + 4..];
+        let body = &resp[header_end + 4..];
         if let Ok(s) = core::str::from_utf8(body) {
             print(s);
         }
-    } else if !response.is_empty() {
-        if let Ok(s) = core::str::from_utf8(&response) {
+    } else if resp_len > 0 {
+        if let Ok(s) = core::str::from_utf8(resp) {
             print(s);
         }
     } else {
@@ -197,7 +205,7 @@ fn query_state(cap_id: u64) -> u8 {
     let mut st = [0u8; 1];
     match sys_recv(0, &mut st) {
         SyscallResult::Ok(_) => st[0],
-        _ => 0x00, // treat error as Closed
+        _ => 0x00,
     }
 }
 
@@ -212,15 +220,11 @@ fn close_socket(cap_id: u64) {
 }
 
 /// Write `src` into `buf` at `pos`; returns new pos.
-///
-/// Caller must guarantee `pos + src.len() <= buf.len()` (enforced by the
-/// URL-length guard above before any call to `wb`).
 fn wb(buf: &mut [u8], pos: usize, src: &[u8]) -> usize {
     buf[pos..pos + src.len()].copy_from_slice(src);
     pos + src.len()
 }
 
-/// Parse `http://IP[:PORT][/path]` → `(host, port, path)`.
 fn parse_url(s: &str) -> Option<(&str, u16, &str)> {
     let rest = s.strip_prefix("http://")?;
     if rest.is_empty() { return None; }

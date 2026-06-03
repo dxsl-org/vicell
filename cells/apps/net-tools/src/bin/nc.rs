@@ -5,9 +5,12 @@ extern crate ostd;
 use ostd::io::println;
 use ostd::syscall::{sys_recv, sys_send, sys_spawn_args, sys_yield, SyscallResult};
 
-/// Net service cell task ID — matches init's fourth sys_spawn_from_path call:
-/// init=1, vfs=2, config=3, input=4, net=5.
-const NET_ENDPOINT: usize = 5;
+/// Net service cell task ID.
+///
+/// The kernel spawns `init` (ID 1) and a `user_hello` smoke-test task (ID 2)
+/// before the init binary runs. Init then spawns: vfs=3, config=4, input=5,
+/// net=6, compositor=7, shell=8. Verified from QEMU serial log.
+const NET_ENDPOINT: usize = 6;
 
 /// IPC opcodes for the net service (mirrors poll_driver::cell_opcodes).
 const SOCKET_TCP: u8 = 0x10;
