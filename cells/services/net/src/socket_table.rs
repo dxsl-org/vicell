@@ -6,7 +6,7 @@
 
 extern crate alloc;
 
-use alloc::collections::BTreeMap;
+use alloc::collections::{BTreeMap, BTreeSet};
 use smoltcp::iface::SocketHandle;
 use types::ViError;
 use crate::socket_state::SocketState;
@@ -22,6 +22,10 @@ pub struct SocketTable {
     /// Bound listen port per cap — needed so ACCEPT can renew the listener on
     /// the same port after the original socket transitions to Established.
     listen_ports: BTreeMap<u64, u16>,
+    /// Tracks which caps hold UDP sockets so TCP-only opcodes can reject them
+    /// before calling `sockets.get_mut::<tcp::Socket>()`, which panics on a
+    /// wrong-type handle.
+    udp_caps: BTreeSet<u64>,
     next_cap: u64,
 }
 
@@ -31,6 +35,7 @@ impl SocketTable {
             entries: BTreeMap::new(),
             states: BTreeMap::new(),
             listen_ports: BTreeMap::new(),
+            udp_caps: BTreeSet::new(),
             next_cap: 1,
         }
     }
@@ -112,10 +117,24 @@ impl SocketTable {
         }
     }
 
+    /// Mark a cap as holding a UDP socket.
+    ///
+    /// TCP-only opcodes (CONNECT, SEND, RECV, etc.) check this to avoid calling
+    /// `sockets.get_mut::<tcp::Socket>` on a UDP handle, which panics.
+    pub fn mark_udp(&mut self, cap: u64) {
+        self.udp_caps.insert(cap);
+    }
+
+    /// Returns `true` if `cap` holds a UDP socket.
+    pub fn is_udp(&self, cap: u64) -> bool {
+        self.udp_caps.contains(&cap)
+    }
+
     /// Remove a socket from the table (called on close).
     pub fn remove(&mut self, cap: u64) -> Option<SocketHandle> {
         self.states.remove(&cap);
         self.listen_ports.remove(&cap);
+        self.udp_caps.remove(&cap);
         self.entries.remove(&cap)
     }
 }

@@ -25,15 +25,12 @@ extern "C" fn main() -> usize {
     // SAFETY: L is non-null; luaL_openlibs is safe to call once.
     unsafe { ffi::luaL_openlibs(L) };
 
-    // Register the `vnet` TCP table.
-    // lua_newtable(L) = lua_createtable(L,0,0); bind the real symbol.
-    // lua_pushcfunction(L,f) = lua_pushcclosure(L,f,0); pass n=0 (no upvalues).
-    // Stack discipline: createtable pushes table @ -1. pushcclosure pushes fn @
-    // -1 (table slides to -2). setfield pops the fn and leaves table @ -1.
-    // setglobal pops the table. Net delta = 0.
+    // Register the `vnet` table (TCP + UDP + DNS).
+    // Stack discipline: createtable pushes table @ -1. Each pushcclosure/setfield
+    // pair is net-zero. setglobal pops the table. Net delta = 0.
     // SAFETY: L is non-null; binding fns uphold the lua_CFunction contract.
     unsafe {
-        ffi::lua_createtable(L, 0, 4);
+        ffi::lua_createtable(L, 0, 7);
         ffi::lua_pushcclosure(L, bindings_net::vnet_connect, 0);
         ffi::lua_setfield(L, -2, c"connect".as_ptr());
         ffi::lua_pushcclosure(L, bindings_net::vnet_send, 0);
@@ -42,6 +39,12 @@ extern "C" fn main() -> usize {
         ffi::lua_setfield(L, -2, c"recv".as_ptr());
         ffi::lua_pushcclosure(L, bindings_net::vnet_close, 0);
         ffi::lua_setfield(L, -2, c"close".as_ptr());
+        ffi::lua_pushcclosure(L, bindings_net::vnet_udp_send, 0);
+        ffi::lua_setfield(L, -2, c"udp_send".as_ptr());
+        ffi::lua_pushcclosure(L, bindings_net::vnet_udp_recv, 0);
+        ffi::lua_setfield(L, -2, c"udp_recv".as_ptr());
+        ffi::lua_pushcclosure(L, bindings_net::vnet_resolve, 0);
+        ffi::lua_setfield(L, -2, c"resolve".as_ptr());
         ffi::lua_setglobal(L, c"vnet".as_ptr());
     }
 

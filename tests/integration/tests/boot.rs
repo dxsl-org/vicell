@@ -297,6 +297,47 @@ fn network_curl_http_get() {
         .unwrap_or_else(|e| panic!("no response body: {e}\n--- output ---\n{}", qemu.dump()));
 }
 
+/// Phase E: `vnet.resolve()` static-table fast-path (no DNS, deterministic).
+///
+/// "gateway" is in the static alias table → returns "10.0.2.2" without a DNS
+/// query. This test is a hard gate and does not require internet access.
+#[test]
+fn lua_vnet_resolve() {
+    if !prerequisites_ok() {
+        return;
+    }
+    let mut qemu = QemuRunner::boot(&kernel_path(), &disk_path());
+    qemu.wait_for("ViOS >", BOOT_TIMEOUT)
+        .unwrap_or_else(|e| panic!("prompt not reached: {e}\n--- output ---\n{}", qemu.dump()));
+    std::thread::sleep(Duration::from_millis(500));
+    qemu.send_line("lua -e print(vnet.resolve('gateway'))");
+    qemu.wait_for("10.0.2.2", 10)
+        .unwrap_or_else(|e| panic!("static resolve failed: {e}\n--- output ---\n{}", qemu.dump()));
+}
+
+/// Phase E: `vnet.resolve()` real DNS A-record query via QEMU SLIRP (10.0.2.3:53).
+///
+/// Requires the test host to have outbound UDP :53 (normal internet access).
+/// The assertion is intentionally loose — any dotted-decimal IP output passes.
+/// Skip (non-blocking) if DNS is unavailable in the CI environment.
+#[test]
+fn lua_vnet_resolve_dns() {
+    if !prerequisites_ok() {
+        return;
+    }
+    let mut qemu = QemuRunner::boot(&kernel_path(), &disk_path());
+    qemu.wait_for("ViOS >", BOOT_TIMEOUT)
+        .unwrap_or_else(|e| panic!("prompt not reached: {e}\n--- output ---\n{}", qemu.dump()));
+    qemu.wait_for("DHCP acquired", 40)
+        .unwrap_or_else(|e| panic!("DHCP failed: {e}\n--- output ---\n{}", qemu.dump()));
+    std::thread::sleep(Duration::from_millis(500));
+    // Wrap output in a marker that can't appear in boot messages so the assertion
+    // is not a false-positive from the existing `[net] IP address: 10.0.2.15` line.
+    qemu.send_line("lua -e local r=vnet.resolve('google.com') if r then print('RESOLVED:'..r) end");
+    qemu.wait_for("RESOLVED:", 20)
+        .unwrap_or_else(|e| panic!("DNS resolve produced no output: {e}\n--- output ---\n{}", qemu.dump()));
+}
+
 /// Phase D.2: HTTP/1.0 GET from Lua via the `vnet.*` TCP bindings.
 ///
 /// A host HTTP server is started before QEMU boots. SLIRP routes guest

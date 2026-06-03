@@ -25,7 +25,7 @@ use ostd::syscall::{sys_get_time, sys_send, sys_try_recv, SyscallResult};
 use poll_driver::{cell_opcodes, decode_message, NetMessage, POLL_INTERVAL_MS};
 use smoltcp::{
     iface::{Config, Interface, SocketSet, SocketStorage},
-    socket::tcp,
+    socket::{tcp, udp},
     time::Instant,
     wire::{EthernetAddress, HardwareAddress, IpAddress, IpCidr, IpEndpoint},
 };
@@ -162,7 +162,10 @@ pub fn main() {
                 let msg_len = match buf[0] {
                     0x12 => scan_len.max(15), // CONNECT: needs addr:4 + port:2
                     0x14 => scan_len.max(13), // RECV:    needs buf_len:4
+                    0x16 => scan_len.max(11), // BIND:    needs port:2
                     0x17 => scan_len.max(11), // LISTEN:  needs port:2
+                    0x21 => scan_len.max(15), // SENDTO:  needs addr:4 + port:2
+                    0x22 => scan_len.max(13), // RECVFROM: needs buf_len:4
                     _    => scan_len,
                 };
                 handle_ipc(
@@ -267,6 +270,8 @@ fn handle_socket_syscall(
             sys_send(sender, local_ip);
         }
         cell_opcodes::CONNECT => {
+            // UDP caps must never reach TCP-typed socket accessors (would panic).
+            if table.is_udp(cap) { sys_send(sender, &[0x01]); return; }
             if payload.len() < 6 {
                 sys_send(sender, &[0x01]);
                 return;
@@ -305,6 +310,7 @@ fn handle_socket_syscall(
             }
         }
         cell_opcodes::SEND => {
+            if table.is_udp(cap) { sys_send(sender, &0u32.to_le_bytes()); return; }
             // Update Connecting → Connected if the handshake has completed.
             if table.get_state(cap) == Some(SocketState::Connecting) {
                 if let Some(handle) = table.get(cap) {
@@ -328,6 +334,7 @@ fn handle_socket_syscall(
             }
         }
         cell_opcodes::RECV => {
+            if table.is_udp(cap) { sys_send(sender, &[]); return; }
             // Update Connecting → Connected if the handshake has completed.
             if table.get_state(cap) == Some(SocketState::Connecting) {
                 if let Some(handle) = table.get(cap) {
@@ -358,6 +365,7 @@ fn handle_socket_syscall(
             }
         }
         cell_opcodes::SOCKET_STATE => {
+            if table.is_udp(cap) { sys_send(sender, &[0x00]); return; } // no TCP state for UDP
             // Read-only: must NOT mutate table state.
             let byte = match table.get(cap) {
                 Some(handle) => {
@@ -369,6 +377,7 @@ fn handle_socket_syscall(
             sys_send(sender, &[byte]);
         }
         cell_opcodes::LISTEN => {
+            if table.is_udp(cap) { sys_send(sender, &[0x01]); return; }
             // [0x17][cap:8][port:2 LE] → [0x00] ok / [0x01] err.
             // Only a freshly-created socket (smoltcp Closed state) may listen.
             if payload.len() < 2 {
@@ -395,8 +404,9 @@ fn handle_socket_syscall(
             }
         }
         cell_opcodes::ACCEPT => {
+            if table.is_udp(cap) { sys_send(sender, &[0xFF_u8; 8]); return; }
             // [0x18][cap:8] → [stream_cap:8 LE] or [0xFF;8] if not connected yet.
-            // handle_ipc already polled smoltcp before this call (main.rs:171),
+            // handle_ipc already polled smoltcp before this call,
             // so socket.state() reflects the current handshake progress.
             if table.get_state(cap) != Some(SocketState::Listening) {
                 sys_send(sender, &[0xFF_u8; 8]);
@@ -443,9 +453,97 @@ fn handle_socket_syscall(
                 }
             }
         }
-        cell_opcodes::BIND | cell_opcodes::SOCKET_UDP => {
-            let _ = (cap, payload);
-            sys_send(sender, &[0xFF]); // not-yet-implemented
+        cell_opcodes::SOCKET_UDP => {
+            let rx = udp::PacketBuffer::new(
+                alloc::vec![udp::PacketMetadata::EMPTY; 4],
+                alloc::vec![0u8; 1024],
+            );
+            let tx = udp::PacketBuffer::new(
+                alloc::vec![udp::PacketMetadata::EMPTY; 4],
+                alloc::vec![0u8; 1024],
+            );
+            let handle = sockets.add(udp::Socket::new(rx, tx));
+            match table.insert(handle) {
+                Ok(cap_id) => {
+                    table.mark_udp(cap_id); // guard TCP-only opcodes from panicking
+                    sys_send(sender, &cap_id.to_le_bytes());
+                }
+                Err(_) => { sys_send(sender, &[0u8; 8]); }
+            }
+        }
+        cell_opcodes::BIND => {
+            // [0x16][cap:8][port:2 LE] → [bound_port:2 LE] ok / [0xFF,0xFF] err.
+            // Port 0 → auto-assign ephemeral; rejects non-Created caps.
+            if payload.len() < 2 { sys_send(sender, &[0xFF, 0xFF]); return; }
+            if table.get_state(cap) != Some(SocketState::Created) {
+                sys_send(sender, &[0xFF, 0xFF]); return;
+            }
+            let requested = u16::from_le_bytes([payload[0], payload[1]]);
+            let port = if requested == 0 { next_ephemeral_port() } else { requested };
+            if let Some(handle) = table.get(cap) {
+                let socket = sockets.get_mut::<udp::Socket>(handle);
+                match socket.bind(port) {
+                    Ok(()) => {
+                        table.set_state(cap, SocketState::Listening);
+                        sys_send(sender, &port.to_le_bytes());
+                    }
+                    Err(_) => { sys_send(sender, &[0xFF, 0xFF]); }
+                }
+            } else {
+                sys_send(sender, &[0xFF, 0xFF]);
+            }
+        }
+        cell_opcodes::SENDTO => {
+            // [0x21][cap:8][addr:4][port:2 LE][data:*] → [n:4 LE] bytes queued.
+            if payload.len() < 6 { sys_send(sender, &0u32.to_le_bytes()); return; }
+            let addr = IpAddress::v4(payload[0], payload[1], payload[2], payload[3]);
+            let dst_port = u16::from_le_bytes([payload[4], payload[5]]);
+            let data = &payload[6..];
+            let endpoint = IpEndpoint::new(addr, dst_port);
+            if let Some(handle) = table.get(cap) {
+                let socket = sockets.get_mut::<udp::Socket>(handle);
+                match socket.send_slice(data, endpoint) {
+                    Ok(()) => {
+                        // Flush the datagram immediately so RECVFROM can observe it.
+                        iface.poll(now_instant(), device, sockets);
+                        sys_send(sender, &(data.len() as u32).to_le_bytes());
+                    }
+                    Err(_) => { sys_send(sender, &0u32.to_le_bytes()); }
+                }
+            } else {
+                sys_send(sender, &0u32.to_le_bytes());
+            }
+        }
+        cell_opcodes::RECVFROM => {
+            // [0x22][cap:8][buf_len:4 LE] → [src_addr:4][src_port:2 LE][data] or empty.
+            let buf_len = if payload.len() >= 4 {
+                u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4])) as usize
+            } else { 512 };
+            let buf_len = buf_len.min(512);
+            if let Some(handle) = table.get(cap) {
+                let socket = sockets.get_mut::<udp::Socket>(handle);
+                if socket.can_recv() {
+                    let mut data = alloc::vec![0u8; buf_len];
+                    match socket.recv_slice(&mut data) {
+                        Ok((n, meta)) => {
+                            let mut reply = alloc::vec![0u8; 6 + n];
+                            // IpAddress::Ipv4 is the only variant (no proto-ipv6 feature).
+                            // Use a let binding rather than if-let to satisfy the
+                            // irrefutable_let_patterns lint.
+                            let IpAddress::Ipv4(src_ip) = meta.endpoint.addr;
+                            reply[0..4].copy_from_slice(src_ip.as_bytes());
+                            reply[4..6].copy_from_slice(&meta.endpoint.port.to_le_bytes());
+                            reply[6..6 + n].copy_from_slice(&data[..n]);
+                            sys_send(sender, &reply);
+                        }
+                        Err(_) => { sys_send(sender, &[]); }
+                    }
+                } else {
+                    sys_send(sender, &[]); // empty = no datagram yet
+                }
+            } else {
+                sys_send(sender, &[]);
+            }
         }
         _ => {
             sys_send(sender, &[]);

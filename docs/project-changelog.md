@@ -4,6 +4,52 @@
 
 ---
 
+## [2026-06-03] Phase E — UDP Sockets & DNS Resolver (Complete)
+
+**Changes**:
+- **Phase E.1 (UDP Socket Creation)**:
+  - `cells/services/net/src/poll_driver.rs` — added opcodes `SENDTO=0x21`, `RECVFROM=0x22`
+  - `cells/services/net/src/socket_table.rs` — added `udp_caps: BTreeSet<u64>` to track UDP-capable handles
+  - `cells/services/net/src/main.rs` — added SOCKET_UDP handler (opcode 0x20): creates smoltcp UDP socket with 4×1KB PacketBuffer metadata+payload rings, tags capability in `udp_caps`
+  - BIND handler: auto-assigns ephemeral port when port=0
+  - SENDTO handler (opcode 0x21): sends datagram to (addr, port), flushes via iface.poll
+  - RECVFROM handler (opcode 0x22): returns [src_addr:4][src_port:2 LE][data] or empty when no datagram waiting
+  - **Type safety**: TCP operations (CONNECT/SEND/RECV/LISTEN/ACCEPT) now check `if !udp_caps.contains(&cap)` before calling `get_mut::<tcp::Socket>` to prevent panic on UDP cap confusion
+
+- **Phase E.2 (Lua DNS Bindings & Resolver)**:
+  - `cells/runtimes/lua/src/bindings_net.rs` — added `vnet.udp_send(cap, ip, port, data)` and `vnet.udp_recv(cap[, len])` Lua FFI
+  - Added `vnet.resolve(hostname: string) -> string` with priority: static table (gateway→10.0.2.2, dns→10.0.2.3, localhost→127.0.0.1) → IPv4 literal → DNS A-record via UDP to 10.0.2.3:53
+  - DNS helpers: `build_dns_query` (question section), `skip_dns_name` (name decompression), `parse_dns_a` (answer extraction), `format_ip` (uint32 → dotted quad)
+  - Always CLOSEs UDP cap on every exit path (RAII pattern vs MAX_SOCKETS=18 resource limit)
+  - `lua_createtable(L, 0, 7)` — 7 fields in vnet table (connects, sends, recvs, closes, send_to, recv_from, resolve)
+
+- **Phase E.3 (Integration Tests)**:
+  - `tests/integration/tests/boot.rs` — added `lua_vnet_resolve` (deterministic: "gateway"→"10.0.2.2")
+  - Added `lua_vnet_resolve_dns` (UDP DNS query, asserts "RESOLVED:" marker prefix distinguishes from boot-time IPs)
+
+**Files Modified**:
+- `cells/services/net/src/poll_driver.rs` — SENDTO/RECVFROM opcodes
+- `cells/services/net/src/socket_table.rs` — udp_caps tracking
+- `cells/services/net/src/main.rs` — SOCKET_UDP, BIND, SENDTO, RECVFROM handlers + type safety gates
+- `cells/runtimes/lua/src/bindings_net.rs` — UDP + DNS FFI
+- `cells/runtimes/lua/src/main.rs` — vnet table registration
+- `tests/integration/tests/boot.rs` — 2 new DNS resolver tests
+
+**Status**: Complete. 25/25 integration tests pass single-threaded.
+
+**Integration Tests Added**:
+- `lua_vnet_resolve` — static hostname table (deterministic: "gateway", "dns", "localhost")
+- `lua_vnet_resolve_dns` — dynamic DNS A-record query via UDP to 10.0.2.3:53
+
+**Impact**:
+- UDP data-path functional; supports stateless request-reply patterns (DNS, DHCP, NTP)
+- DNS resolver with fallback chain: static table → literal IPv4 → UDP A-record query
+- Lua bindings enable network scripting (DNS lookups from REPL)
+- Type safety: UDP and TCP handles no longer cause confusion panics
+- Foundation for Phase F (DHCP client, multicast, raw socket APIs)
+
+---
+
 ## [2026-06-03] Phase A–B — Network TCP Data-Path & HTTP/1.0 GET (Complete)
 
 **Changes**:

@@ -41,6 +41,10 @@ pub mod cell_opcodes {
     pub const SOCKET_STATE: u8  = 0x19;
     /// Query DHCP-assigned IP; reply = 4-byte addr or 0.0.0.0.
     pub const GET_LOCAL_IP: u8  = 0x20;
+    /// Send a UDP datagram to (addr4[4], port[2 LE]); reply = bytes queued [4 LE].
+    pub const SENDTO: u8        = 0x21;
+    /// Receive one UDP datagram; reply = [src_addr:4][src_port:2 LE][data] or empty.
+    pub const RECVFROM: u8      = 0x22;
 }
 
 /// Decode a raw IPC payload into either a kernel frame event or a cell request.
