@@ -161,3 +161,59 @@ impl Drop for QemuRunner {
         let _ = self.child.wait();
     }
 }
+
+/// Spawn a single-connection HTTP/1.0 server on an ephemeral loopback port.
+///
+/// Reads request headers (until `\r\n\r\n`), replies a fixed
+/// `HTTP/1.0 200 OK\r\nContent-Length: 5\r\n\r\nHELLO`, then drops the stream
+/// to send FIN. QEMU SLIRP routes guest→`10.0.2.2:port` to host→`127.0.0.1:port`.
+///
+/// Returns `(port, handle)`. The caller **must** keep `handle` alive for the
+/// test duration so the server thread outlives the QEMU session.
+pub fn spawn_http_server() -> (u16, thread::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("http server bind");
+    let port = listener.local_addr().unwrap().port();
+    let handle = thread::spawn(move || {
+        if let Ok((mut stream, _)) = listener.accept() {
+            let mut buf = [0u8; 1024];
+            let mut total = 0usize;
+            loop {
+                match stream.read(&mut buf[total..]) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => {
+                        total += n;
+                        if buf[..total].windows(4).any(|w| w == b"\r\n\r\n") { break; }
+                        if total == buf.len() { break; }
+                    }
+                }
+            }
+            let _ = stream.write_all(
+                b"HTTP/1.0 200 OK\r\nContent-Length: 5\r\n\r\nHELLO",
+            );
+            drop(stream); // sends FIN — curl's SOCKET_STATE will see CloseWait
+        }
+    });
+    (port, handle)
+}
+
+/// Spawn a single-connection TCP echo server on an ephemeral loopback port.
+///
+/// Returns the bound port. QEMU SLIRP routes guest→`10.0.2.2:port` to
+/// host→`127.0.0.1:port`, so the guest's nc can reach this server.
+/// The server exits after handling one connection (sufficient for tests).
+pub fn spawn_echo_server() -> u16 {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("echo server bind");
+    let port = listener.local_addr().unwrap().port();
+    thread::spawn(move || {
+        if let Ok((mut stream, _)) = listener.accept() {
+            let mut buf = [0u8; 256];
+            loop {
+                match stream.read(&mut buf) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => { let _ = stream.write_all(&buf[..n]); }
+                }
+            }
+        }
+    });
+    port
+}

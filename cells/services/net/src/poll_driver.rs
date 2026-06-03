@@ -37,6 +37,8 @@ pub mod cell_opcodes {
     pub const LISTEN: u8        = 0x17;
     /// Accept a pending TCP connection; reply = CapId for new stream.
     pub const ACCEPT: u8        = 0x18;
+    /// Query live TCP state of a socket; reply = 1-byte state code.
+    pub const SOCKET_STATE: u8  = 0x19;
     /// Query DHCP-assigned IP; reply = 4-byte addr or 0.0.0.0.
     pub const GET_LOCAL_IP: u8  = 0x20;
 }

@@ -110,6 +110,30 @@
 
 ---
 
+## [2026-06-03] Phase A–B — Network TCP Data-Path (Complete)
+
+**Changes**:
+- **Phase A (prior)**: CONNECT / SEND / RECV / CLOSE opcodes wired; TCP client functional
+- **Phase B**: Extended with HTTP/1.0 GET client and socket state introspection
+  - Added `SOCKET_STATE (0x19)` opcode to net cell: query live TCP state (1-byte encoding)
+  - Implemented `curl` binary: HTTP/1.0 GET client with URL parsing, response accumulation, FIN detection
+  - Disk-build integration: added `/bin/nc` and `/bin/curl` to disk cell table
+  - Integration test: `network_curl_http_get` with host HTTP server end-to-end validation
+
+**Files Modified**:
+- `cells/services/net/src/poll_driver.rs` — added SOCKET_STATE constant (0x19)
+- `cells/services/net/src/main.rs` — added tcp_state_byte() helper, SOCKET_STATE handler
+- `cells/apps/net-tools/src/bin/curl.rs` — full HTTP/1.0 GET client (replaced stub)
+- `gen_disk.ps1` — build app-net-tools, add /bin/nc and /bin/curl to cell table
+- `tests/integration/src/lib.rs` — added spawn_http_server()
+- `tests/integration/tests/boot.rs` — added network_curl_http_get test
+
+**Status**: Phase A + B complete. Phase C (VFS write for persistent responses) planned.
+
+**Impact**: ViOS can now fetch HTTP responses from external servers; network tooling usable from shell.
+
+---
+
 ## [2026-06-03] Status Update — Phases 10, 14, 15, 16, 18, 20 Verified (0.2.1-dev)
 
 **Verification**:

@@ -573,7 +573,7 @@ Physical RAM: 0x8000_0000–0x8800_0000 (default: 128 MB in QEMU)
 
 ### 🚧 In Progress / Partial
 - **VFS write** (FAT32 integration in progress)
-- **Network data-path** (CONNECT/SEND/RECV/LISTEN opcodes return 0xFF stubs)
+- **Network opcodes** (SOCKET_STATE 0x19 added; LISTEN/ACCEPT partial; full multi-connection server deferred)
 - **KASLR** (not implemented)
 
 ### ⏳ Planned (Later phases)

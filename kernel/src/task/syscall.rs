@@ -639,13 +639,24 @@ pub fn handle_syscall(caller_id: usize, syscall: Syscall) -> SyscallResult {
         }
         Syscall::ServiceLookup { name_ptr, name_len } => {
             validate_user_buf(name_ptr, name_len, MAX_LOG_MSG)?;
-            unsafe {
-                let _slice = core::slice::from_raw_parts(name_ptr as *const u8, name_len);
-                // if let Some(id) = crate::task::drivers::registry::resolve(name) {
-                //    return Ok(id);
-                // }
-                return Ok(0);
-            }
+            // SAFETY: validate_user_buf checked the pointer and length above.
+            let name = unsafe {
+                core::str::from_utf8(
+                    core::slice::from_raw_parts(name_ptr as *const u8, name_len)
+                ).map_err(|_| SyscallError::InvalidInput)?
+            };
+            // Hardcoded spawn-order lookup (init=1, then init's sys_spawn_from_path calls
+            // in sequence). Replace with a dynamic registry in v0.3.
+            let id: usize = match name {
+                "vfs"         => 2,
+                "config"      => 3,
+                "input"       => 4,
+                "net"         => 5,
+                "compositor"  => 6,
+                "shell"       => 7,
+                _ => return Err(SyscallError::FileNotFound),
+            };
+            Ok(id)
         }
         Syscall::Open { path_ptr, path_len } => {
             validate_user_buf(path_ptr, path_len, MAX_LOG_MSG)?;

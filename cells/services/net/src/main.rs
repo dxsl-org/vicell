@@ -13,9 +13,11 @@ extern crate alloc;
 mod dhcp;
 mod interface;
 mod poll_driver;
+mod socket_state;
 mod socket_table;
 
 use alloc::boxed::Box;
+use core::sync::atomic::{AtomicU16, Ordering};
 use dhcp::{add_dhcp_socket, poll_dhcp, DhcpState};
 use interface::VirtioNetDevice;
 use ostd::io::println;
@@ -25,8 +27,9 @@ use smoltcp::{
     iface::{Config, Interface, SocketSet, SocketStorage},
     socket::tcp,
     time::Instant,
-    wire::{EthernetAddress, HardwareAddress, IpAddress, IpCidr},
+    wire::{EthernetAddress, HardwareAddress, IpAddress, IpCidr, IpEndpoint},
 };
+use socket_state::SocketState;
 use socket_table::SocketTable;
 
 /// Fixed MAC address for QEMU VirtIO NIC (locally administered, unicast).
@@ -37,6 +40,20 @@ const MAX_SOCKETS: usize = 18;
 
 /// Number of ticks between forced smoltcp polls (fallback when no IPC arrives).
 const POLL_TICKS: u64 = POLL_INTERVAL_MS * 10_000; // 100ms @ 10 MHz mtime
+
+/// Ephemeral local port counter for outbound TCP connections.
+///
+/// Wraps in the IANA ephemeral range (49152–65534). Single-core kernel makes
+/// Relaxed ordering safe — no concurrent writers exist.
+static NEXT_PORT: AtomicU16 = AtomicU16::new(49152);
+
+fn next_ephemeral_port() -> u16 {
+    let p = NEXT_PORT.fetch_add(1, Ordering::Relaxed);
+    if p >= 65534 {
+        NEXT_PORT.store(49152, Ordering::Relaxed);
+    }
+    p
+}
 
 fn now_instant() -> Instant {
     // Convert kernel ticks (10 MHz) to smoltcp Instant (microseconds).
@@ -153,9 +170,34 @@ fn handle_ipc(
             iface.poll(now_instant(), device, sockets);
         }
         NetMessage::CellRequest { opcode, cap, payload } => {
-            handle_socket_syscall(opcode, cap, payload, sender, sockets, table, local_ip);
+            // Advance smoltcp before and after the syscall so TCP state
+            // transitions (SYN-SENT → ESTABLISHED) happen promptly.
+            iface.poll(now_instant(), device, sockets);
+            handle_socket_syscall(opcode, cap, payload, sender, iface, device, sockets, table, local_ip);
+            iface.poll(now_instant(), device, sockets);
         }
         NetMessage::Unknown => {}
+    }
+}
+
+/// Map a smoltcp TCP state to the 1-byte wire encoding consumers expect.
+///
+/// No wildcard arm: `tcp::State` is exhaustive in smoltcp 0.11 (11 variants,
+/// no `#[non_exhaustive]`). A `_ =>` arm would be unreachable and fail
+/// `clippy -D warnings`.
+fn tcp_state_byte(s: tcp::State) -> u8 {
+    match s {
+        tcp::State::Closed      => 0x00,
+        tcp::State::SynSent     => 0x01,
+        tcp::State::SynReceived => 0x02,
+        tcp::State::Established => 0x03,
+        tcp::State::FinWait1    => 0x04,
+        tcp::State::FinWait2    => 0x05,
+        tcp::State::CloseWait   => 0x06,
+        tcp::State::Closing     => 0x07,
+        tcp::State::LastAck     => 0x08,
+        tcp::State::TimeWait    => 0x09,
+        tcp::State::Listen      => 0x0A,
     }
 }
 
@@ -165,6 +207,8 @@ fn handle_socket_syscall(
     cap: u64,
     payload: &[u8],
     sender: usize,
+    iface: &mut Interface,
+    device: &mut VirtioNetDevice,
     sockets: &mut SocketSet<'_>,
     table: &mut SocketTable,
     local_ip: &[u8; 4],
@@ -194,10 +238,110 @@ fn handle_socket_syscall(
         cell_opcodes::GET_LOCAL_IP => {
             sys_send(sender, local_ip);
         }
-        cell_opcodes::CONNECT | cell_opcodes::SEND | cell_opcodes::RECV
-        | cell_opcodes::BIND | cell_opcodes::LISTEN | cell_opcodes::ACCEPT
+        cell_opcodes::CONNECT => {
+            if payload.len() < 6 {
+                sys_send(sender, &[0x01]);
+                return;
+            }
+            // Guard against double-connect.
+            match table.get_state(cap) {
+                Some(SocketState::Created) => {}
+                Some(_) | None => {
+                    sys_send(sender, &[0x01]); // wrong state or unknown cap
+                    return;
+                }
+            }
+            let addr = [payload[0], payload[1], payload[2], payload[3]];
+            let port = u16::from_le_bytes([payload[4], payload[5]]);
+            let remote = IpEndpoint::new(
+                IpAddress::v4(addr[0], addr[1], addr[2], addr[3]),
+                port,
+            );
+            let local_port = next_ephemeral_port();
+
+            if let Some(handle) = table.get(cap) {
+                let cx = iface.context();
+                let socket = sockets.get_mut::<tcp::Socket>(handle);
+                match socket.connect(cx, remote, local_port) {
+                    Ok(()) => {
+                        table.set_state(cap, SocketState::Connecting);
+                        // Flush the SYN immediately instead of waiting for the next
+                        // periodic poll — reduces handshake latency by up to 100 ms.
+                        iface.poll(now_instant(), device, sockets);
+                        sys_send(sender, &[0x00]);
+                    }
+                    Err(_) => { sys_send(sender, &[0x01]); }
+                }
+            } else {
+                sys_send(sender, &[0x01]);
+            }
+        }
+        cell_opcodes::SEND => {
+            // Update Connecting → Connected if the handshake has completed.
+            if table.get_state(cap) == Some(SocketState::Connecting) {
+                if let Some(handle) = table.get(cap) {
+                    let s = sockets.get_mut::<tcp::Socket>(handle);
+                    if s.state() == tcp::State::Established {
+                        table.set_state(cap, SocketState::Connected);
+                    }
+                }
+            }
+            let data = payload;
+            if let Some(handle) = table.get(cap) {
+                let socket = sockets.get_mut::<tcp::Socket>(handle);
+                if socket.can_send() {
+                    let n = socket.send_slice(data).unwrap_or(0);
+                    sys_send(sender, &(n as u32).to_le_bytes());
+                } else {
+                    sys_send(sender, &0u32.to_le_bytes()); // not ready yet
+                }
+            } else {
+                sys_send(sender, &0u32.to_le_bytes());
+            }
+        }
+        cell_opcodes::RECV => {
+            // Update Connecting → Connected if the handshake has completed.
+            if table.get_state(cap) == Some(SocketState::Connecting) {
+                if let Some(handle) = table.get(cap) {
+                    let s = sockets.get_mut::<tcp::Socket>(handle);
+                    if s.state() == tcp::State::Established {
+                        table.set_state(cap, SocketState::Connected);
+                    }
+                }
+            }
+            let buf_len = if payload.len() >= 4 {
+                u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4])) as usize
+            } else {
+                512
+            };
+            let buf_len = buf_len.min(4096);
+
+            if let Some(handle) = table.get(cap) {
+                let socket = sockets.get_mut::<tcp::Socket>(handle);
+                let mut data = alloc::vec![0u8; buf_len];
+                let n = if socket.can_recv() {
+                    socket.recv_slice(&mut data).unwrap_or(0)
+                } else {
+                    0
+                };
+                sys_send(sender, &data[..n]); // 0-byte reply = no data yet
+            } else {
+                sys_send(sender, &[]);
+            }
+        }
+        cell_opcodes::SOCKET_STATE => {
+            // Read-only: must NOT mutate table state.
+            let byte = match table.get(cap) {
+                Some(handle) => {
+                    let socket = sockets.get_mut::<tcp::Socket>(handle);
+                    tcp_state_byte(socket.state())
+                }
+                None => 0x00, // unknown cap == effectively closed
+            };
+            sys_send(sender, &[byte]);
+        }
+        cell_opcodes::BIND | cell_opcodes::LISTEN | cell_opcodes::ACCEPT
         | cell_opcodes::SOCKET_UDP => {
-            // Stub: full data-path deferred to Phase 17 readline + shell integration.
             let _ = (cap, payload);
             sys_send(sender, &[0xFF]); // not-yet-implemented
         }

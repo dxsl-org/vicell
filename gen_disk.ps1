@@ -27,6 +27,7 @@ cargo build --release `
     -p service-input -p service-net -p service-compositor `
     -p micropython 2>&1 | Select-Object -Last 5
 cargo build --release -p app-bench 2>&1 | Select-Object -Last 3
+cargo build --release -p app-net-tools 2>&1 | Select-Object -Last 3
 
 # 1b. Update kernel embedded cells (init, shell, vfs, config) from release builds.
 # These 4 cells are embedded in kernel_fs.img via include_bytes!.
@@ -49,6 +50,8 @@ $bench_bin  = "$rel_dir\bench"             # Phase 22 benchmark cell
 $input_bin  = "$rel_dir\service-input"     # Phase 14: input service cell
 $net_bin    = "$rel_dir\service-net"       # Phase 15: network service cell
 $comp_bin   = "$rel_dir\service-compositor" # Phase 16: compositor + GPU
+$nc_bin     = "$rel_dir\nc"               # Phase A: TCP netcat tool
+$curl_bin   = "$rel_dir\curl"             # Phase B: HTTP GET client
 
 foreach ($pair in @(
     @{ Path = $init_bin;   Name = "app-init" },
@@ -123,6 +126,8 @@ if ($bench_bin) { $table_args += "/bin/bench=$bench_bin" }
 if (Test-Path $input_bin) { $table_args += "/bin/input=$input_bin" }
 if (Test-Path $net_bin)   { $table_args += "/bin/net=$net_bin" }
 if (Test-Path $comp_bin)  { $table_args += "/bin/compositor=$comp_bin" }
+if (Test-Path $nc_bin)    { $table_args += "/bin/nc=$nc_bin" }
+if (Test-Path $curl_bin)  { $table_args += "/bin/curl=$curl_bin" }
 python "$tools_dir\write-cell-table.py" @table_args
 
 Write-Host "Done. disk_v3.img is ready."

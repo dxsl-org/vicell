@@ -8,7 +8,7 @@
 //! tests resolve them from CARGO_MANIFEST_DIR so they run regardless of cwd.
 
 use std::path::PathBuf;
-use vios_integration_tests::{qemu_binary, QemuRunner};
+use vios_integration_tests::{qemu_binary, spawn_echo_server, spawn_http_server, QemuRunner};
 
 const BOOT_TIMEOUT: u64 = 40;
 
@@ -218,4 +218,76 @@ fn micropython_runtime_executes() {
     qemu.wait_for("MicroPython v1.24.1 on ViOS", 20).unwrap_or_else(|e| {
         panic!("micropython did not start: {e}\n--- output ---\n{}", qemu.dump())
     });
+}
+
+/// Phase A: TCP data-path — CONNECT → SEND → RECV → CLOSE via the `nc` tool.
+///
+/// The echo server is started on the host before QEMU boots. QEMU SLIRP routes
+/// guest connections to `10.0.2.2:<port>` to `127.0.0.1:<port>` on the host.
+/// `nc` sends "HELLO_VIOS\n", the echo server reflects it, and nc prints it to
+/// serial — proving the full TCP data-path is wired end-to-end.
+#[test]
+fn network_tcp_send_recv() {
+    if !prerequisites_ok() {
+        return;
+    }
+
+    // Start the echo server before QEMU so it is ready when nc connects.
+    let echo_port = spawn_echo_server();
+
+    let mut qemu = QemuRunner::boot(&kernel_path(), &disk_path());
+
+    qemu.wait_for("ViOS >", BOOT_TIMEOUT)
+        .unwrap_or_else(|e| panic!("shell not reached: {e}\n--- output ---\n{}", qemu.dump()));
+
+    // Wait for DHCP before asking nc to connect — avoids a race where the net
+    // cell hasn't acquired an IP yet and the TCP SYN uses 0.0.0.0 as source.
+    qemu.wait_for("DHCP acquired", 40)
+        .unwrap_or_else(|e| panic!("DHCP failed: {e}\n--- output ---\n{}", qemu.dump()));
+
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    qemu.send_line(&format!("nc 10.0.2.2 {echo_port}"));
+
+    qemu.wait_for("connected", 15)
+        .unwrap_or_else(|e| panic!("nc did not connect: {e}\n--- output ---\n{}", qemu.dump()));
+
+    qemu.wait_for("HELLO_VIOS", 20)
+        .unwrap_or_else(|e| panic!("TCP echo not received: {e}\n--- output ---\n{}", qemu.dump()));
+}
+
+/// Phase B: HTTP/1.0 GET via `curl` over the Phase A TCP data-path.
+///
+/// A host HTTP server is started before QEMU boots. QEMU SLIRP routes guest
+/// connections to `10.0.2.2:<port>` → host `127.0.0.1:<port>`. `curl` sends
+/// a minimal GET, the server replies `HTTP/1.0 200 OK\r\n...\r\n\r\nHELLO`,
+/// and closes. Proves the full HTTP client path works end-to-end.
+#[test]
+fn network_curl_http_get() {
+    if !prerequisites_ok() {
+        return;
+    }
+
+    // Start the HTTP server before QEMU boots so it is ready when curl connects.
+    // Keep `_server` (not `_`) alive — dropping the handle early can race with
+    // the server thread's accept() and cause the test to flake.
+    let (port, _server) = spawn_http_server();
+
+    let mut qemu = QemuRunner::boot(&kernel_path(), &disk_path());
+
+    qemu.wait_for("ViOS >", BOOT_TIMEOUT)
+        .unwrap_or_else(|e| panic!("shell not reached: {e}\n--- output ---\n{}", qemu.dump()));
+
+    // Gate on DHCP before connecting — avoids a race where the net cell has
+    // not yet acquired an IP and the TCP SYN uses 0.0.0.0 as source address.
+    qemu.wait_for("DHCP acquired", 40)
+        .unwrap_or_else(|e| panic!("DHCP failed: {e}\n--- output ---\n{}", qemu.dump()));
+
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    qemu.send_line(&format!("curl http://10.0.2.2:{port}/"));
+
+    qemu.wait_for("200", 20)
+        .unwrap_or_else(|e| panic!("no HTTP 200 status: {e}\n--- output ---\n{}", qemu.dump()));
+
+    qemu.wait_for("HELLO", 10)
+        .unwrap_or_else(|e| panic!("no response body: {e}\n--- output ---\n{}", qemu.dump()));
 }
