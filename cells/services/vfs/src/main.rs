@@ -35,8 +35,10 @@ const OP_STAT:     u8 = 3; // path -> (size:u64, is_dir:u8, pad:[u8;7])
 const OP_WRITE:    u8 = 4; // [path_len:u8][content_len:u16 LE][path][content] → /data FAT16 or /tmp RamFS
 const OP_READ:     u8 = 8; // path -> file bytes (up to 480), empty = not found
 const OP_MKDIR:    u8 = 5; // path -> 0=ok, 1=err
-const OP_RMDIR:    u8 = 6; // path -> 0=ok, 1=err (only empty dirs)
-const OP_UNLINK:   u8 = 7; // path -> 0=ok, 1=err (only files)
+const OP_RMDIR:            u8 = 6;  // path -> 0=ok, 1=err (only empty dirs)
+const OP_UNLINK:           u8 = 7;  // path -> 0=ok, 1=err (only files)
+const OP_RMDIR_RECURSIVE:  u8 = 9;  // path -> 0=ok, 1=err — recursive tree delete (/data only)
+const OP_APPEND:           u8 = 10; // [path_len:u8][content_len:u16 LE][path][content] → seek-to-end append
 
 #[derive(Clone)]
 struct RamFile {
@@ -284,6 +286,33 @@ fn write_fat16(fs: Option<&DataFs>, path: &str, content: &[u8]) -> bool {
     file.write_all(content).is_ok()
 }
 
+/// Append `content` to `/data/[sub/]NAME`. Creates the file (and any parent dirs)
+/// if absent — first append behaves like a write. Reuses `ensure_dir_chain` (mkdir -p).
+///
+/// `fatfs::File::seek(End(0))` translates to `disk.seek(Start(abs_end))` internally,
+/// so the `End` arm of `BlockStream::seek` (which errors) is never reached.
+fn append_fat16(fs: Option<&DataFs>, path: &str, content: &[u8]) -> bool {
+    use fatfs::{Write as _, Seek as _};
+    let fs  = match fs { Some(f) => f, None => return false };
+    let rel = match path.strip_prefix("/data/") {
+        Some(n) if !n.is_empty() => n,
+        _ => return false,
+    };
+    if rel.split('/').any(|c| c == "..") { return false; }
+    let (parent, name) = split_last(rel);
+    if name.is_empty() { return false; }
+    let dir = match ensure_dir_chain(fs.root_dir(), parent) {
+        Ok(d)   => d,
+        Err(()) => return false,
+    };
+    let mut file = match dir.open_file(name) {
+        Ok(f)  => f,
+        Err(_) => match dir.create_file(name) { Ok(f) => f, Err(_) => return false },
+    };
+    if file.seek(fatfs::SeekFrom::End(0)).is_err() { return false; }
+    file.write_all(content).is_ok()
+}
+
 /// Read up to 480 bytes of `/data/[sub/]NAME` from the FAT16 volume.
 ///
 /// fatfs `open_file` traverses '/'-separated paths natively, so no manual
@@ -309,15 +338,81 @@ fn read_fat16(fs: Option<&DataFs>, path: &str, sender: usize) {
     ostd::syscall::sys_send(sender, &resp[..total]);
 }
 
-/// Remove `/data/[sub/]NAME` from the FAT16 volume.
-///
-/// fatfs `remove` traverses '/'-separated paths natively.
+/// Remove `/data/[sub/]NAME` where NAME is a regular FILE. Returns false if the
+/// entry is a directory or does not exist (use `rmdir_fat16` for directories).
+/// Phase H: `open_file` succeeds only for files in fatfs — acts as the type guard.
 fn unlink_fat16(fs: Option<&DataFs>, path: &str) -> bool {
     let fs  = match fs { Some(f) => f, None => return false };
     let rel = match path.strip_prefix("/data/") {
         Some(n) if !n.is_empty() => n,
         _ => return false,
     };
+    if fs.root_dir().open_file(rel).is_err() { return false; }
+    fs.root_dir().remove(rel).is_ok()
+}
+
+/// Remove an EMPTY `/data/[sub/]DIR`. Returns false if the entry is a regular
+/// file, is non-empty, or does not exist. Phase H: strict POSIX type checking.
+/// `open_dir` succeeds only for directories; `remove` errors on a non-empty dir.
+fn rmdir_fat16(fs: Option<&DataFs>, path: &str) -> bool {
+    let fs  = match fs { Some(f) => f, None => return false };
+    let rel = match path.strip_prefix("/data/") {
+        Some(n) if !n.is_empty() => n,
+        _ => return false,
+    };
+    // Reject any path component that is ".." — defense-in-depth even though
+    // fatfs confines resolution to the volume root.
+    if rel.split('/').any(|c| c == "..") { return false; }
+    if fs.root_dir().open_dir(rel).is_err() { return false; }
+    fs.root_dir().remove(rel).is_ok()
+}
+
+/// Recursively remove `/data/[sub/]DIR` and all its contents (POSIX `rm -r`).
+/// A path resolving to a regular file is removed directly. Returns false on any
+/// fatfs error or missing target. Only `/data/` is supported.
+fn rmdir_recursive_fat16(fs: Option<&DataFs>, path: &str) -> bool {
+    let fs  = match fs { Some(f) => f, None => return false };
+    let rel = match path.strip_prefix("/data/") {
+        Some(n) if !n.is_empty() => n,
+        _ => return false,
+    };
+    // Defense-in-depth: reject ".." before the recursive delete amplifies any
+    // path-confusion. fatfs also confines to the volume root, but explicit is safer.
+    if rel.split('/').any(|c| c == "..") { return false; }
+    remove_tree(fs, rel)
+}
+
+/// Depth-first delete of `rel` (path relative to the FAT16 root).
+///
+/// Rebuilds `root_dir()` per level and addresses children by full relative path
+/// so no `Dir` handle is held across a recursive call (borrow-checker safe).
+/// Collects `iter()` entries before mutating — avoids iterator-vs-mutation aliasing.
+fn remove_tree(fs: &DataFs, rel: &str) -> bool {
+    let dir = match fs.root_dir().open_dir(rel) {
+        Ok(d)  => d,
+        // `rel` is a file (or already gone) — remove it directly.
+        Err(_) => return fs.root_dir().remove(rel).is_ok(),
+    };
+    // Collect (name, is_dir) so the iterator borrow is released before we mutate.
+    let entries: alloc::vec::Vec<(alloc::string::String, bool)> = dir
+        .iter()
+        .filter_map(|e| e.ok())
+        .filter_map(|e| {
+            let name = e.file_name();
+            if name == "." || name == ".." { None } else { Some((name, e.is_dir())) }
+        })
+        .collect();
+    drop(dir);
+
+    for (name, is_dir) in &entries {
+        let child = alloc::format!("{}/{}", rel, name);
+        let ok = if *is_dir {
+            remove_tree(fs, &child)
+        } else {
+            fs.root_dir().remove(&child).is_ok()
+        };
+        if !ok { return false; }
+    }
     fs.root_dir().remove(rel).is_ok()
 }
 
@@ -358,6 +453,10 @@ pub fn main() {
                 let path_len = buf[1] as usize;
                 let path = core::str::from_utf8(&buf[2..2usize.saturating_add(path_len)]).ok();
 
+                // NOTE: `path` (from buf[2..]) is the 2-byte-header parse used by
+                // mkdir/rmdir/unlink. OP_WRITE/OP_APPEND re-parse from buf[4..] (4-byte
+                // header). Future opcodes must pick ONE scheme and NOT use the loop-level
+                // `path` if they use the 4-byte header.
                 match buf[0] {
                     OP_GET_FILE => {
                         if let Some(p) = path {
@@ -424,10 +523,10 @@ pub fn main() {
                     }
                     OP_RMDIR => {
                         if let Some(p) = path {
-                            // fatfs remove() deletes an empty dir and errors on a
-                            // non-empty one — same POSIX-rmdir semantics as vfs.rmdir().
+                            // Phase H: rmdir_fat16 verifies the target IS a directory
+                            // before calling remove() — POSIX type semantics (ENOTDIR).
                             let ok = if p.starts_with("/data/") {
-                                unlink_fat16(fat_fs.as_ref(), p)
+                                rmdir_fat16(fat_fs.as_ref(), p)
                             } else {
                                 vfs.rmdir(p)
                             };
@@ -443,6 +542,39 @@ pub fn main() {
                             };
                             ostd::syscall::sys_send(sender, if ok { b"\x00" } else { b"\x01" });
                         }
+                    }
+                    OP_RMDIR_RECURSIVE => {
+                        if let Some(p) = path {
+                            // Recursive delete only for the persistent FAT16 volume.
+                            // /tmp RamFS is volatile and out of scope for recursive delete.
+                            let ok = if p.starts_with("/data/") {
+                                rmdir_recursive_fat16(fat_fs.as_ref(), p)
+                            } else {
+                                false
+                            };
+                            ostd::syscall::sys_send(sender, if ok { b"\x00" } else { b"\x01" });
+                        }
+                    }
+                    OP_APPEND => {
+                        // Same header as OP_WRITE: [op][path_len:u8][content_len:u16 LE][path][content]
+                        let pl = buf[1] as usize;
+                        let cl = u16::from_le_bytes([buf[2], buf[3]]) as usize;
+                        let ok = if 4 + pl + cl <= buf.len() {
+                            match core::str::from_utf8(&buf[4..4 + pl]) {
+                                Ok(p) if p.starts_with("/data/") =>
+                                    append_fat16(fat_fs.as_ref(), p, &buf[4 + pl..4 + pl + cl]),
+                                Ok(p) if p.starts_with("/tmp/") => {
+                                    let content = &buf[4 + pl..4 + pl + cl];
+                                    let mut data = vfs.get_file_data(p)
+                                        .map(|d| d.to_vec())
+                                        .unwrap_or_default();
+                                    data.extend_from_slice(content);
+                                    vfs.write_file(p, &data)
+                                }
+                                _ => false,
+                            }
+                        } else { false };
+                        ostd::syscall::sys_send(sender, if ok { b"\x00" } else { b"\x01" });
                     }
                     _ => {
                         ostd::syscall::sys_send(sender, b"");

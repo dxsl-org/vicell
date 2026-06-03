@@ -559,3 +559,43 @@ fn vfs_fat16_subdir_persistence() {
             qemu2.dump()
         ));
 }
+
+/// Phase H: recursive directory removal via `rm -r /data/dir` (OP_RMDIR_RECURSIVE).
+#[test]
+fn vfs_fat16_recursive_rmdir() {
+    if !prerequisites_ok() { return; }
+    let mut qemu = QemuRunner::boot(&kernel_path(), &disk_path());
+    qemu.wait_for("ViOS >", BOOT_TIMEOUT)
+        .unwrap_or_else(|e| panic!("prompt: {e}\n{}", qemu.dump()));
+    assert!(qemu.output_contains("FAT16 /data volume mounted"), "FAT16 not mounted\n{}", qemu.dump());
+    std::thread::sleep(std::time::Duration::from_millis(500));
+
+    qemu.send_line("mkdir /data/rr");
+    qemu.wait_for("ViOS >", CMD_TIMEOUT).unwrap_or_else(|e| panic!("mkdir: {e}\n{}", qemu.dump()));
+    qemu.send_line("echo X > /data/rr/f.txt");
+    qemu.wait_for("ViOS >", CMD_TIMEOUT).unwrap_or_else(|e| panic!("write: {e}\n{}", qemu.dump()));
+    qemu.send_line("rm -r /data/rr");
+    qemu.wait_for("ViOS >", CMD_TIMEOUT).unwrap_or_else(|e| panic!("rm -r: {e}\n{}", qemu.dump()));
+    qemu.send_line("vcat /data/rr/f.txt");
+    qemu.wait_for("not found", CMD_TIMEOUT)
+        .unwrap_or_else(|e| panic!("tree not deleted: {e}\n{}", qemu.dump()));
+}
+
+/// Phase H: OP_APPEND assembles content without truncating (vwrite then vappend).
+#[test]
+fn vfs_fat16_append() {
+    if !prerequisites_ok() { return; }
+    let mut qemu = QemuRunner::boot(&kernel_path(), &disk_path());
+    qemu.wait_for("ViOS >", BOOT_TIMEOUT)
+        .unwrap_or_else(|e| panic!("prompt: {e}\n{}", qemu.dump()));
+    assert!(qemu.output_contains("FAT16 /data volume mounted"), "FAT16 not mounted\n{}", qemu.dump());
+    std::thread::sleep(std::time::Duration::from_millis(500));
+
+    qemu.send_line("vwrite /data/big.txt AAA");
+    qemu.wait_for("ViOS >", CMD_TIMEOUT).unwrap_or_else(|e| panic!("vwrite: {e}\n{}", qemu.dump()));
+    qemu.send_line("vappend /data/big.txt BBB");
+    qemu.wait_for("ViOS >", CMD_TIMEOUT).unwrap_or_else(|e| panic!("vappend: {e}\n{}", qemu.dump()));
+    qemu.send_line("vcat /data/big.txt");
+    qemu.wait_for("AAABBB", CMD_TIMEOUT)
+        .unwrap_or_else(|e| panic!("append truncated/lost: {e}\n{}", qemu.dump()));
+}

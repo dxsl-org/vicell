@@ -216,6 +216,33 @@
 
 ---
 
+## [2026-06-03] Phase H — Kernel Permissions & FAT16 Type Guards (Complete)
+
+**Changes**:
+- **KernelPerms Bitflags**: Replaced boot-order-fragile `can_block_io: bool` in `kernel/src/task/tcb.rs` with `KernelPerms(u32)` bitfield. `KernelPerms::BLOCK_IO = 1<<0` granted to `/bin/vfs` at spawn time via `kernel/src/loader.rs`. Enables future capabilities without ABI changes.
+- **POSIX Type Checking**: `unlink_fat16` now rejects directories (type guard via `open_file`); new `rmdir_fat16` rejects files (type guard via `open_dir`). Fixes Phase G limitation where `rmdir file.txt` and `unlink dir/` both succeeded.
+- **Recursive rmdir**: New `OP_RMDIR_RECURSIVE=9` opcode + `rm -r /data/dir` shell command. Implemented via `remove_tree()` (depth-first, collect-before-mutate, `root_dir()`-per-level to avoid borrow conflicts). Defense-in-depth `..` path rejection on all helpers.
+- **OP_APPEND=10**: Append to existing FAT16 files without truncating. `append_fat16` uses `fatfs::File::seek(End(0))` translating to `disk.seek(Start(abs_end))` internally (BlockStream::seek(End) never called). New `vwrite`/`vappend` shell built-ins for testing. `/tmp/` append via read-extend-write.
+
+**Files Modified**:
+- `kernel/src/task/tcb.rs` — KernelPerms bitflags + BLOCK_IO constant
+- `kernel/src/loader.rs` — grant logic for KernelPerms::BLOCK_IO to `/bin/vfs`
+- `kernel/src/task/syscall.rs` — updated block-I/O gate to use caller permissions
+- `cells/services/vfs/src/main.rs` — rmdir type checking, recursive removal, append support
+- `cells/apps/shell/src/cmd_fs.rs` — vwrite/vappend built-ins
+- `cells/apps/shell/src/executor.rs` — command registration
+- `tests/integration/tests/boot.rs` — 2 new tests: vfs_fat16_recursive_rmdir, vfs_fat16_append
+
+**Status**: Complete. 21/21 integration tests pass.
+
+**Impact**:
+- File-vs-directory semantics now enforced (POSIX-compliant)
+- Recursive directory cleanup now possible (`rm -r /data/dir`)
+- Append mode enables append-only workflows and log files
+- KernelPerms foundation enables future capability tokens without ABI breaks
+
+---
+
 ## See Also
 
 - **project-roadmap.md** — Live phase tracking and milestone definitions
@@ -230,9 +257,9 @@
 | Version | Date | Phase(s) | Status |
 |---------|------|----------|--------|
 | 0.2.0 | 2026-05-01 | Phase 0 (Alpha) | Stable baseline |
-| 0.2.1-dev | 2026-06-03 | Phases 01–23, C/D/E/F complete | In progress |
-| 0.2.1 | TBD | Phase 1 + Phases C/D/E/F complete | Pending |
-| 0.3.0 | 2026-09-30 | Phases 2–3 + Phase G | Planned |
+| 0.2.1-dev | 2026-06-03 | Phases 01–23, C/D/E/F/G/H complete | In progress |
+| 0.2.1 | TBD | Phase 1 + Phases C/D/E/F/G/H complete | Pending |
+| 0.3.0 | 2026-09-30 | Phases 2–3 + Phase I+ | Planned |
 | 1.0.0 | 2027-03-31 | Phases 4+ | Planned |
 
 ---

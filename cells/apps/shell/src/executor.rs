@@ -149,7 +149,9 @@ fn dispatch_builtin(prog: &str, args: &[&str], jobs: &mut Jobs) -> i32 {
         "mkdir" => crate::cmd_fs::cmd_mkdir(make_parts(args)),
         "rmdir" => crate::cmd_fs::cmd_rmdir(make_parts(args)),
         "rm"    => crate::cmd_fs::cmd_rm(make_parts(args)),
-        "vcat"  => crate::cmd_fs::cmd_vcat(make_parts(args)),
+        "vcat"    => crate::cmd_fs::cmd_vcat(make_parts(args)),
+        "vwrite"  => crate::cmd_fs::cmd_vwrite(make_parts(args)),
+        "vappend" => crate::cmd_fs::cmd_vappend(make_parts(args)),
         // ── System ──────────────────────────────────────────────────────
         "ps"     => crate::commands::cmd_ps(make_parts(args)),
         "pwd"    => crate::cmd_sys::cmd_pwd(make_parts(args)),

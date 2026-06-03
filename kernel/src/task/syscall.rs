@@ -66,18 +66,18 @@ const MAX_LOG_MSG: usize = 4096;
 
 /// Returns `true` if the calling task holds raw block-device I/O permission.
 ///
-/// Checks the per-TCB `can_block_io` flag set at spawn time for `/bin/vfs`.
-/// Replaces the former boot-order-fragile `VFS_TASK_ID == 3` check (Phase G).
-/// TODO Phase H: fold into a formal `CapPerms::BLOCK_IO` capability token.
+/// Checks `KernelPerms::BLOCK_IO` in the per-TCB bitfield, set at spawn time
+/// for `/bin/vfs`. Boot-order-independent (Phase H replaces `can_block_io: bool`).
 ///
-/// Lock-ordering note: acquires SCHEDULER, drops before returning. No nested
+/// Lock-ordering: acquires SCHEDULER, drops before returning. No nested
 /// BLOCK_DEVICE lock inside this call — safe against the FS read ordering.
 fn caller_has_block_io(caller_id: usize) -> bool {
+    use super::tcb::KernelPerms;
     super::SCHEDULER
         .lock()
         .as_ref()
         .and_then(|sched| sched.tasks.get(&caller_id))
-        .map(|t| t.can_block_io)
+        .map(|t| t.kernel_perms.contains(KernelPerms::BLOCK_IO))
         .unwrap_or(false)
 }
 

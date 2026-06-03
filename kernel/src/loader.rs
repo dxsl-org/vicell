@@ -68,13 +68,13 @@ pub fn spawn_from_path(path: &str) -> ViResult<usize> {
     let tid = crate::task::spawn_from_mem(&elf_bytes, name, CellId(0), alloc::vec::Vec::new())
         .map_err(|_| ViError::OutOfMemory)?;
 
-    // Grant raw block-I/O to the VFS service only. Boot-order-independent
-    // replacement for the former `VFS_TASK_ID == 3` hardcode (Phase G).
-    // Phase H: replace with a formal CapPerms::BLOCK_IO capability token.
+    // Grant raw block-I/O to the VFS service only (boot-order-independent).
+    // `KernelPerms::BLOCK_IO` is kernel-internal — no Law 1 ABI impact (Phase H).
     if path.ends_with("/bin/vfs") {
+        use crate::task::tcb::KernelPerms;
         if let Some(sched) = crate::task::SCHEDULER.lock().as_mut() {
             if let Some(task) = sched.tasks.get_mut(&tid) {
-                task.can_block_io = true;
+                task.kernel_perms = task.kernel_perms.with(KernelPerms::BLOCK_IO);
             }
         }
     }

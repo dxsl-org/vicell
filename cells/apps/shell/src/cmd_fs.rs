@@ -13,9 +13,11 @@ use ostd::syscall;
 /// IPC to the user_hello task instead of the VFS service. Verified from QEMU
 /// serial log — see kernel/src/task/syscall.rs ServiceLookup table.
 const VFS_ENDPOINT: usize = 3;
-const OP_MKDIR:  u8 = 5;
-const OP_RMDIR:  u8 = 6;
-const OP_UNLINK: u8 = 7;
+const OP_MKDIR:           u8 = 5;
+const OP_RMDIR:           u8 = 6;
+const OP_UNLINK:          u8 = 7;
+const OP_RMDIR_RECURSIVE: u8 = 9;
+const OP_APPEND:          u8 = 10;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -235,22 +237,43 @@ pub fn cmd_rmdir<'a>(mut args: core::str::SplitWhitespace<'a>) -> ViResult<()> {
 
 // ─── rm ───────────────────────────────────────────────────────────────────────
 
-/// `rm <path>` — remove a file via VFS IPC (`-r` flag silently accepted).
+/// `rm [-r] [-f] <path>` — remove a file, or (with -r on /data) a directory tree.
 pub fn cmd_rm<'a>(mut args: core::str::SplitWhitespace<'a>) -> ViResult<()> {
-    // Consume optional -r / -f flags.
+    let mut recursive = false;
     let path = loop {
         match args.next() {
-            Some(a) if a.starts_with('-') => {}
+            Some(a) if a.starts_with('-') => { recursive |= a.contains('r'); }
             Some(a) => break a,
-            None => { ostd::io::println("Usage: rm <path>"); return Ok(()); }
+            None => { ostd::io::println("Usage: rm [-r] <path>"); return Ok(()); }
         }
     };
-    if !vfs_path_op(OP_UNLINK, path) {
+    let ok = if recursive && path.starts_with("/data/") {
+        rm_recursive(path)
+    } else {
+        vfs_path_op(OP_UNLINK, path)
+    };
+    if !ok {
         ostd::io::print("rm: cannot remove '");
         ostd::io::print(path);
         ostd::io::println("'");
     }
     Ok(())
+}
+
+/// Send OP_RMDIR_RECURSIVE to VFS — recursively deletes a `/data/` directory tree.
+pub fn rm_recursive(path: &str) -> bool {
+    let pb = path.as_bytes();
+    let pl = pb.len().min(253) as u8;
+    let mut buf = [0u8; 256];
+    buf[0] = OP_RMDIR_RECURSIVE;
+    buf[1] = pl;
+    buf[2..2 + pl as usize].copy_from_slice(&pb[..pl as usize]);
+    syscall::sys_send(VFS_ENDPOINT, &buf[..2 + pl as usize]);
+    let mut reply = [0u8; 4];
+    match syscall::sys_recv(0, &mut reply) {
+        syscall::SyscallResult::Ok(_) => reply[0] == 0,
+        _ => false,
+    }
 }
 
 const OP_WRITE: u8 = 4;
@@ -275,6 +298,50 @@ pub fn write_file(path: &str, content: &[u8]) -> bool {
         syscall::SyscallResult::Ok(_) => reply[0] == 0,
         _ => false,
     }
+}
+
+/// Append `content` to `path` via OP_APPEND (same 4-byte header as OP_WRITE).
+/// Path + content capped to 512 bytes per call — caller chunks for larger payloads.
+pub fn append_file(path: &str, content: &[u8]) -> bool {
+    let pb = path.as_bytes();
+    let pl = pb.len().min(255);
+    let cl = content.len().min(512_usize.saturating_sub(4 + pl));
+    let mut buf = [0u8; 512];
+    buf[0] = OP_APPEND;
+    buf[1] = pl as u8;
+    buf[2..4].copy_from_slice(&(cl as u16).to_le_bytes());
+    buf[4..4 + pl].copy_from_slice(&pb[..pl]);
+    buf[4 + pl..4 + pl + cl].copy_from_slice(&content[..cl]);
+    syscall::sys_send(VFS_ENDPOINT, &buf[..4 + pl + cl]);
+    let mut reply = [0u8; 1];
+    match syscall::sys_recv(0, &mut reply) {
+        syscall::SyscallResult::Ok(_) => reply[0] == 0,
+        _ => false,
+    }
+}
+
+/// `vwrite <path> <text>` — write text to a VFS path via OP_WRITE (test helper).
+pub fn cmd_vwrite<'a>(mut args: core::str::SplitWhitespace<'a>) -> ViResult<()> {
+    let path = match args.next() { Some(p) => p, None => { ostd::io::println("Usage: vwrite <path> <text>"); return Ok(()); } };
+    let rest = args.collect::<alloc::vec::Vec<_>>().join(" ");
+    if !write_file(path, rest.as_bytes()) {
+        ostd::io::print("vwrite: failed to write '");
+        ostd::io::print(path);
+        ostd::io::println("'");
+    }
+    Ok(())
+}
+
+/// `vappend <path> <text>` — append text to a VFS path via OP_APPEND (test helper).
+pub fn cmd_vappend<'a>(mut args: core::str::SplitWhitespace<'a>) -> ViResult<()> {
+    let path = match args.next() { Some(p) => p, None => { ostd::io::println("Usage: vappend <path> <text>"); return Ok(()); } };
+    let rest = args.collect::<alloc::vec::Vec<_>>().join(" ");
+    if !append_file(path, rest.as_bytes()) {
+        ostd::io::print("vappend: failed to append '");
+        ostd::io::print(path);
+        ostd::io::println("'");
+    }
+    Ok(())
 }
 
 /// Read file content from VFS via OP_READ; returns byte count written into `out`.

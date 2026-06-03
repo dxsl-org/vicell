@@ -86,6 +86,30 @@ pub enum SyscallFuture {
                                                             // Add other syscall futures here (FileWrite, Connect, etc.)
 }
 
+/// Kernel-internal capability bitflags for a task.
+///
+/// Replaces the single-purpose `can_block_io: bool` (Phase G) with a bitfield
+/// that accommodates future kernel-only capabilities without TCB struct changes.
+///
+/// NOTE: kernel-internal only — distinct from `libs/api` `CapPerms` (file I/O, Law 1).
+#[derive(Copy, Clone, Default)]
+pub struct KernelPerms(u32);
+
+impl KernelPerms {
+    /// Permits raw block-device syscalls (500/501/503). Granted to `/bin/vfs` at spawn.
+    pub const BLOCK_IO: Self = Self(1 << 0);
+
+    #[inline]
+    pub const fn contains(self, other: Self) -> bool {
+        self.0 & other.0 != 0
+    }
+
+    #[inline]
+    pub const fn with(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+}
+
 /// Task Control Block (TCB)
 #[allow(dead_code)]
 pub struct Task {
@@ -125,10 +149,9 @@ pub struct Task {
     // Async Kernel Support
     pub pending_future: Option<SyscallFuture>,
 
-    /// Grants access to raw block-device syscalls (500/501/503).
-    /// Set at spawn time for `/bin/vfs`; false for every other cell.
-    /// Phase H replaces this with a formal `CapPerms::BLOCK_IO` capability token.
-    pub can_block_io: bool,
+    /// Kernel capability bitfield. Granted at spawn (e.g. BLOCK_IO for `/bin/vfs`).
+    /// Empty for every other cell. Replaces the Phase G `can_block_io: bool`.
+    pub kernel_perms: KernelPerms,
 }
 
 impl Task {
@@ -154,7 +177,7 @@ impl Task {
             waiters: Vec::new(),
             exit_code: None,
             pending_future: None,
-            can_block_io: false,
+            kernel_perms: KernelPerms::default(),
         }
     }
 
