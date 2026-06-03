@@ -3,7 +3,7 @@
 **Audience**: Developers new to ViOS  
 **Level**: High-level (conceptual + key components)  
 **Version**: 0.2.1-dev (Mycelium Era)  
-**Last Updated**: 2026-06-03
+**Last Updated**: 2026-06-03 (Phase G complete)
 
 ---
 

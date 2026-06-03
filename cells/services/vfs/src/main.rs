@@ -424,7 +424,13 @@ pub fn main() {
                     }
                     OP_RMDIR => {
                         if let Some(p) = path {
-                            let ok = vfs.rmdir(p);
+                            // fatfs remove() deletes an empty dir and errors on a
+                            // non-empty one — same POSIX-rmdir semantics as vfs.rmdir().
+                            let ok = if p.starts_with("/data/") {
+                                unlink_fat16(fat_fs.as_ref(), p)
+                            } else {
+                                vfs.rmdir(p)
+                            };
                             ostd::syscall::sys_send(sender, if ok { b"\x00" } else { b"\x01" });
                         }
                     }

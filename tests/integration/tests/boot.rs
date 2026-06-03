@@ -477,3 +477,85 @@ fn vfs_fat16_subdir() {
     qemu.wait_for("PHASE_F_SUB", CMD_TIMEOUT)
         .unwrap_or_else(|e| panic!("subdir readback: {e}\n{}", qemu.dump()));
 }
+
+/// Phase G: a non-VFS cell must NOT access raw block I/O (capability gate).
+///
+/// `blktest` calls `sys_blk_read` from the shell cell, which lacks `can_block_io`.
+/// The gate must deny it with `PermissionDenied`.
+#[test]
+fn block_io_denied_non_vfs() {
+    if !prerequisites_ok() {
+        return;
+    }
+    let mut qemu = QemuRunner::boot(&kernel_path(), &disk_path());
+    qemu.wait_for("ViOS >", BOOT_TIMEOUT)
+        .unwrap_or_else(|e| panic!("prompt not reached: {e}\n{}", qemu.dump()));
+    std::thread::sleep(std::time::Duration::from_millis(500));
+
+    qemu.send_line("blktest");
+    qemu.wait_for("blkio: denied", CMD_TIMEOUT)
+        .unwrap_or_else(|e| panic!("block I/O was NOT denied for non-VFS cell: {e}\n{}", qemu.dump()));
+
+    // Guard against false pass: the BUG marker must never appear.
+    assert!(
+        !qemu.output_contains("blkio: ALLOWED"),
+        "capability gate let a non-VFS cell read the block device\n{}", qemu.dump()
+    );
+}
+
+/// Phase G: a FAT16 SUBDIRECTORY write survives a full reboot.
+///
+/// Same power-cycle pattern as `vfs_fat16_reboot_persistence`, but the marker is
+/// written into a nested dir (`/data/pdir/f.txt`) created at runtime via `mkdir`.
+/// Shares `disk_v3.img`; create-or-overwrite keeps re-runs safe.
+#[test]
+fn vfs_fat16_subdir_persistence() {
+    if !prerequisites_ok() {
+        return;
+    }
+
+    // ── First boot: mkdir + write into the subdir, then shut down ────────────
+    let mut qemu = QemuRunner::boot(&kernel_path(), &disk_path());
+    qemu.wait_for("ViOS >", BOOT_TIMEOUT)
+        .unwrap_or_else(|e| panic!("first boot prompt failed: {e}\n{}", qemu.dump()));
+    assert!(
+        qemu.output_contains("FAT16 /data volume mounted"),
+        "FAT16 not mounted on first boot\n{}", qemu.dump()
+    );
+    std::thread::sleep(std::time::Duration::from_millis(500));
+
+    qemu.send_line("mkdir /data/pdir");
+    qemu.wait_for("ViOS >", CMD_TIMEOUT)
+        .unwrap_or_else(|e| panic!("mkdir did not return to prompt: {e}\n{}", qemu.dump()));
+
+    qemu.send_line("echo SUBDIR_PERSIST > /data/pdir/f.txt");
+    qemu.wait_for("ViOS >", CMD_TIMEOUT)
+        .unwrap_or_else(|e| panic!("subdir write did not return to prompt: {e}\n{}", qemu.dump()));
+
+    qemu.send_line("shutdown");
+    qemu.wait_for("System shutting down", CMD_TIMEOUT)
+        .unwrap_or_else(|e| panic!("shutdown did not run: {e}\n{}", qemu.dump()));
+    assert!(
+        qemu.wait_for_natural_exit(15),
+        "QEMU did not exit after shutdown\n{}", qemu.dump()
+    );
+    let first_boot_dump = qemu.dump();
+    drop(qemu);
+
+    // ── Second boot: verify the subdir file persisted ─────────────────────────
+    let mut qemu2 = QemuRunner::boot(&kernel_path(), &disk_path());
+    qemu2.wait_for("ViOS >", BOOT_TIMEOUT)
+        .unwrap_or_else(|e| panic!("second boot prompt failed: {e}\n{}", qemu2.dump()));
+    assert!(
+        qemu2.output_contains("FAT16 /data volume mounted"),
+        "FAT16 not mounted on second boot\n{}", qemu2.dump()
+    );
+    std::thread::sleep(std::time::Duration::from_millis(500));
+
+    qemu2.send_line("vcat /data/pdir/f.txt");
+    qemu2.wait_for("SUBDIR_PERSIST", CMD_TIMEOUT)
+        .unwrap_or_else(|e| panic!(
+            "subdir file not persisted across reboot: {e}\n--- first boot ---\n{first_boot_dump}\n--- second boot ---\n{}",
+            qemu2.dump()
+        ));
+}

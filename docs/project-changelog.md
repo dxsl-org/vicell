@@ -112,6 +112,47 @@
 - 4-byte header removes chunking bottleneck for large writes (up to 512-byte messages)
 - Unlink + mkdir on /data/ enable destructive operations (scripts can clean, recreate state)
 - Block I/O gating closes privilege escalation hole; non-VFS cells can no longer corrupt disk
+
+---
+
+## [2026-06-03] Phase G — FAT16 Completion (0.2.1-dev)
+
+**Changes**:
+- **Phase 1 (can_block_io TCB flag)**: Replaced boot-order-fragile `VFS_TASK_ID == 3` hardcode with per-cell `can_block_io: bool` flag set at spawn time for `/bin/vfs`
+  - `kernel/src/task/tcb.rs:126` — added field, default false
+  - `kernel/src/loader.rs:73-83` — grant logic; sets true when spawned path ends `/bin/vfs`
+  - `kernel/src/task/syscall.rs:70-82` — added `caller_has_block_io()` helper
+  - `kernel/src/task/syscall.rs:1082,1109,1130` — updated all 3 block-I/O gates (BlkFlush, BlkRead, BlkWrite)
+  - Removed `VFS_TASK_ID` constant entirely
+- **Phase 2 (OP_RMDIR for FAT16)**: Extended OP_RMDIR to route `/data/` paths to FAT16, enabling empty dir deletion
+  - `cells/services/vfs/src/main.rs:425-436` — OP_RMDIR arm now branches on path prefix, reuses `unlink_fat16()` (DRY)
+- **Phase 3 (Negative block-I/O test)**: Added security regression test asserting non-VFS cells cannot call raw block I/O
+  - `cells/apps/shell/src/cmd_sys.rs:72-81` — `cmd_blkio_test()` shell command
+  - `cells/apps/shell/src/executor.rs` — registered `"blktest"` dispatch arm
+  - `tests/integration/tests/boot.rs:486-510` — `block_io_denied_non_vfs` integration test
+- **Phase 4 (Subdir reboot persistence test)**: Validated FAT16 subdirectory writes survive power cycle
+  - `tests/integration/tests/boot.rs:512-568` — `vfs_fat16_subdir_persistence` integration test
+
+**Files Modified**:
+- `kernel/src/task/tcb.rs` — `can_block_io` field
+- `kernel/src/loader.rs` — grant logic in `spawn_from_path`
+- `kernel/src/task/syscall.rs` — `caller_has_block_io()` helper + gate updates
+- `cells/services/vfs/src/main.rs` — OP_RMDIR branch for `/data/`
+- `cells/apps/shell/src/cmd_sys.rs` — `cmd_blkio_test()` command
+- `cells/apps/shell/src/executor.rs` — dispatch registration
+- `tests/integration/tests/boot.rs` — 2 new integration tests
+
+**Status**: Complete. 4 independent phases, all integrated. 19/19 integration tests pass.
+
+**Integration Tests Added**:
+- `block_io_denied_non_vfs` — verifies capability gate rejects non-VFS block I/O syscalls
+- `vfs_fat16_subdir_persistence` — validates nested-dir writes survive reboot (mirrors Phase E pattern)
+
+**Impact**:
+- Block I/O capability now boot-order-independent; safer, more modular design
+- FAT16 rmdir enables cleanup scripts; `/data/` directory lifecycle complete
+- Security regression test locks in privilege separation; accidental grants caught immediately
+- Subdir persistence proved end-to-end; FAT16 is now a durable storage backend
 - Foundation for Phase G (capability tokens, reboot persistence of subdirs, ACPI/PSCI)
 
 ---

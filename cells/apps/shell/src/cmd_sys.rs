@@ -63,3 +63,18 @@ pub fn cmd_shutdown<'a>() -> ViResult<()> {
     ostd::io::println("System shutting down...");
     syscall::sys_shutdown()
 }
+
+/// `blktest` — attempt a raw block read from the shell cell (a non-VFS cell).
+///
+/// Prints `"blkio: denied"` when Phase G's capability gate correctly rejects the
+/// call, or `"blkio: ALLOWED (BUG)"` if the gate is missing. Used exclusively
+/// by the `block_io_denied_non_vfs` integration test.
+pub fn cmd_blkio_test<'a>(_args: core::str::SplitWhitespace<'a>) -> ViResult<()> {
+    let mut buf = [0u8; 512];
+    if syscall::sys_blk_read(0, &mut buf) {
+        ostd::io::println("blkio: ALLOWED (BUG)");
+    } else {
+        ostd::io::println("blkio: denied");
+    }
+    Ok(())
+}

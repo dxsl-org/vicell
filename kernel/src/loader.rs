@@ -65,8 +65,20 @@ pub fn spawn_from_path(path: &str) -> ViResult<usize> {
     let name = path.rsplit('/').next().unwrap_or(path);
 
     // Spawn via the existing in-memory spawn path (ELF parse + segment map).
-    crate::task::spawn_from_mem(&elf_bytes, name, CellId(0), alloc::vec::Vec::new())
-        .map_err(|_| ViError::OutOfMemory)
+    let tid = crate::task::spawn_from_mem(&elf_bytes, name, CellId(0), alloc::vec::Vec::new())
+        .map_err(|_| ViError::OutOfMemory)?;
+
+    // Grant raw block-I/O to the VFS service only. Boot-order-independent
+    // replacement for the former `VFS_TASK_ID == 3` hardcode (Phase G).
+    // Phase H: replace with a formal CapPerms::BLOCK_IO capability token.
+    if path.ends_with("/bin/vfs") {
+        if let Some(sched) = crate::task::SCHEDULER.lock().as_mut() {
+            if let Some(task) = sched.tasks.get_mut(&tid) {
+                task.can_block_io = true;
+            }
+        }
+    }
+    Ok(tid)
 }
 
 /// Linker trait (reserved for future dynamic-linking support).

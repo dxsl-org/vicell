@@ -124,6 +124,11 @@ pub struct Task {
 
     // Async Kernel Support
     pub pending_future: Option<SyscallFuture>,
+
+    /// Grants access to raw block-device syscalls (500/501/503).
+    /// Set at spawn time for `/bin/vfs`; false for every other cell.
+    /// Phase H replaces this with a formal `CapPerms::BLOCK_IO` capability token.
+    pub can_block_io: bool,
 }
 
 impl Task {
@@ -149,6 +154,7 @@ impl Task {
             waiters: Vec::new(),
             exit_code: None,
             pending_future: None,
+            can_block_io: false,
         }
     }
 

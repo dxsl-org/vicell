@@ -64,13 +64,22 @@ const MAX_USER_BUF: usize = 64 * 1024 * 1024;
 /// Tighter cap for `Syscall::Log` since the kernel holds locks while printing.
 const MAX_LOG_MSG: usize = 4096;
 
-/// Only this task may issue raw block-device syscalls (500/501/503).
+/// Returns `true` if the calling task holds raw block-device I/O permission.
 ///
-/// VFS = task 3 in the standard boot order (init=1, user_hello=2, vfs=3).
-/// Cross-ref: the ServiceLookup table (`"vfs" => 3`, syscall.rs:651) hardcodes
-/// the same value.  Both must change together if the boot order shifts.
-/// TODO Phase G: replace with a `CapPerms::BLOCK_IO` capability token.
-const VFS_TASK_ID: usize = 3;
+/// Checks the per-TCB `can_block_io` flag set at spawn time for `/bin/vfs`.
+/// Replaces the former boot-order-fragile `VFS_TASK_ID == 3` check (Phase G).
+/// TODO Phase H: fold into a formal `CapPerms::BLOCK_IO` capability token.
+///
+/// Lock-ordering note: acquires SCHEDULER, drops before returning. No nested
+/// BLOCK_DEVICE lock inside this call — safe against the FS read ordering.
+fn caller_has_block_io(caller_id: usize) -> bool {
+    super::SCHEDULER
+        .lock()
+        .as_ref()
+        .and_then(|sched| sched.tasks.get(&caller_id))
+        .map(|t| t.can_block_io)
+        .unwrap_or(false)
+}
 
 /// Validate a user-supplied (ptr, len) buffer descriptor.
 ///
@@ -1078,8 +1087,8 @@ pub fn handle_syscall(caller_id: usize, syscall: Syscall) -> SyscallResult {
             Ok(crate::cell::state_stash::restore(key as u64, buf))
         }
         Syscall::BlkFlush => {
-            if caller_id != VFS_TASK_ID {
-                log::warn!("BlkFlush denied: task {} != VFS_TASK_ID {} (boot order changed?)", caller_id, VFS_TASK_ID);
+            if !caller_has_block_io(caller_id) {
+                log::warn!("BlkFlush denied: task {} lacks block-I/O capability", caller_id);
                 return Err(SyscallError::PermissionDenied);
             }
             use crate::task::drivers::virtio_blk::viVirtIOBlk;
@@ -1105,8 +1114,8 @@ pub fn handle_syscall(caller_id: usize, syscall: Syscall) -> SyscallResult {
             }
         }
         Syscall::BlkRead { sector, buf_ptr } => {
-            if caller_id != VFS_TASK_ID {
-                log::warn!("BlkRead denied: task {} != VFS_TASK_ID {} (boot order changed?)", caller_id, VFS_TASK_ID);
+            if !caller_has_block_io(caller_id) {
+                log::warn!("BlkRead denied: task {} lacks block-I/O capability", caller_id);
                 return Err(SyscallError::PermissionDenied);
             }
             // Reject any sector at/after the cell bootstrap table; a runaway FAT
@@ -1126,8 +1135,8 @@ pub fn handle_syscall(caller_id: usize, syscall: Syscall) -> SyscallResult {
             }
         }
         Syscall::BlkWrite { sector, buf_ptr } => {
-            if caller_id != VFS_TASK_ID {
-                log::warn!("BlkWrite denied: task {} != VFS_TASK_ID {} (boot order changed?)", caller_id, VFS_TASK_ID);
+            if !caller_has_block_io(caller_id) {
+                log::warn!("BlkWrite denied: task {} lacks block-I/O capability", caller_id);
                 return Err(SyscallError::PermissionDenied);
             }
             // Reject any sector at/after the cell bootstrap table; prevents a
