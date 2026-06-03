@@ -35,8 +35,7 @@ use socket_table::SocketTable;
 /// Fixed MAC address for QEMU VirtIO NIC (locally administered, unicast).
 const MAC: EthernetAddress = EthernetAddress([0x52, 0x54, 0x00, 0x12, 0x34, 0x56]);
 
-/// Maximum simultaneous sockets.
-const MAX_SOCKETS: usize = 18;
+use socket_table::MAX_SOCKETS;
 
 /// Number of ticks between forced smoltcp polls (fallback when no IPC arrives).
 const POLL_TICKS: u64 = POLL_INTERVAL_MS * 10_000; // 100ms @ 10 MHz mtime
@@ -141,7 +140,7 @@ pub fn main() {
                     &mut iface,
                     &mut sockets,
                     &mut table,
-                    &mut local_ip,
+                    &local_ip,
                 );
             }
             _ => {
@@ -159,7 +158,7 @@ fn handle_ipc(
     iface: &mut Interface,
     sockets: &mut SocketSet<'_>,
     table: &mut SocketTable,
-    local_ip: &mut [u8; 4],
+    local_ip: &[u8; 4],
 ) {
     match decode_message(buf) {
         NetMessage::RxFrame(frame) => {

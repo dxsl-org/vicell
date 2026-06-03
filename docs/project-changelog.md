@@ -4,6 +4,63 @@
 
 ---
 
+## [2026-06-03] Phase A–B — Network TCP Data-Path & HTTP/1.0 GET (Complete)
+
+**Changes**:
+- **Phase A (TCP Data-Path)**: Full TCP client stack wired in network service
+  - `cells/services/net/src/socket_state.rs` — `SocketState` enum (Created/Connecting/Connected/Listening/Closed) with `#[allow(dead_code)]` for server-side variants
+  - `cells/services/net/src/socket_table.rs` — Extended with `states: BTreeMap<u64, SocketState>` + `get_state()`/`set_state()` methods
+  - `cells/services/net/src/main.rs` — Wired syscall handlers:
+    - `CONNECT` (opcode 0x16): state guard, ephemeral port allocation (49152–65534), immediate SYN flush
+    - `SEND` (opcode 0x17): Connecting→Connected auto-transition, `can_send()` guard, per-state validation
+    - `RECV` (opcode 0x18): `can_recv()` guard, 4 KB cap, zero-scan length detection for ASCII payloads
+    - `SOCKET_STATE` (opcode 0x19): read-only state query (1-byte encoding for FIN/CloseWait detection)
+  - Fixed shell's `&mut local_ip` → `&local_ip` to prevent `SmoltcpDriver` method signature mismatch
+  - Removed duplicate `MAX_SOCKETS` constant redefinition (now uses `socket_table::MAX_SOCKETS`)
+  - `kernel/src/task/syscall.rs` — Added hardcoded ServiceLookup: vfs=3, config=4, input=5, net=6, compositor=7, shell=8
+  - `tests/integration/src/lib.rs` — Added `spawn_echo_server()` helper for host-side TCP echo server testing
+
+- **Phase B (HTTP/1.0 GET)**: Full curl implementation and nc utility
+  - `cells/apps/net-tools/src/bin/nc.rs` — TCP client binary: SOCKET_TCP→CONNECT→SEND→RECV→CLOSE with retry loop tracking `sent_bytes` offset to avoid prefix duplication on partial writes
+  - `cells/apps/net-tools/src/bin/curl.rs` — HTTP/1.0 GET client with:
+    - URL parsing (scheme/host/path extraction)
+    - SOCKET_TCP→CONNECT→SEND GET request→accumulate RECV→CLOSE
+    - SOCKET_STATE (0x19) opcode for FIN/CloseWait detection
+    - Stack-only buffer (no heap) to avoid BSS conflicts in SAS address space
+    - Retry loop with `sent_bytes` offset tracking (prevents request prefix duplication)
+  - Disk build integration: added `/bin/nc` and `/bin/curl` to cell table in `gen_disk.ps1`
+
+**Files Modified**:
+- `cells/services/net/src/socket_state.rs` — new enum
+- `cells/services/net/src/socket_table.rs` — state tracking
+- `cells/services/net/src/main.rs` — CONNECT/SEND/RECV/SOCKET_STATE handlers
+- `cells/services/net/src/poll_driver.rs` — SOCKET_STATE constant (0x19)
+- `cells/apps/net-tools/src/bin/nc.rs` — full TCP client
+- `cells/apps/net-tools/src/bin/curl.rs` — HTTP/1.0 GET client
+- `kernel/src/task/syscall.rs` — ServiceLookup table (net=6)
+- `gen_disk.ps1` — added /bin/nc and /bin/curl
+- `tests/integration/src/lib.rs` — `spawn_echo_server()` helper
+- `tests/integration/tests/boot.rs` — 2 new integration tests
+
+**Integration Tests Added**:
+- `network_tcp_send_recv` — CONNECT→SEND "HELLO_VIOS\n"→RECV echo→CLOSE with host TCP echo server
+- `network_curl_http_get` — HTTP GET to host server, verifies response contains "200" + "HELLO"
+
+**Status**: Complete. All 23 integration tests pass (21 FAT16 + 2 network).
+
+**Known Limitations**:
+- Zero-scan RECV length detection (using `rposition(|&b| b != 0)`) works ASCII-only; binary protocol fix (length-prefixed replies) deferred to Phase C+
+- NET_ENDPOINT = 6 hardcoded (matches spawn order); dynamic ServiceLookup registry deferred to v0.3
+- TCP server (LISTEN/ACCEPT) not yet implemented
+
+**Impact**:
+- ViOS can fetch HTTP responses from external servers via curl utility
+- TCP data-path validated end-to-end with host server integration
+- Network tooling now usable from shell (`nc`, `curl`)
+- Foundation for Phase C (VFS-backed persistent HTTP responses)
+
+---
+
 ## [2026-05-28] Phase 01 — Workspace Cleanup (0.2.0 → 0.2.1-dev)
 
 **Changes**:

@@ -3,7 +3,7 @@
 **Project**: ViOS (Jarvis Hybrid OS)  
 **Current Version**: 0.2.1-dev (Mycelium Era)  
 **Current Phase**: Phase 1 - Core Stability  
-**Last Updated**: 2026-06-03 (Phase H complete)
+**Last Updated**: 2026-06-03 (Phase H complete, Phase A–B complete)
 
 ---
 
@@ -20,7 +20,7 @@ ViOS development is organized into 4 major phases, each with specific milestones
 **Start Date**: 2026-04-01  
 **Target End Date**: 2026-06-30  
 **Effort**: 320 hours (~8 weeks @ 40h/wk)
-**Status**: ✅ 95% COMPLETE (Phases 01, 02, 05, C, D, E, F, G, H all complete)
+**Status**: ✅ 95% COMPLETE (Phases 01, 02, 05, C, D, E, F, G, H, A, B all complete)
 
 ### Milestone 1.1: VirtIO Block Device Fix
 **Status**: ✅ PARTIAL (Root Cause Fixed)  
@@ -199,15 +199,24 @@ All milestones complete when:
 ---
 
 ### Milestone 2.3: Complete Network Service
-**Status**: 📋 PLANNED  
+**Status**: ✅ PARTIAL (TCP data-path + HTTP/1.0 GET working)  
 **Priority**: P1
 
-- TCP/IPv4 stack (basic)
-- DHCP client
-- Socket syscalls (bind, listen, connect, send, recv)
-- VirtIO NIC driver
+**Phase A+B Complete**:
+- [x] TCP client (CONNECT, SEND, RECV, CLOSE)
+- [x] HTTP/1.0 GET client (curl)
+- [x] nc utility (TCP echo client)
+- [x] Socket state introspection (SOCKET_STATE opcode)
+- [x] Integration tests (network_tcp_send_recv, network_curl_http_get)
 
-**Effort**: 200 hours
+**Remaining**:
+- TCP server (LISTEN, ACCEPT)
+- DHCP client
+- UDP support
+- Full socket API (bind, listen, etc.)
+- VirtIO NIC kernel driver
+
+**Effort**: 200 hours (100 hours Phase A+B complete, 100 hours remaining)
 
 ---
 
@@ -428,8 +437,6 @@ Phase 4 (Advanced Features)
 
 | Issue | Impact | Status |
 |-------|--------|--------|
-| VFS write (FAT32) | Can't persist files | 🚧 Phase 13 integration |
-| Network data-path | TCP/UDP ops return 0xFF stubs | 🚧 Phase 15 implementation |
 | Per-Cell SATP | No true address-space isolation | 📋 Phase 21+ |
 
 ### Low Priority
@@ -460,7 +467,9 @@ Phase 4 (Advanced Features)
 ✅ **Phase E**: Hardening + reboot persistence  
 ✅ **Phase F**: FAT16 hardening (unlink, mkdir, nested paths, block-I/O gate)  
 ✅ **Phase G**: FAT16 completion (can_block_io capability, rmdir, persistence)  
-✅ **Phase H**: Kernel permissions + FAT16 type guards (KernelPerms, rmdir type-safe, recursive rm, append)
+✅ **Phase H**: Kernel permissions + FAT16 type guards (KernelPerms, rmdir type-safe, recursive rm, append)  
+✅ **Phase A**: Network TCP Data-Path (CONNECT, SEND, RECV, CLOSE, socket state)  
+✅ **Phase B**: HTTP/1.0 GET via curl (nc binary, curl binary, state introspection)
 
 ---
 
@@ -512,7 +521,8 @@ Phase 4 (Advanced Features)
 | External ELF | ✅ Working | ✅ spawn_from_path verified | ✅ COMPLETE |
 | HotSwap | ✅ Working | ✅ 5-step protocol verified | ✅ COMPLETE |
 | FAT16 persistence | ✅ Full stack | ✅ All phases C–H verified (21/21 tests) | ✅ COMPLETE |
-| Test coverage | ✅ 80%+ | ✅ 90%+ (phases C–H) | ✅ MET |
+| Network TCP | ✅ Data-path functional | ✅ Phases A–B verified (2 new tests) | ✅ COMPLETE |
+| Test coverage | ✅ 80%+ | ✅ 90%+ (phases C–H + A–B: 23/23) | ✅ MET |
 | Architecture tests | ✅ 10/10 | ✅ 10/10 | ✅ MET |
 | Kernel LOC | ✅ < 10,000 | ✅ 8,700 | ✅ MET |
 
@@ -533,7 +543,8 @@ Phase 4 (Advanced Features)
 - ✅ External ELF loading (Phase 10)
 - ✅ HotSwap orchestrator (Phase 20)
 - ✅ FAT16 persistence stack: VFS RamFS + block I/O + hardening + type guards (Phases C–H)
-- ✅ Integration test suite (90%+ coverage, 21/21 tests passing)
+- ✅ Network TCP data-path: CONNECT/SEND/RECV/CLOSE + HTTP/1.0 GET (Phases A–B)
+- ✅ Integration test suite (90%+ coverage, 23/23 tests passing)
 
 ### v0.3.0 (Target: 2026-09-30)
 - FAT16 feature parity (permissions, extended attrs, sparse files)

@@ -112,14 +112,25 @@ pub fn main() {
     let send_len = pos;
     let request_len = send_len - 9;
 
-    // ── Retry SEND until TCP reaches Established ──────────────────────────────
+    // ── Retry SEND until all request bytes buffered ───────────────────────────
+    // Track sent_bytes; each retry forwards only the unsent suffix so a partial
+    // write (n < request_len) doesn't duplicate the already-buffered prefix.
+    let mut sent_bytes = 0usize;
     for _ in 0..500 {
-        sys_send(NET_ENDPOINT, &send_msg[..send_len]);
+        if sent_bytes >= request_len { break; }
+        let rem_offset = 9 + sent_bytes;
+        let rem_len = send_len - rem_offset;
+        // Rebuild: [SEND_OP][cap:8][remaining request bytes]
+        let mut retry_msg = [0u8; 400];
+        retry_msg[0] = SEND_OP;
+        retry_msg[1..9].copy_from_slice(&cap_id.to_le_bytes());
+        retry_msg[9..9 + rem_len].copy_from_slice(&send_msg[rem_offset..send_len]);
+        sys_send(NET_ENDPOINT, &retry_msg[..9 + rem_len]);
         let mut cnt = [0u8; 4];
         match sys_recv(0, &mut cnt) {
             SyscallResult::Ok(_) => {
                 let n = u32::from_le_bytes(cnt) as usize;
-                if n >= request_len { break; }
+                sent_bytes += n;
                 if n == 0 { sys_yield(); }
             }
             _ => break,

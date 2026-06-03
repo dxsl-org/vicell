@@ -91,22 +91,23 @@ pub fn main() {
     println("connected");
 
     // ── SEND "HELLO_VIOS\n" — retry until all bytes buffered ─────────────────
-    // The net cell returns a 4-byte LE byte-count. 0 = not established yet.
-    // Build message: [0x13][cap:8][payload]
-    let mut send_msg = [0u8; 9 + 11]; // opcode + cap + "HELLO_VIOS\n"
-    send_msg[0] = SEND_OP;
-    send_msg[1..9].copy_from_slice(&cap_id.to_le_bytes());
-    send_msg[9..9 + HELLO.len()].copy_from_slice(HELLO);
-
-    // Retry until the net cell confirms bytes were buffered (n > 0 means
-    // smoltcp reached Established and send_slice accepted the data).
+    // Track sent_bytes so each retry forwards only the unsent suffix, preventing
+    // prefix duplication if smoltcp accepts a partial write (n < HELLO.len()).
+    let mut sent_bytes = 0usize;
     for _ in 0..500 {
-        sys_send(NET_ENDPOINT, &send_msg);
+        if sent_bytes >= HELLO.len() { break; }
+        let rem = &HELLO[sent_bytes..];
+        // Build: [SEND_OP][cap:8][remaining payload]
+        let mut send_msg = [0u8; 9 + 11];
+        send_msg[0] = SEND_OP;
+        send_msg[1..9].copy_from_slice(&cap_id.to_le_bytes());
+        send_msg[9..9 + rem.len()].copy_from_slice(rem);
+        sys_send(NET_ENDPOINT, &send_msg[..9 + rem.len()]);
         let mut cnt = [0u8; 4];
         match sys_recv(0, &mut cnt) {
             SyscallResult::Ok(_) => {
                 let n = u32::from_le_bytes(cnt) as usize;
-                if n >= HELLO.len() { break; }
+                sent_bytes += n;
                 if n == 0 { sys_yield(); }
             }
             _ => break,
