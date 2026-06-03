@@ -9,6 +9,8 @@ fn main() {
     let embed_port = vendor.join("ports/embed/port");
 
     // ── Step 1: generate genhdr/ if missing or stale ─────────────────────
+    // Pass the port C dir as arg 3 so gen_genhdr.py scans modvnet.c for
+    // MP_QSTR_ references and MP_REGISTER_MODULE registrations.
     let qstr_out = genhdr_dir.join("qstrdefs.generated.h");
     if !qstr_out.exists() {
         let python = find_python();
@@ -17,6 +19,7 @@ fn main() {
             .arg(&gen_script)
             .arg(&vendor)
             .arg(&genhdr_dir)
+            .arg(&port_dir)
             .status()
             .expect("gen_genhdr.py: failed to run");
         assert!(status.success(), "gen_genhdr.py exited with error");
@@ -106,10 +109,12 @@ fn main() {
     // Our src/c/vios/mphalport.c provides all HAL functions.
     build.file(embed_port.join("embed_util.c"));
 
-    // ── Step 6: ViOS HAL + stubs ──────────────────────────────────────────
+    // ── Step 6: ViOS HAL + stubs + vnet module ───────────────────────────
     build.file(port_dir.join("mphalport.c"));
     // Stubs: readline, mp_lexer_new_from_file, mp_import_stat, disabled modules
     build.file(port_dir.join("vios_stubs.c"));
+    // vnet Python module: TCP socket IPC via vios_net_* bridge (net_bridge.rs)
+    build.file(port_dir.join("modvnet.c"));
     // GC register collector: gchelper_rv64i.s provides gc_helper_get_regs_and_sp;
     // gchelper_native.c wraps it into gc_helper_collect_regs_and_stack.
     build.file(shared_rt.join("gchelper_native.c"));
@@ -133,6 +138,8 @@ fn main() {
     println!("cargo:rerun-if-changed=micropython.ld");
     println!("cargo:rerun-if-changed=src/c/vios/mpconfigport.h");
     println!("cargo:rerun-if-changed=src/c/vios/mphalport.c");
+    println!("cargo:rerun-if-changed=src/c/vios/modvnet.c");
+    println!("cargo:rerun-if-changed=src/c/vios/vios_stubs.c");
     println!("cargo:rerun-if-changed=gen_genhdr.py");
     println!("cargo:rerun-if-changed=vendor/py");
 }
@@ -170,13 +177,13 @@ fn run_cross_compiler(args: &[&str]) -> String {
 }
 
 fn find_python() -> String {
-    // Try project venv python first, then system python3/python.
-    let candidates = [
-        r"~\.claude\skills\.venv\Scripts\python.exe",
-        "python3",
-        "python",
-    ];
-    for c in &candidates {
+    // Expand `~` to the user home directory before probing.
+    let home = std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .unwrap_or_default();
+    let venv_python = format!(r"{}\.claude\skills\.venv\Scripts\python.exe", home);
+    let candidates: &[&str] = &[venv_python.as_str(), "python3", "python"];
+    for &c in candidates {
         if Command::new(c).arg("--version").output().is_ok() {
             return c.to_string();
         }

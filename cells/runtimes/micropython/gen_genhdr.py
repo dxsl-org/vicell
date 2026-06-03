@@ -103,6 +103,8 @@ STATIC_QSTRS = [
     "staticmethod", "step", "stop", "str", "strip", "sum", "super",
     "throw", "to_bytes", "tuple", "type", "update", "upper", "utf-8",
     "value", "values", "write", "zip",
+    # ViOS port-specific QSTRs (vnet module)
+    "vnet", "resolve", "udp_send", "udp_recv",
 ]
 
 # ── Unsorted pool (small index, from makeqstrdata.py) ────────────────────
@@ -171,11 +173,13 @@ def make_qdef(ident: str, s: str, pool: int) -> str:
     return 'QDEF%d(MP_QSTR_%s, %d, %d, "%s")' % (pool, ident, qhash, qlen, qdata)
 
 
-def scan_qstrs_from_source(vendor_dir: str) -> set:
+def scan_qstrs_from_source(vendor_dir: str, port_dir: str = '') -> set:
     """Regex-scan C/H files for MP_QSTR_xxx usages."""
     found = set()
-    for scan_dir in SCAN_DIRS:
-        d = os.path.join(vendor_dir, scan_dir)
+    dirs_to_scan = [os.path.join(vendor_dir, d) for d in SCAN_DIRS]
+    if port_dir and os.path.isdir(port_dir):
+        dirs_to_scan.append(port_dir)
+    for d in dirs_to_scan:
         if not os.path.isdir(d):
             continue
         for fname in os.listdir(d):
@@ -190,7 +194,7 @@ def scan_qstrs_from_source(vendor_dir: str) -> set:
     return found
 
 
-def write_qstrdefs(out_path: str, vendor_dir: str):
+def write_qstrdefs(out_path: str, vendor_dir: str, port_dir: str = ''):
     # Track every ident emitted so far to prevent redeclaration.
     emitted: set[str] = {'MP_QSTRnull'}
 
@@ -218,7 +222,7 @@ def write_qstrdefs(out_path: str, vendor_dir: str):
     # Pool 1: extra qstrs found in source via MP_QSTR_xxx scan.
     # The raw identifier after MP_QSTR_ is already in escaped form for
     # pure-ASCII names.  Skip anything already in QDEF0 pools.
-    raw_scanned = scan_qstrs_from_source(vendor_dir)
+    raw_scanned = scan_qstrs_from_source(vendor_dir, port_dir)
     extra_count = 0
     for raw_ident in sorted(raw_scanned):
         if raw_ident in emitted:
@@ -270,10 +274,12 @@ def write_mpversion(out_path: str, vendor_dir: str):
 _REGISTRATION_SCAN_DIRS = ['py', 'shared/runtime']
 
 
-def _scan_all_c_files(vendor_dir: str):
-    """Yield text content of .c files in registration scan dirs."""
-    for scan_dir in _REGISTRATION_SCAN_DIRS:
-        d = os.path.join(vendor_dir, scan_dir)
+def _scan_all_c_files(vendor_dir: str, port_dir: str = ''):
+    """Yield text content of .c files in registration scan dirs + optional port dir."""
+    dirs = [os.path.join(vendor_dir, d) for d in _REGISTRATION_SCAN_DIRS]
+    if port_dir and os.path.isdir(port_dir):
+        dirs.append(port_dir)
+    for d in dirs:
         if not os.path.isdir(d):
             continue
         for fname in os.listdir(d):
@@ -285,13 +291,13 @@ def _scan_all_c_files(vendor_dir: str):
                 pass
 
 
-def write_moduledefs(out_path: str, vendor_dir: str):
+def write_moduledefs(out_path: str, vendor_dir: str, port_dir: str = ''):
     """Mirror of makemoduledefs.py: generate extern + #define + MICROPY_REGISTERED_MODULES."""
     regular: list[tuple] = []    # (module_name, obj_module)
     extensible: list[tuple] = [] # (module_name, obj_module)
 
     seen = set()
-    for text in _scan_all_c_files(vendor_dir):
+    for text in _scan_all_c_files(vendor_dir, port_dir):
         for macro, qstr_name, obj_module in MODULE_PATTERN.findall(text):
             key = (macro, qstr_name, obj_module)
             if key in seen:
@@ -329,10 +335,10 @@ def write_moduledefs(out_path: str, vendor_dir: str):
     print(f'  moduledefs.h: {len(regular)} regular + {len(extensible)} extensible modules')
 
 
-def write_root_pointers(out_path: str, vendor_dir: str):
+def write_root_pointers(out_path: str, vendor_dir: str, port_dir: str = ''):
     """Mirror of make_root_pointers.py: bare C variable declarations inside mp_state_vm_t."""
     ptrs: set[str] = set()
-    for text in _scan_all_c_files(vendor_dir):
+    for text in _scan_all_c_files(vendor_dir, port_dir):
         for decl in ROOT_PTR_PATTERN.findall(text):
             ptrs.add(decl.strip())
 
@@ -347,17 +353,18 @@ def write_root_pointers(out_path: str, vendor_dir: str):
 
 def main():
     if len(sys.argv) < 3:
-        print('Usage: gen_genhdr.py <vendor_dir> <genhdr_output_dir>')
+        print('Usage: gen_genhdr.py <vendor_dir> <genhdr_output_dir> [port_c_dir]')
         sys.exit(1)
     vendor_dir = sys.argv[1]
     out_dir    = sys.argv[2]
+    port_dir   = sys.argv[3] if len(sys.argv) >= 4 else ''
     os.makedirs(out_dir, exist_ok=True)
 
     print('Generating genhdr/ files...')
-    write_qstrdefs(os.path.join(out_dir, 'qstrdefs.generated.h'), vendor_dir)
+    write_qstrdefs(os.path.join(out_dir, 'qstrdefs.generated.h'), vendor_dir, port_dir)
     write_mpversion(os.path.join(out_dir, 'mpversion.h'),         vendor_dir)
-    write_moduledefs(os.path.join(out_dir, 'moduledefs.h'),       vendor_dir)
-    write_root_pointers(os.path.join(out_dir, 'root_pointers.h'), vendor_dir)
+    write_moduledefs(os.path.join(out_dir, 'moduledefs.h'),       vendor_dir, port_dir)
+    write_root_pointers(os.path.join(out_dir, 'root_pointers.h'), vendor_dir, port_dir)
     print('Done.')
 
 

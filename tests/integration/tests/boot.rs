@@ -760,3 +760,65 @@ fn vfs_fat16_append() {
     qemu.wait_for("AAABBB", CMD_TIMEOUT)
         .unwrap_or_else(|e| panic!("append truncated/lost: {e}\n{}", qemu.dump()));
 }
+
+// ── Phase G: MicroPython argv + vnet module ───────────────────────────────────
+
+/// Phase G.1: `python -c "print(2+3)"` must output `5`.
+///
+/// Verifies that `mp_embed_exec_str` executes Python source passed via argv,
+/// not just the banner printout that was previously the only verified output.
+#[test]
+fn python_exec_code() {
+    if !prerequisites_ok() { return; }
+    let mut qemu = QemuRunner::boot(&kernel_path(), &disk_path());
+    qemu.wait_for("ViOS >", BOOT_TIMEOUT)
+        .unwrap_or_else(|e| panic!("prompt not reached: {e}\n{}", qemu.dump()));
+    std::thread::sleep(Duration::from_millis(500));
+
+    // No spaces in the expression so the shell passes it as one token.
+    qemu.send_line("python -c print(2+3)");
+    qemu.wait_for("5", 20)
+        .unwrap_or_else(|e| panic!("python did not execute code: {e}\n--- output ---\n{}", qemu.dump()));
+}
+
+/// Phase G.1: `python path.py` must read the script from VFS and execute it.
+///
+/// Uses `vwrite` to create a one-liner Python script in /data/, then spawns
+/// `python /data/py_script_test.py` to verify the VFS-read + exec path.
+#[test]
+fn python_script_file() {
+    if !prerequisites_ok() { return; }
+    let mut qemu = QemuRunner::boot(&kernel_path(), &disk_path());
+    qemu.wait_for("ViOS >", BOOT_TIMEOUT)
+        .unwrap_or_else(|e| panic!("prompt: {e}\n{}", qemu.dump()));
+    assert!(qemu.output_contains("FAT16 /data volume mounted"), "FAT16 not mounted\n{}", qemu.dump());
+    std::thread::sleep(Duration::from_millis(500));
+
+    // Use a short (8.3-compatible) filename — FAT16 LFN is not guaranteed.
+    qemu.send_line("vwrite /data/test.py print('PYTHON_SCRIPT_OK')");
+    qemu.wait_for("ViOS >", CMD_TIMEOUT)
+        .unwrap_or_else(|e| panic!("vwrite: {e}\n{}", qemu.dump()));
+    qemu.send_line("python /data/test.py");
+    qemu.wait_for("PYTHON_SCRIPT_OK", 20)
+        .unwrap_or_else(|e| panic!("python script did not run: {e}\n--- output ---\n{}", qemu.dump()));
+}
+
+/// Phase G.2: `import vnet; vnet.resolve('gateway')` must return `10.0.2.2`.
+///
+/// Verifies the vnet C module is registered in MicroPython's built-in module
+/// table and that the static DNS table returns the QEMU SLIRP gateway.
+/// Uses `__import__` so the whole expression fits in one `-c` argument without
+/// semicolons (the ViOS shell splits on `;`).
+#[test]
+fn python_vnet_resolve() {
+    if !prerequisites_ok() { return; }
+    let mut qemu = QemuRunner::boot(&kernel_path(), &disk_path());
+    qemu.wait_for("ViOS >", BOOT_TIMEOUT)
+        .unwrap_or_else(|e| panic!("prompt not reached: {e}\n{}", qemu.dump()));
+    std::thread::sleep(Duration::from_millis(500));
+
+    // `__import__` avoids a separate `import` statement and semicolons.
+    qemu.send_line("python -c print(__import__('vnet').resolve('gateway'))");
+    qemu.wait_for("10.0.2.2", 20)
+        .unwrap_or_else(|e| panic!("vnet.resolve('gateway') failed: {e}\n--- output ---\n{}", qemu.dump()));
+}
