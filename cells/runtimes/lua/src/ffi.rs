@@ -34,6 +34,21 @@ extern "C" {
     /// Returns `LUA_OK` on success; otherwise pushes an error string.
     pub fn luaL_loadstring(L: *mut LuaState, s: *const c_char) -> c_int;
 
+    /// Compile `sz` bytes at `buff` as a Lua chunk named `name`.
+    ///
+    /// This is the real exported symbol; `luaL_loadbuffer` in lua.h is the macro
+    /// `luaL_loadbufferx(L,s,sz,n,NULL)`. Pass `core::ptr::null()` for `mode`
+    /// to get the same default behavior (text + binary).
+    /// Unlike `luaL_loadstring`, the buffer need not be NUL-terminated,
+    /// making it correct for raw file content from VFS.
+    pub fn luaL_loadbufferx(
+        L: *mut LuaState,
+        buff: *const c_char,
+        sz: usize,
+        name: *const c_char,
+        mode: *const c_char,
+    ) -> c_int;
+
     /// Call the function at the top of the stack with `nargs` arguments.
     /// `LUA_MULTRET` for `nresults` accepts any number of results.
     ///

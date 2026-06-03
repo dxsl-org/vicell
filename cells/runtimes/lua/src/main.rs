@@ -1,13 +1,37 @@
 #![no_std]
 #![no_main]
 
+extern crate alloc;
 extern crate ostd;
 extern crate api;
 
 mod bindings_io;
 mod bindings_net;
+mod bindings_vfs;
 mod ffi;
 mod repl_session;
+
+/// Read up to 4096 bytes from a VFS path via OP_READ IPC.
+///
+/// Returns byte count (zero-scan from reply; sys_recv returns sender_id not length).
+/// Matches `read_file_vfs` in cells/apps/shell/src/cmd_fs.rs.
+fn vfs_read_to_buf(path: &str, buf: &mut [u8]) -> usize {
+    const VFS_ENDPOINT: usize = 3;
+    const OP_READ: u8 = 8;
+    let pb = path.as_bytes();
+    let pl = pb.len().min(253) as u8;
+    let mut req = [0u8; 256];
+    req[0] = OP_READ;
+    req[1] = pl;
+    req[2..2 + pl as usize].copy_from_slice(&pb[..pl as usize]);
+    ostd::syscall::sys_send(VFS_ENDPOINT, &req[..2 + pl as usize]);
+    match ostd::syscall::sys_recv(0, buf) {
+        ostd::syscall::SyscallResult::Ok(_) => {
+            buf.iter().rposition(|&b| b != 0).map(|i| i + 1).unwrap_or(0)
+        }
+        _ => 0,
+    }
+}
 
 #[no_mangle]
 #[allow(non_snake_case)] // reason: L is the Lua API convention
@@ -48,6 +72,21 @@ extern "C" fn main() -> usize {
         ffi::lua_setglobal(L, c"vnet".as_ptr());
     }
 
+    // Register the `vfs` table (read/write/append/mkdir). Net stack delta = 0.
+    // SAFETY: L is non-null; binding fns uphold the lua_CFunction contract.
+    unsafe {
+        ffi::lua_createtable(L, 0, 4);
+        ffi::lua_pushcclosure(L, bindings_vfs::vfs_read, 0);
+        ffi::lua_setfield(L, -2, c"read".as_ptr());
+        ffi::lua_pushcclosure(L, bindings_vfs::vfs_write, 0);
+        ffi::lua_setfield(L, -2, c"write".as_ptr());
+        ffi::lua_pushcclosure(L, bindings_vfs::vfs_append, 0);
+        ffi::lua_setfield(L, -2, c"append".as_ptr());
+        ffi::lua_pushcclosure(L, bindings_vfs::vfs_mkdir, 0);
+        ffi::lua_setfield(L, -2, c"mkdir".as_ptr());
+        ffi::lua_setglobal(L, c"vfs".as_ptr());
+    }
+
     // Read the command line published by the spawner (e.g. the shell).
     let mut argbuf = [0u8; 512];
     let n = ostd::syscall::sys_spawn_args(&mut argbuf);
@@ -67,6 +106,57 @@ extern "C" fn main() -> usize {
         loop {
             ostd::task::yield_now();
         }
+    }
+
+    // `lua /path/to/script.lua` — read file from VFS and execute.
+    // Reached when args is non-empty and does not start with `-e` (the `-e` branch
+    // parks before falling through). Empty args falls through to the REPL.
+    if !args.is_empty() {
+        let path = args.trim();
+        let mut file_buf = alloc::vec![0u8; 4096];
+        let n = vfs_read_to_buf(path, &mut file_buf);
+        if n == 0 {
+            ostd::io::print("lua: cannot open '");
+            ostd::io::print(path);
+            ostd::io::println("'");
+        } else {
+            // Chunk name "@/data/script.lua" for error messages (NUL-terminated).
+            let mut chunk_name = alloc::vec![b'@'; 1 + path.len() + 1];
+            chunk_name[1..1 + path.len()].copy_from_slice(path.as_bytes());
+            *chunk_name.last_mut().unwrap() = 0;
+            // SAFETY: L is valid; file_buf[..n] is valid Lua source bytes;
+            // chunk_name is NUL-terminated and outlives the pcall.
+            // luaL_loadbuffer in lua.h is the macro luaL_loadbufferx(L,s,sz,n,NULL);
+            // we bind the real symbol and pass null for the mode (text + binary).
+            let rc = unsafe {
+                ffi::luaL_loadbufferx(
+                    L,
+                    file_buf.as_ptr() as *const core::ffi::c_char,
+                    n,
+                    chunk_name.as_ptr() as *const core::ffi::c_char,
+                    core::ptr::null(),
+                )
+            };
+            if rc == ffi::LUA_OK {
+                let _ = unsafe {
+                    ffi::lua_pcallk(L, 0, ffi::LUA_MULTRET, 0, 0, core::ptr::null_mut())
+                };
+            } else {
+                let mut len = 0usize;
+                // SAFETY: L is valid; -1 is the error string at stack top.
+                let ptr = unsafe { ffi::lua_tolstring(L, -1, &mut len as *mut _) };
+                if !ptr.is_null() {
+                    // SAFETY: Lua guarantees `len` valid bytes at `ptr`.
+                    let bytes = unsafe { core::slice::from_raw_parts(ptr as *const u8, len) };
+                    if let Ok(s) = core::str::from_utf8(bytes) {
+                        ostd::io::println(s);
+                    }
+                }
+                // SAFETY: L is valid; pops the error string.
+                unsafe { ffi::lua_settop(L, -2) };
+            }
+        }
+        loop { ostd::task::yield_now(); }
     }
 
     // No `-e`: interactive REPL (multi-line, history, Ctrl+C/D).

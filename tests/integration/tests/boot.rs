@@ -338,6 +338,42 @@ fn lua_vnet_resolve_dns() {
         .unwrap_or_else(|e| panic!("DNS resolve produced no output: {e}\n--- output ---\n{}", qemu.dump()));
 }
 
+/// Phase F.1: `lua /data/script.lua` — reads and executes a Lua script from VFS.
+#[test]
+fn lua_script_file() {
+    if !prerequisites_ok() {
+        return;
+    }
+    let mut qemu = QemuRunner::boot(&kernel_path(), &disk_path());
+    qemu.wait_for("ViOS >", BOOT_TIMEOUT)
+        .unwrap_or_else(|e| panic!("prompt: {e}\n{}", qemu.dump()));
+    assert!(qemu.output_contains("FAT16 /data volume mounted"), "FAT16 not mounted\n{}", qemu.dump());
+    std::thread::sleep(Duration::from_millis(500));
+    qemu.send_line("vwrite /data/hello.lua print('SCRIPT_OK')");
+    qemu.wait_for("ViOS >", CMD_TIMEOUT)
+        .unwrap_or_else(|e| panic!("vwrite: {e}\n{}", qemu.dump()));
+    qemu.send_line("lua /data/hello.lua");
+    qemu.wait_for("SCRIPT_OK", 15)
+        .unwrap_or_else(|e| panic!("script did not run: {e}\n{}", qemu.dump()));
+}
+
+/// Phase F.2: Lua `vfs.*` file I/O — write then read back from /data/.
+#[test]
+fn lua_vfs_write_read() {
+    if !prerequisites_ok() {
+        return;
+    }
+    let mut qemu = QemuRunner::boot(&kernel_path(), &disk_path());
+    qemu.wait_for("ViOS >", BOOT_TIMEOUT)
+        .unwrap_or_else(|e| panic!("prompt: {e}\n{}", qemu.dump()));
+    assert!(qemu.output_contains("FAT16 /data volume mounted"), "FAT16 not mounted\n{}", qemu.dump());
+    std::thread::sleep(Duration::from_millis(500));
+    // Single -e expression: adjacent Lua stmts, no semicolons, no spaces inside strings.
+    qemu.send_line("lua -e vfs.write('/data/lua_vfs.txt','HELLO_VFS') print(vfs.read('/data/lua_vfs.txt'))");
+    qemu.wait_for("HELLO_VFS", 15)
+        .unwrap_or_else(|e| panic!("vfs roundtrip failed: {e}\n{}", qemu.dump()));
+}
+
 /// Phase D.2: HTTP/1.0 GET from Lua via the `vnet.*` TCP bindings.
 ///
 /// A host HTTP server is started before QEMU boots. SLIRP routes guest

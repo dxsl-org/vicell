@@ -20,7 +20,7 @@ ViOS development is organized into 4 major phases, each with specific milestones
 **Start Date**: 2026-04-01  
 **Target End Date**: 2026-06-30  
 **Effort**: 320 hours (~8 weeks @ 40h/wk)
-**Status**: ✅ 96% COMPLETE (Phases 01, 02, 05, C, D, E, F, G, H, A, B, D all complete)
+**Status**: ✅ 96% COMPLETE (Phases 01, 02, 05, C, D, E, F, G, H, A, B, C, D, E, F all complete)
 
 ### Milestone 1.1: VirtIO Block Device Fix
 **Status**: ✅ PARTIAL (Root Cause Fixed)  
@@ -475,6 +475,7 @@ Phase 4 (Advanced Features)
 ✅ **Phase D**: FAT16 write persistence on VirtIO block device  
 ✅ **Phase E**: Hardening + reboot persistence  
 ✅ **Phase F**: FAT16 hardening (unlink, mkdir, nested paths, block-I/O gate)  
+✅ **Phase F**: Lua script file loading + vfs.* bindings  
 ✅ **Phase G**: FAT16 completion (can_block_io capability, rmdir, persistence)  
 ✅ **Phase H**: Kernel permissions + FAT16 type guards (KernelPerms, rmdir type-safe, recursive rm, append)  
 ✅ **Phase A**: Network TCP Data-Path (CONNECT, SEND, RECV, CLOSE, socket state)  

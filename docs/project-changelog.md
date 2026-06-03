@@ -172,6 +172,43 @@
 
 ---
 
+## [2026-06-03] Phase F — Lua Script File Loading + vfs.* Bindings (Complete)
+
+**Changes**:
+- **Phase F.1 (Lua Script File Loading)**:
+  - `cells/runtimes/lua/src/ffi.rs` — added FFI binding for `luaL_loadbufferx` (the real exported symbol; `luaL_loadbuffer` in lua.h is a macro wrapping it). Passes `NULL` mode for text+binary default.
+  - `cells/runtimes/lua/src/main.rs` — added `extern crate alloc;`, `vfs_read_to_buf()` helper (OP_READ IPC to VFS_ENDPOINT=3), script-file execution branch after `-e` branch
+  - When args is non-empty and not `-e`, reads file from VFS and executes via `luaL_loadbufferx` + `lua_pcallk`
+  - Park loop at end ensures clean shutdown
+
+- **Phase F.2 (vfs.* Lua Bindings)**:
+  - `cells/runtimes/lua/src/bindings_vfs.rs` (NEW): implemented `vfs_read`, `vfs_write`, `vfs_append`, `vfs_mkdir` as Lua FFI bindings
+  - IPC mirrors cmd_fs.rs wire format exactly (VFS_ENDPOINT=3, OP_READ=8, OP_WRITE=4, OP_APPEND=10, OP_MKDIR=5)
+  - Content chunked at 480 bytes per round-trip with `max_chunk.max(1)` forward-progress guarantee
+  - `cells/runtimes/lua/src/main.rs` — added `mod bindings_vfs;`, registered `vfs` global table with 4 fields: read/write/append/mkdir
+
+**Files Modified**:
+- `cells/runtimes/lua/src/ffi.rs` — added luaL_loadbufferx FFI binding
+- `cells/runtimes/lua/src/main.rs` — script file loading + vfs table registration
+- `cells/runtimes/lua/src/bindings_vfs.rs` — NEW: vfs.* filesystem bindings
+
+**Files Created**:
+- `cells/runtimes/lua/src/bindings_vfs.rs` — VFS I/O FFI for Lua
+
+**Status**: Complete. 27/27 integration tests pass single-threaded.
+
+**Integration Tests Added**:
+- `lua_script_file` — executes `/data/hello.lua` script written by `vfs.write`
+- `lua_vfs_write_read` — round-trips data via `vfs.write` and `vfs.read`
+
+**Impact**:
+- Lua runtime now loads and executes `.lua` scripts from filesystem (VFS)
+- `vfs.*` bindings enable network scripting (reading files, writing logs, persistence)
+- Scripts can now perform filesystem I/O without spawning shell commands
+- Foundation for Phase G (Lua package system, module loading)
+
+---
+
 ## [2026-06-03] Phase F — FAT16 Hardening (Complete)
 
 **Changes**:
