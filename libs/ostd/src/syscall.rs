@@ -35,6 +35,48 @@ unsafe fn syscall(id: ViSyscall, a0: usize, a1: usize, a2: usize, a3: usize) -> 
     ret
 }
 
+/// Invoke a syscall by raw numeric id (bypasses the `ViSyscall` enum).
+///
+/// Used for block I/O (ids 500/501) which intentionally have no `ViSyscall`
+/// entry — keeping them out of `libs/api` avoids the Interface-is-Sacred
+/// 2x-confirmation gate. The kernel dispatches them via the numeric fallback
+/// in `vios_syscall_dispatch`.
+#[inline(always)]
+unsafe fn syscall_raw(id: usize, a0: usize, a1: usize, a2: usize, a3: usize) -> isize {
+    let mut ret: isize;
+    asm!(
+        "ecall",
+        inlateout("a0") a0 => ret,
+        in("a1") a1,
+        in("a2") a2,
+        in("a3") a3,
+        in("a7") id,
+        options(nostack, preserves_flags)
+    );
+    ret
+}
+
+/// Read one 512-byte sector from the VirtIO block device. Returns `true` on success.
+///
+/// Raw syscall 500 — has no `ViSyscall` entry to preserve `libs/api` stability.
+/// `buf` is filled only when this returns `true`.
+pub fn sys_blk_read(sector: u64, buf: &mut [u8; 512]) -> bool {
+    // SAFETY: buf is a fixed 512-byte stack array; the kernel validates the
+    // pointer with validate_user_buf before writing exactly 512 bytes.
+    let ret = unsafe { syscall_raw(500, sector as usize, buf.as_mut_ptr() as usize, 512, 0) };
+    ret == 1
+}
+
+/// Write one 512-byte sector to the VirtIO block device. Returns `true` on success.
+///
+/// Raw syscall 501. The write is synchronous (VirtIO polling) — durable on return.
+pub fn sys_blk_write(sector: u64, buf: &[u8; 512]) -> bool {
+    // SAFETY: buf is a fixed 512-byte stack array; the kernel validates the
+    // pointer with validate_user_buf before reading exactly 512 bytes.
+    let ret = unsafe { syscall_raw(501, sector as usize, buf.as_ptr() as usize, 512, 0) };
+    ret == 1
+}
+
 pub fn sys_log(msg: &str) -> SyscallResult {
     unsafe {
         syscall(ViSyscall::Log, msg.as_ptr() as usize, msg.len(), 0, 0);

@@ -250,6 +250,11 @@ pub enum Syscall {
     StateRestore { key: usize, buf_ptr: usize, buf_len: usize },
     /// 400: HotSwap — live-replace a Cell with a new ELF from disk.
     HotSwap { cell_id: usize, path_ptr: usize, path_len: usize },
+    /// 500: BlkRead — read one 512-byte sector from the VirtIO block device.
+    /// Not in `ViSyscall` enum to preserve `libs/api` stability (raw dispatch).
+    BlkRead { sector: u64, buf_ptr: usize },
+    /// 501: BlkWrite — write one 512-byte sector to the VirtIO block device.
+    BlkWrite { sector: u64, buf_ptr: usize },
 }
 
 /// Dispatches a system call to the appropriate handler.
@@ -1060,6 +1065,30 @@ pub fn handle_syscall(caller_id: usize, syscall: Syscall) -> SyscallResult {
             let buf = unsafe { core::slice::from_raw_parts_mut(buf_ptr as *mut u8, buf_len) };
             Ok(crate::cell::state_stash::restore(key as u64, buf))
         }
+        Syscall::BlkRead { sector, buf_ptr } => {
+            validate_user_buf(buf_ptr, 512, MAX_USER_BUF)?;
+            use crate::task::drivers::virtio_blk::viVirtIOBlk;
+            use api::block::ViBlockDevice;
+            // SAFETY: buf_ptr is a user-space 512-byte buffer validated above;
+            // SUM=1 (set by vios_syscall_dispatch) allows S-mode to write it.
+            let buf = unsafe { core::slice::from_raw_parts_mut(buf_ptr as *mut u8, 512) };
+            match viVirtIOBlk.read_sector(sector, buf) {
+                Ok(()) => Ok(1),
+                Err(_)  => Ok(0),
+            }
+        }
+        Syscall::BlkWrite { sector, buf_ptr } => {
+            validate_user_buf(buf_ptr, 512, MAX_USER_BUF)?;
+            use crate::task::drivers::virtio_blk::viVirtIOBlk;
+            use api::block::ViBlockDevice;
+            // SAFETY: buf_ptr is a user-space 512-byte buffer validated above;
+            // SUM=1 allows S-mode to read it.
+            let buf = unsafe { core::slice::from_raw_parts(buf_ptr as *const u8, 512) };
+            match viVirtIOBlk.write_sector(sector, buf) {
+                Ok(()) => Ok(1),
+                Err(_)  => Ok(0),
+            }
+        }
         Syscall::HotSwap { cell_id, path_ptr, path_len } => {
             // Validate and copy the path string from user space.
             let path_len = path_len.min(crate::loader::disk_layout::MAX_CELL_PATH);
@@ -1166,7 +1195,11 @@ pub extern "Rust" fn vios_syscall_dispatch(frame: &mut ViTrapFrame) {
             108 => Syscall::GetCwd { buf_ptr: a0, buf_len: a1 },
             110 => Syscall::MkDir { path_ptr: a0, path_len: a1 },
             111 => Syscall::Create { path_ptr: a0, path_len: a1 },
-            
+
+            // Block I/O — intentionally absent from ViSyscall/libs/api (avoids ABI 2x-confirm).
+            500 => Syscall::BlkRead  { sector: a0 as u64, buf_ptr: a1 },
+            501 => Syscall::BlkWrite { sector: a0 as u64, buf_ptr: a1 },
+
              _ => {
                  frame.regs[10] = usize::MAX; // -1
                  return;

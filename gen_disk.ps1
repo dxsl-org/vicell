@@ -110,6 +110,12 @@ $blankImg = New-Object byte[] $diskSize
 [System.IO.File]::WriteAllBytes("disk_v3.img", $blankImg)
 Write-Host "  Blank 40 MB image created."
 
+# 3c. Format an empty FAT16 filesystem on LBA 0-81919 (before the cell table
+#     lands at LBA 82000). The VFS cell mounts this at startup as /data/.
+Write-Host "Formatting FAT16 partition (LBA 0-81919)..."
+python "$tools_dir\mkfat16.py" "disk_v3.img" 81920 2>&1
+if ($LASTEXITCODE -ne 0) { Write-Host "Warning: mkfat16.py failed; /data writes will not persist."; }
+
 # 4. Append cell bootstrap table (for kernel early loader).
 # Only include the cells that the kernel early loader needs: VFS, config, shell.
 # Optionally include lua and bench when built.

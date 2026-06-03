@@ -319,3 +319,36 @@ fn vfs_write_echo_redirect() {
     qemu.wait_for("PHASE_C_WRITE", CMD_TIMEOUT)
         .unwrap_or_else(|e| panic!("file content not read back: {e}\n--- output ---\n{}", qemu.dump()));
 }
+
+/// Phase D: write to /data (FAT16 on VirtIO) and read it back in the same boot.
+///
+/// Proves the full path: shell → VFS → fatfs → BlockStream → block syscall →
+/// VirtIO → disk image → back. Reboot persistence is Phase E (needs graceful
+/// QEMU shutdown to flush the disk image before kill).
+#[test]
+fn vfs_fat16_write_read() {
+    if !prerequisites_ok() {
+        return;
+    }
+    let mut qemu = QemuRunner::boot(&kernel_path(), &disk_path());
+
+    qemu.wait_for("ViOS >", BOOT_TIMEOUT)
+        .unwrap_or_else(|e| panic!("prompt not reached: {e}\n--- output ---\n{}", qemu.dump()));
+
+    // Verify the VFS cell successfully mounted the Phase 2 FAT16 volume.
+    assert!(
+        qemu.output_contains("FAT16 /data volume mounted"),
+        "VFS did not mount FAT16 /data volume\n--- output ---\n{}",
+        qemu.dump()
+    );
+
+    std::thread::sleep(std::time::Duration::from_millis(500));
+
+    qemu.send_line("echo PHASE_D_PERSIST > /data/test.txt");
+    qemu.wait_for("ViOS >", CMD_TIMEOUT)
+        .unwrap_or_else(|e| panic!("write did not return to prompt: {e}\n{}", qemu.dump()));
+
+    qemu.send_line("vcat /data/test.txt");
+    qemu.wait_for("PHASE_D_PERSIST", CMD_TIMEOUT)
+        .unwrap_or_else(|e| panic!("FAT16 read-back failed: {e}\n--- output ---\n{}", qemu.dump()));
+}

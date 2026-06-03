@@ -6,6 +6,7 @@ extern crate driver_disk;
 
 use api::hotswap::ViStateTransfer;
 
+mod block_stream;
 mod handle_table;
 mod mount;
 mod quota;
@@ -231,11 +232,79 @@ impl VfsManager {
     }
 }
 
+use block_stream::BlockStream;
+
+/// Concrete `fatfs::FileSystem` type for the VirtIO FAT16 volume.
+///
+/// `NullTimeProvider` and `LossyOemCpConverter` are the fatfs defaults;
+/// using them avoids needing a RTC or a UTF-8↔OEM code-page converter.
+type DataFs = fatfs::FileSystem<BlockStream, fatfs::NullTimeProvider, fatfs::LossyOemCpConverter>;
+
+/// Create-or-overwrite `/data/NAME` with `content` in the FAT16 volume.
+///
+/// Uses remove-then-create to get truncate semantics without needing
+/// `seek(End)` (which `BlockStream` does not support). Returns `false` if the
+/// volume is not mounted, the name is empty, or any fatfs operation fails.
+fn write_fat16(fs: Option<&DataFs>, path: &str, content: &[u8]) -> bool {
+    use fatfs::Write as _;
+    let fs   = match fs { Some(f) => f, None => return false };
+    let name = match path.strip_prefix("/data/") {
+        Some(n) if !n.is_empty() => n,
+        _ => return false,
+    };
+    let root = fs.root_dir();
+    let _ = root.remove(name); // ignore "not found"
+    let mut file = match root.create_file(name) { Ok(f) => f, Err(_) => return false };
+    file.write_all(content).is_ok()
+    // file drops here → directory entry + FAT chain flushed
+}
+
+/// Read up to 480 bytes of `/data/NAME` from the FAT16 volume and send them to `sender`.
+///
+/// Sends an empty reply when the volume is not mounted or the file does not exist,
+/// matching the behaviour of the RamFS `OP_READ` path.
+fn read_fat16(fs: Option<&DataFs>, path: &str, sender: usize) {
+    use fatfs::Read as _;
+    let send_empty = || { ostd::syscall::sys_send(sender, b""); };
+    let fs   = match fs { Some(f) => f, None => return send_empty() };
+    let name = match path.strip_prefix("/data/") {
+        Some(n) if !n.is_empty() => n,
+        _ => return send_empty(),
+    };
+    let root = fs.root_dir();
+    let mut file = match root.open_file(name) { Ok(f) => f, Err(_) => return send_empty() };
+    let mut resp  = [0u8; 480];
+    let mut total = 0usize;
+    while total < resp.len() {
+        match file.read(&mut resp[total..]) {
+            Ok(0)  => break,
+            Ok(n)  => total += n,
+            Err(_) => break,
+        }
+    }
+    ostd::syscall::sys_send(sender, &resp[..total]);
+}
+
 #[no_mangle]
 pub fn main() {
     println("VFS Service v0.2: RamFS + mkdir/rmdir/unlink IPC");
     let mut vfs = VfsManager::new();
     let mut buf = [0u8; 512];
+
+    // Mount the persistent FAT16 volume on the VirtIO disk. On failure (no disk
+    // attached, bad BPB) fall back to RamFS-only — /data writes will fail with
+    // 0x01 but /tmp and /bin still work.
+    let opts = fatfs::FsOptions::new().update_accessed_date(false);
+    let fat_fs: Option<DataFs> = match fatfs::FileSystem::new(BlockStream::new(), opts) {
+        Ok(fs) => {
+            println("[vfs] FAT16 /data volume mounted");
+            Some(fs)
+        }
+        Err(_) => {
+            println("[vfs] WARNING: FAT16 mount failed — /data writes will fail");
+            None
+        }
+    };
 
     loop {
         match ostd::syscall::sys_recv(0, &mut buf) {
@@ -276,6 +345,9 @@ pub fn main() {
                         let cl = buf[2] as usize;
                         let ok = if 3 + pl + cl <= buf.len() {
                             match core::str::from_utf8(&buf[3..3 + pl]) {
+                                Ok(p) if p.starts_with("/data/") => {
+                                    write_fat16(fat_fs.as_ref(), p, &buf[3 + pl..3 + pl + cl])
+                                }
                                 Ok(p) if p.starts_with("/tmp/") => {
                                     vfs.write_file(p, &buf[3 + pl..3 + pl + cl])
                                 }
@@ -286,7 +358,9 @@ pub fn main() {
                     }
                     OP_READ => {
                         if let Some(p) = path {
-                            if let Some(data) = vfs.get_file_data(p) {
+                            if p.starts_with("/data/") {
+                                read_fat16(fat_fs.as_ref(), p, sender);
+                            } else if let Some(data) = vfs.get_file_data(p) {
                                 let n = data.len().min(480);
                                 ostd::syscall::sys_send(sender, &data[..n]);
                             } else {

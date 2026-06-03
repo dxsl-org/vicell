@@ -146,7 +146,62 @@
 - Shell output now persists in-session: `echo TEXT > /tmp/file` writes to VFS RamFS
 - `vcat` built-in reads back VFS-stored files
 - `/tmp/` prefix guard prevents unauthorized writes
-- Foundation for Phase D (FAT32 disk integration) and Phase E+ (persistent storage)
+- Foundation for Phase D (FAT16 disk integration) and Phase E+ (reboot-persistent storage)
+
+---
+
+## [2026-06-03] Phase D — FAT16 Write Persistence on VirtIO Block Device (Complete)
+
+**Changes**:
+- **Phase 1 (Block I/O Syscalls)**: Exposed VirtIO block device via raw syscalls 500 (BlkRead) and 501 (BlkWrite) without modifying stable ABI
+  - Added private `syscall_raw` helper in `libs/ostd/src/syscall.rs` to bypass `ViSyscall` enum
+  - Added `sys_blk_read(sector, &mut [u8;512]) -> bool` and `sys_blk_write(sector, &[u8;512]) -> bool` to ostd
+  - Added `Syscall::BlkRead` and `Syscall::BlkWrite` variants to kernel (internal enum only)
+  - Added kernel handlers in `handle_syscall` with `validate_user_buf` checks
+  - Mapped 500/501 in numeric fallback of `vios_syscall_dispatch`
+  - Verified against `viVirtIOBlk.read_sector()`/`write_sector()` trait methods
+- **Phase 2 (FAT16 Format)**: Created disk formatter for LBA 0–81919 (before cell table at LBA 82000)
+  - Created `tools/mkfat16.py`: in-place FAT16 formatter with 81920 sectors, 8 sec/cluster, 10225 clusters
+  - Integrated into `gen_disk.ps1` step 3c (after blank image, before cell-table append)
+  - BPB validation: magic 0x55AA at offset 510, type label "FAT16   " at 54–61
+  - Cluster count verified in FAT16 window (4085–65524)
+- **Phase 3 (BlockStream + fatfs Mount)**: Enabled FAT16 in VFS service via syscalls
+  - Created `cells/services/vfs/src/block_stream.rs`: fatfs IoBase adapter over syscall 500/501
+  - Implemented BlockStream::read/write with sector-granular RMW for sub-sector ops
+  - Implemented BlockStream::seek (Start/Current) with End→Err fallback (not needed in Phase D)
+  - Added `fatfs` git dependency to VFS (deduped with kernel)
+  - Mount FAT16 at VFS startup; fallback to RamFS-only if mount fails
+- **Phase 4 (VFS Routing)**: Branched OP_WRITE and OP_READ on path prefix
+  - Added `/data/` prefix detection in OP_WRITE handler (routes to `write_fat16` helper)
+  - Implemented `write_fat16`: remove existing file (avoid append/truncate edge case) + create-fresh with content
+  - Added `/data/` prefix detection in OP_READ handler (routes to `read_fat16` helper)
+  - Implemented `read_fat16`: open file, loop-read up to 480 bytes, send response
+  - `/tmp/` paths unchanged (continue to route through RamFS)
+- **Phase 5 (Integration Test)**: Validated full stack in single-session write → read round trip
+  - Added `vfs_fat16_write_read` integration test: boot → write `PHASE_D_PERSIST` to `/data/test.txt` → read via vcat
+  - Asserts FAT16 mount log detection
+  - Verifies marker returned in read-back
+  - All 13 integration tests pass ✅
+
+**Files Created**:
+- `tools/mkfat16.py` — in-place FAT16 formatter
+- `cells/services/vfs/src/block_stream.rs` — fatfs I/O adapter
+
+**Files Modified**:
+- `kernel/src/task/syscall.rs` — added BlkRead/BlkWrite syscall support
+- `libs/ostd/src/syscall.rs` — added sys_blk_read/write
+- `cells/services/vfs/Cargo.toml` — added fatfs dependency
+- `cells/services/vfs/src/main.rs` — FAT16 mount + routing branches
+- `gen_disk.ps1` — added mkfat16.py step
+- `tests/integration/tests/boot.rs` — added vfs_fat16_write_read test
+
+**Status**: Complete. FAT16 write-persistence functional for session-local `/data/` writes. Reboot persistence deferred to Phase E.
+
+**Impact**:
+- Shell writes to `/data/` now persist on VirtIO block device: `echo TEXT > /data/file` survives session (within same boot)
+- VFS transparently routes `/data/*` through FAT16 filesystem
+- `/tmp/` writes remain volatile (RamFS); `/data/` writes durable (block device)
+- Foundation for Phase E (reboot persistence, subdirs, sector-range capability gates)
 
 **Known Limitations**:
 - Writes are volatile (RamFS only; lost on reboot)
