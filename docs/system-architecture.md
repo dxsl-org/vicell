@@ -322,6 +322,15 @@ pub trait ViFile {
     async fn write(&mut self, data: &[u8]) -> ViResult<usize>;
     async fn seek(&mut self, pos: u64) -> ViResult<u64>;
 }
+
+// IPC Opcodes (Phase F: FAT16 Hardening)
+// OP_WRITE (0x04): [opcode][path_len:u8][content_len:u16 LE][path][content]
+//   - Effective message cap: min(512, 4 + path_len + content_len) bytes
+//   - /data/* → FAT16, /tmp/* → RamFS
+// OP_UNLINK (0x07): [opcode][path_len:u8][path]
+//   - /data/* → FAT16, /tmp/* → RamFS (nested paths supported)
+// OP_MKDIR (0x05): [opcode][path_len:u8][path]
+//   - /data/* → FAT16 mkdir -p, /tmp/* → RamFS (nested paths supported)
 ```
 
 ### Block Devices (`ViBlockDevice`)
@@ -569,15 +578,19 @@ Physical RAM: 0x8000_0000–0x8800_0000 (default: 128 MB in QEMU)
 
 ## Current Status (2026-06-03)
 
-### ✅ Implemented (Phases 01, 02, 05, 10, 14, 15, 16, 18, 20, C, D)
+### ✅ Implemented (Phases 01, 02, 05, 10, 14, 15, 16, 18, 20, C, D, E, F)
 - **RV64, AArch64, x86_64** HAL with paging (SV39/4K/4K respectively)
 - **Nano kernel** (~8,700 LOC) with round-robin scheduler
-- **48 syscall variants** (IPC, memory, task, FS, GPU, network, state)
-- **Block I/O syscalls** (raw 500/501 for FAT16 persistence)
+- **48 syscall variants** (IPC, memory, task, FS, GPU, network, state) + **Block I/O capability gate**
+- **Block I/O syscalls** (raw 500/501/503 for FAT16 persistence, gated to VFS task 3)
 - Frame allocator (bitmap) and virtual memory
 - ELF loader with PIE relocation support
-- **VFS service** (RamFS read/write, FAT16 write via block device)
-- **FAT16 filesystem** (LBA 0–81919 on VirtIO disk, /data/* paths persistent)
+- **VFS service** (RamFS read/write, FAT16 write/read/delete via block device)
+  - **4-byte OP_WRITE header** (u16 content length, up to 65KB writes per message)
+  - **OP_UNLINK** for /data/ flat files and nested paths
+  - **/data/ subdirectories** with mkdir -p semantics and full path traversal
+  - **OP_MKDIR** for /data/ nested directory creation
+- **FAT16 filesystem** (LBA 0–81919 on VirtIO disk, /data/* paths persistent with subdir support)
 - **Config service** (KV store with ViStateTransfer)
 - **Interactive shell** with pipes, redirection, background jobs, history, aliases, echo built-in
 - **Lua 5.4** runtime (multi-line REPL, VFS I/O FFI, ViStateTransfer) — verified

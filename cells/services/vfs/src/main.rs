@@ -32,7 +32,7 @@ static LUA_ELF:   &[u8] = include_bytes!("../../../../kernel/src/embedded/lua");
 const OP_GET_FILE: u8 = 1; // path -> (ptr:u64, len:u64)
 const OP_LIST_DIR: u8 = 2; // path -> newline-separated names
 const OP_STAT:     u8 = 3; // path -> (size:u64, is_dir:u8, pad:[u8;7])
-const OP_WRITE:    u8 = 4; // [path_len][content_len][path][content] under /tmp -> 0=ok, 1=err (RamFS, volatile)
+const OP_WRITE:    u8 = 4; // [path_len:u8][content_len:u16 LE][path][content] → /data FAT16 or /tmp RamFS
 const OP_READ:     u8 = 8; // path -> file bytes (up to 480), empty = not found
 const OP_MKDIR:    u8 = 5; // path -> 0=ok, 1=err
 const OP_RMDIR:    u8 = 6; // path -> 0=ok, 1=err (only empty dirs)
@@ -238,41 +238,65 @@ use block_stream::BlockStream;
 ///
 /// `NullTimeProvider` and `LossyOemCpConverter` are the fatfs defaults;
 /// using them avoids needing a RTC or a UTF-8↔OEM code-page converter.
-type DataFs = fatfs::FileSystem<BlockStream, fatfs::NullTimeProvider, fatfs::LossyOemCpConverter>;
+type DataFs  = fatfs::FileSystem<BlockStream, fatfs::NullTimeProvider, fatfs::LossyOemCpConverter>;
+/// Convenience alias for a FAT16 directory handle — avoids repeating the full generic.
+type DataDir<'a> = fatfs::Dir<'a, BlockStream, fatfs::NullTimeProvider, fatfs::LossyOemCpConverter>;
 
-/// Create-or-overwrite `/data/NAME` with `content` in the FAT16 volume.
+/// Split `"sub/dir/file"` into `("sub/dir", "file")`. `"file"` → `("", "file")`.
+fn split_last(rel: &str) -> (&str, &str) {
+    match rel.rfind('/') {
+        Some(i) => (&rel[..i], &rel[i + 1..]),
+        None    => ("", rel),
+    }
+}
+
+/// Walk `parts` (a '/'-separated relative dir path) from `root`, creating any
+/// missing component. Returns the leaf `Dir`, or `Err(())` on fatfs failure.
+/// Empty `parts` returns `root` unchanged.
+fn ensure_dir_chain<'a>(root: DataDir<'a>, parts: &str) -> Result<DataDir<'a>, ()> {
+    let mut cur = root;
+    for part in parts.split('/').filter(|p| !p.is_empty()) {
+        // create_dir is create-or-open → idempotent on existing dirs.
+        cur = cur.create_dir(part).map_err(|_| ())?;
+    }
+    Ok(cur)
+}
+
+/// Create-or-overwrite `/data/[sub/]NAME` with `content` in the FAT16 volume.
 ///
-/// Uses remove-then-create to get truncate semantics without needing
-/// `seek(End)` (which `BlockStream` does not support). Returns `false` if the
-/// volume is not mounted, the name is empty, or any fatfs operation fails.
+/// Creates intermediate directories automatically (mkdir -p semantics). Uses
+/// remove-then-create for truncate semantics without `seek(End)`.
 fn write_fat16(fs: Option<&DataFs>, path: &str, content: &[u8]) -> bool {
     use fatfs::Write as _;
-    let fs   = match fs { Some(f) => f, None => return false };
-    let name = match path.strip_prefix("/data/") {
+    let fs  = match fs { Some(f) => f, None => return false };
+    let rel = match path.strip_prefix("/data/") {
         Some(n) if !n.is_empty() => n,
         _ => return false,
     };
-    let root = fs.root_dir();
-    let _ = root.remove(name); // ignore "not found"
-    let mut file = match root.create_file(name) { Ok(f) => f, Err(_) => return false };
+    let (parent, name) = split_last(rel);
+    if name.is_empty() { return false; }
+    let dir = match ensure_dir_chain(fs.root_dir(), parent) {
+        Ok(d)   => d,
+        Err(()) => return false,
+    };
+    let _ = dir.remove(name);
+    let mut file = match dir.create_file(name) { Ok(f) => f, Err(_) => return false };
     file.write_all(content).is_ok()
-    // file drops here → directory entry + FAT chain flushed via BlockStream::flush
 }
 
-/// Read up to 480 bytes of `/data/NAME` from the FAT16 volume and send them to `sender`.
+/// Read up to 480 bytes of `/data/[sub/]NAME` from the FAT16 volume.
 ///
-/// Sends an empty reply when the volume is not mounted or the file does not exist,
-/// matching the behaviour of the RamFS `OP_READ` path.
+/// fatfs `open_file` traverses '/'-separated paths natively, so no manual
+/// traversal is needed for reads. Sends an empty reply on any failure.
 fn read_fat16(fs: Option<&DataFs>, path: &str, sender: usize) {
     use fatfs::Read as _;
     let send_empty = || { ostd::syscall::sys_send(sender, b""); };
-    let fs   = match fs { Some(f) => f, None => return send_empty() };
-    let name = match path.strip_prefix("/data/") {
+    let fs  = match fs { Some(f) => f, None => return send_empty() };
+    let rel = match path.strip_prefix("/data/") {
         Some(n) if !n.is_empty() => n,
         _ => return send_empty(),
     };
-    let root = fs.root_dir();
-    let mut file = match root.open_file(name) { Ok(f) => f, Err(_) => return send_empty() };
+    let mut file = match fs.root_dir().open_file(rel) { Ok(f) => f, Err(_) => return send_empty() };
     let mut resp  = [0u8; 480];
     let mut total = 0usize;
     while total < resp.len() {
@@ -283,6 +307,28 @@ fn read_fat16(fs: Option<&DataFs>, path: &str, sender: usize) {
         }
     }
     ostd::syscall::sys_send(sender, &resp[..total]);
+}
+
+/// Remove `/data/[sub/]NAME` from the FAT16 volume.
+///
+/// fatfs `remove` traverses '/'-separated paths natively.
+fn unlink_fat16(fs: Option<&DataFs>, path: &str) -> bool {
+    let fs  = match fs { Some(f) => f, None => return false };
+    let rel = match path.strip_prefix("/data/") {
+        Some(n) if !n.is_empty() => n,
+        _ => return false,
+    };
+    fs.root_dir().remove(rel).is_ok()
+}
+
+/// Create `/data/[sub/]...` directory chain in the FAT16 volume (mkdir -p).
+fn fat16_mkdir(fs: Option<&DataFs>, path: &str) -> bool {
+    let fs  = match fs { Some(f) => f, None => return false };
+    let rel = match path.strip_prefix("/data/") {
+        Some(n) if !n.is_empty() => n,
+        _ => return false,
+    };
+    ensure_dir_chain(fs.root_dir(), rel).is_ok()
 }
 
 #[no_mangle]
@@ -338,18 +384,16 @@ pub fn main() {
                         }
                     }
                     OP_WRITE => {
-                        // Message: [4][path_len][content_len][path][content]
-                        // Note: OP_WRITE uses its own 3-byte header (not the shared
-                        // 2-byte path-only header) so content_len is unambiguous.
+                        // Header: [4][path_len:u8][content_len:u16 LE][path][content]
                         let pl = buf[1] as usize;
-                        let cl = buf[2] as usize;
-                        let ok = if 3 + pl + cl <= buf.len() {
-                            match core::str::from_utf8(&buf[3..3 + pl]) {
+                        let cl = u16::from_le_bytes([buf[2], buf[3]]) as usize;
+                        let ok = if 4 + pl + cl <= buf.len() {
+                            match core::str::from_utf8(&buf[4..4 + pl]) {
                                 Ok(p) if p.starts_with("/data/") => {
-                                    write_fat16(fat_fs.as_ref(), p, &buf[3 + pl..3 + pl + cl])
+                                    write_fat16(fat_fs.as_ref(), p, &buf[4 + pl..4 + pl + cl])
                                 }
                                 Ok(p) if p.starts_with("/tmp/") => {
-                                    vfs.write_file(p, &buf[3 + pl..3 + pl + cl])
+                                    vfs.write_file(p, &buf[4 + pl..4 + pl + cl])
                                 }
                                 _ => false,
                             }
@@ -370,7 +414,11 @@ pub fn main() {
                     }
                     OP_MKDIR => {
                         if let Some(p) = path {
-                            let ok = vfs.mkdir(p);
+                            let ok = if p.starts_with("/data/") {
+                                fat16_mkdir(fat_fs.as_ref(), p)
+                            } else {
+                                vfs.mkdir(p)
+                            };
                             ostd::syscall::sys_send(sender, if ok { b"\x00" } else { b"\x01" });
                         }
                     }
@@ -382,7 +430,11 @@ pub fn main() {
                     }
                     OP_UNLINK => {
                         if let Some(p) = path {
-                            let ok = vfs.unlink(p);
+                            let ok = if p.starts_with("/data/") {
+                                unlink_fat16(fat_fs.as_ref(), p)
+                            } else {
+                                vfs.unlink(p)
+                            };
                             ostd::syscall::sys_send(sender, if ok { b"\x00" } else { b"\x01" });
                         }
                     }

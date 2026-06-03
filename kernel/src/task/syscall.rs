@@ -64,6 +64,14 @@ const MAX_USER_BUF: usize = 64 * 1024 * 1024;
 /// Tighter cap for `Syscall::Log` since the kernel holds locks while printing.
 const MAX_LOG_MSG: usize = 4096;
 
+/// Only this task may issue raw block-device syscalls (500/501/503).
+///
+/// VFS = task 3 in the standard boot order (init=1, user_hello=2, vfs=3).
+/// Cross-ref: the ServiceLookup table (`"vfs" => 3`, syscall.rs:651) hardcodes
+/// the same value.  Both must change together if the boot order shifts.
+/// TODO Phase G: replace with a `CapPerms::BLOCK_IO` capability token.
+const VFS_TASK_ID: usize = 3;
+
 /// Validate a user-supplied (ptr, len) buffer descriptor.
 ///
 /// Rejects: NULL pointer, zero-length when expected non-empty, lengths above
@@ -1070,6 +1078,10 @@ pub fn handle_syscall(caller_id: usize, syscall: Syscall) -> SyscallResult {
             Ok(crate::cell::state_stash::restore(key as u64, buf))
         }
         Syscall::BlkFlush => {
+            if caller_id != VFS_TASK_ID {
+                log::warn!("BlkFlush denied: task {} != VFS_TASK_ID {} (boot order changed?)", caller_id, VFS_TASK_ID);
+                return Err(SyscallError::PermissionDenied);
+            }
             use crate::task::drivers::virtio_blk::viVirtIOBlk;
             use api::block::ViBlockDevice;
             match viVirtIOBlk.flush() {
@@ -1093,6 +1105,10 @@ pub fn handle_syscall(caller_id: usize, syscall: Syscall) -> SyscallResult {
             }
         }
         Syscall::BlkRead { sector, buf_ptr } => {
+            if caller_id != VFS_TASK_ID {
+                log::warn!("BlkRead denied: task {} != VFS_TASK_ID {} (boot order changed?)", caller_id, VFS_TASK_ID);
+                return Err(SyscallError::PermissionDenied);
+            }
             // Reject any sector at/after the cell bootstrap table; a runaway FAT
             // offset must never read kernel-owned LBAs. Returns 0 = failure.
             if sector >= crate::loader::disk_layout::CELL_TABLE_BASE_LBA {
@@ -1110,6 +1126,10 @@ pub fn handle_syscall(caller_id: usize, syscall: Syscall) -> SyscallResult {
             }
         }
         Syscall::BlkWrite { sector, buf_ptr } => {
+            if caller_id != VFS_TASK_ID {
+                log::warn!("BlkWrite denied: task {} != VFS_TASK_ID {} (boot order changed?)", caller_id, VFS_TASK_ID);
+                return Err(SyscallError::PermissionDenied);
+            }
             // Reject any sector at/after the cell bootstrap table; prevents a
             // cell from corrupting the loader's table. Returns 0 = failure.
             if sector >= crate::loader::disk_layout::CELL_TABLE_BASE_LBA {

@@ -69,6 +69,53 @@
 
 ---
 
+## [2026-06-03] Phase F — FAT16 Hardening (Complete)
+
+**Changes**:
+- **Phase 1 (OP_WRITE Header Widening)**:
+  - `cells/apps/shell/src/cmd_fs.rs:263-279` — `write_file()` refactored with 4-byte header: `[opcode][path_len:u8][content_len:u16 LE][path][content]`
+  - `cells/services/vfs/src/main.rs:340-358` — OP_WRITE arm updated to parse `u16::from_le_bytes([buf[2], buf[3]])` for content length, offset 4 for path
+  - Effective write cap increased from 253 bytes (before) to 512 - 4 - path_len (now), enabling large-content writes in single message
+- **Phase 2 (OP_UNLINK for /data/ FAT16)**:
+  - `cells/services/vfs/src/main.rs:287-290` — `unlink_fat16()` helper added; routes `/data/` prefixed paths to FAT16 deletion
+  - OP_UNLINK arm (line 383) refactored with `/data/` branch
+  - Shell already sends OP_UNLINK via 2-byte header; no client change
+- **Phase 3 (Subdirectories under /data/)**:
+  - `cells/services/vfs/src/main.rs:242` — Added `DataDir<'a>` type alias for cleaner helper signatures
+  - `cells/services/vfs/src/main.rs:258-330` — Added `split_last()`, `ensure_dir_chain()`, `fat16_mkdir()` helpers
+  - Refactored `write_fat16()` to use `ensure_dir_chain()` for mkdir -p parent creation, then `create_file()` with full relative path
+  - Refactored `read_fat16()` to use `open_file(rel_path)` for full path traversal (fatfs handles '/'-separated paths natively)
+  - Refactored `unlink_fat16()` to use `remove(rel_path)` for nested path deletion
+  - OP_MKDIR arm (line 371) refactored with `/data/` branch routing to `fat16_mkdir`, else to RamFS `vfs.mkdir`
+  - Nested write/read/delete now fully functional: `/data/sub/f` creates `sub/` dir, writes `f`, reads back, deletes
+- **Phase 4 (Block Syscall Capability Gate)**:
+  - `kernel/src/task/syscall.rs:62` — Added `VFS_TASK_ID: usize = 3` constant with TODO and ServiceLookup cross-ref
+  - `Syscall::BlkRead`, `BlkWrite`, `BlkFlush` arms (lines 1095, 1112, 1072) — Each gated with `if caller_id != VFS_TASK_ID { log::warn + return Err(PermissionDenied) }`
+  - `Syscall::Shutdown` (line 1080) — Explicitly untouched, remains open to all
+  - Security improvement: raw block I/O syscalls (500/501/503) now restricted to VFS cell (task 3); prevents arbitrary sector reads/writes
+
+**Files Modified**:
+- `cells/apps/shell/src/cmd_fs.rs` — 4-byte OP_WRITE header
+- `cells/services/vfs/src/main.rs` — FAT16 hardening: unlink, mkdir, nested path traversal
+- `kernel/src/task/syscall.rs` — Block I/O capability gate
+
+**Status**: Complete. All 17 integration tests pass; 4 phases independent + fully integrated.
+
+**Integration Tests Added**:
+- `vfs_fat16_large_write` — validates 4-byte header widening (>253-byte content per message)
+- `vfs_fat16_unlink` — flat-file deletion via OP_UNLINK
+- `vfs_fat16_subdir` — nested directory creation, write, read, delete
+- `vfs_fat16_deep_nesting` — 3+ level mkdir -p chains
+
+**Impact**:
+- VFS FAT16 now feature-complete for session-local (same-boot) writes with directory support
+- 4-byte header removes chunking bottleneck for large writes (up to 512-byte messages)
+- Unlink + mkdir on /data/ enable destructive operations (scripts can clean, recreate state)
+- Block I/O gating closes privilege escalation hole; non-VFS cells can no longer corrupt disk
+- Foundation for Phase G (capability tokens, reboot persistence of subdirs, ACPI/PSCI)
+
+---
+
 ## [2026-06-03] Phase E — Hardening + Reboot Persistence (Complete)
 
 **Changes**:
@@ -142,9 +189,9 @@
 | Version | Date | Phase(s) | Status |
 |---------|------|----------|--------|
 | 0.2.0 | 2026-05-01 | Phase 0 (Alpha) | Stable baseline |
-| 0.2.1-dev | 2026-05-29 | Phases 01–23 (all partial+) | In progress |
-| 0.2.1 | TBD | Phase 1 complete | Pending |
-| 0.3.0 | 2026-09-30 | Phases 2–3 | Planned |
+| 0.2.1-dev | 2026-06-03 | Phases 01–23, C/D/E/F complete | In progress |
+| 0.2.1 | TBD | Phase 1 + Phases C/D/E/F complete | Pending |
+| 0.3.0 | 2026-09-30 | Phases 2–3 + Phase G | Planned |
 | 1.0.0 | 2027-03-31 | Phases 4+ | Planned |
 
 ---

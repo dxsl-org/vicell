@@ -256,21 +256,20 @@ pub fn cmd_rm<'a>(mut args: core::str::SplitWhitespace<'a>) -> ViResult<()> {
 const OP_WRITE: u8 = 4;
 const OP_READ:  u8 = 8;
 
-/// Write `content` to `path` via VFS OP_WRITE (3-byte header: opcode, path_len, content_len).
-///
-/// Path+content are capped to fit the 256-byte client buffer. The VFS server
-/// enforces `/tmp/` authorization; this call is a transparent passthrough.
+/// Write `content` to `path` via VFS OP_WRITE (4-byte header:
+/// opcode, path_len:u8, content_len:u16 LE). Path+content capped to 512 bytes.
+/// The VFS server enforces `/data/`/`/tmp/` authorization.
 pub fn write_file(path: &str, content: &[u8]) -> bool {
     let pb = path.as_bytes();
-    let pl = pb.len().min(253);
-    let cl = content.len().min(253_usize.saturating_sub(pl));
-    let mut buf = [0u8; 256];
+    let pl = pb.len().min(255);
+    let cl = content.len().min(512_usize.saturating_sub(4 + pl));
+    let mut buf = [0u8; 512];
     buf[0] = OP_WRITE;
     buf[1] = pl as u8;
-    buf[2] = cl as u8;
-    buf[3..3 + pl].copy_from_slice(&pb[..pl]);
-    buf[3 + pl..3 + pl + cl].copy_from_slice(&content[..cl]);
-    syscall::sys_send(VFS_ENDPOINT, &buf[..3 + pl + cl]);
+    buf[2..4].copy_from_slice(&(cl as u16).to_le_bytes());
+    buf[4..4 + pl].copy_from_slice(&pb[..pl]);
+    buf[4 + pl..4 + pl + cl].copy_from_slice(&content[..cl]);
+    syscall::sys_send(VFS_ENDPOINT, &buf[..4 + pl + cl]);
     let mut reply = [0u8; 1];
     match syscall::sys_recv(0, &mut reply) {
         syscall::SyscallResult::Ok(_) => reply[0] == 0,

@@ -414,3 +414,66 @@ fn vfs_fat16_reboot_persistence() {
     qemu2.wait_for("REBOOT_OK", CMD_TIMEOUT)
         .unwrap_or_else(|e| panic!("persistence failed: {e}\n--- first boot ---\n{}\n--- second boot ---\n{}", first_boot_dump, qemu2.dump()));
 }
+
+/// Phase F-1: write a >253-byte marker to /tmp (proves content_len u16 works).
+#[test]
+fn vfs_write_large_content() {
+    if !prerequisites_ok() { return; }
+    let mut qemu = QemuRunner::boot(&kernel_path(), &disk_path());
+    qemu.wait_for("ViOS >", BOOT_TIMEOUT)
+        .unwrap_or_else(|e| panic!("prompt: {e}\n{}", qemu.dump()));
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    // Write a marker that is exactly 255 chars (>253-byte old cap).
+    // The marker itself fits in a single echo line; shell passes it via write_file.
+    qemu.send_line("echo PHASE_F_WIDE_WRITE_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA > /tmp/big.txt");
+    qemu.wait_for("ViOS >", CMD_TIMEOUT)
+        .unwrap_or_else(|e| panic!("write: {e}\n{}", qemu.dump()));
+    qemu.send_line("vcat /tmp/big.txt");
+    qemu.wait_for("PHASE_F_WIDE_WRITE", CMD_TIMEOUT)
+        .unwrap_or_else(|e| panic!("wide write readback: {e}\n{}", qemu.dump()));
+}
+
+/// Phase F-2: create /data/ file, verify it exists, delete it, verify gone.
+#[test]
+fn vfs_fat16_unlink() {
+    if !prerequisites_ok() { return; }
+    let mut qemu = QemuRunner::boot(&kernel_path(), &disk_path());
+    qemu.wait_for("ViOS >", BOOT_TIMEOUT)
+        .unwrap_or_else(|e| panic!("prompt: {e}\n{}", qemu.dump()));
+    assert!(qemu.output_contains("FAT16 /data volume mounted"), "FAT16 not mounted\n{}", qemu.dump());
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    qemu.send_line("echo PHASE_F_DEL > /data/del.txt");
+    qemu.wait_for("ViOS >", CMD_TIMEOUT)
+        .unwrap_or_else(|e| panic!("write: {e}\n{}", qemu.dump()));
+    qemu.send_line("vcat /data/del.txt");
+    qemu.wait_for("PHASE_F_DEL", CMD_TIMEOUT)
+        .unwrap_or_else(|e| panic!("file exists: {e}\n{}", qemu.dump()));
+    qemu.wait_for("ViOS >", CMD_TIMEOUT)
+        .unwrap_or_else(|e| panic!("post-vcat prompt: {e}\n{}", qemu.dump()));
+    qemu.send_line("rm /data/del.txt");
+    qemu.wait_for("ViOS >", CMD_TIMEOUT)
+        .unwrap_or_else(|e| panic!("rm: {e}\n{}", qemu.dump()));
+    qemu.send_line("vcat /data/del.txt");
+    qemu.wait_for("not found", CMD_TIMEOUT)
+        .unwrap_or_else(|e| panic!("file still exists after rm: {e}\n{}", qemu.dump()));
+}
+
+/// Phase F-3: create /data/ subdirectory, write and read a file in it.
+#[test]
+fn vfs_fat16_subdir() {
+    if !prerequisites_ok() { return; }
+    let mut qemu = QemuRunner::boot(&kernel_path(), &disk_path());
+    qemu.wait_for("ViOS >", BOOT_TIMEOUT)
+        .unwrap_or_else(|e| panic!("prompt: {e}\n{}", qemu.dump()));
+    assert!(qemu.output_contains("FAT16 /data volume mounted"), "FAT16 not mounted\n{}", qemu.dump());
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    qemu.send_line("mkdir /data/sub");
+    qemu.wait_for("ViOS >", CMD_TIMEOUT)
+        .unwrap_or_else(|e| panic!("mkdir: {e}\n{}", qemu.dump()));
+    qemu.send_line("echo PHASE_F_SUB > /data/sub/f.txt");
+    qemu.wait_for("ViOS >", CMD_TIMEOUT)
+        .unwrap_or_else(|e| panic!("write subdir: {e}\n{}", qemu.dump()));
+    qemu.send_line("vcat /data/sub/f.txt");
+    qemu.wait_for("PHASE_F_SUB", CMD_TIMEOUT)
+        .unwrap_or_else(|e| panic!("subdir readback: {e}\n{}", qemu.dump()));
+}
