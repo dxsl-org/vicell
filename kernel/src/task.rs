@@ -15,9 +15,8 @@ use crate::sync::Spinlock;
 use alloc::string::String;
 use log::info;
 use scheduler::Scheduler;
-/// Pages per user+kernel stack (256 KB). Increased from 16 because fatfs
-/// nests many deep call frames (Dir iterators, cluster chains, BufStream
-/// internals) during complex operations such as recursive directory removal.
+/// Increased to 64 (256 KB): fatfs nests deep call frames during recursive
+/// directory removal; 16 pages (64 KB) overflows on complex FAT16 ops.
 pub const STACK_PAGES: usize = 64;
 const TRAP_FRAME_SIZE: usize = 288;
 extern "C" {

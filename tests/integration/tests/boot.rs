@@ -557,10 +557,13 @@ fn vfs_fat16_reboot_persistence() {
         "QEMU did not exit after shutdown command\n{}", qemu.dump()
     );
     let first_boot_dump = qemu.dump();
-    drop(qemu); // safe: process already exited; Drop's kill is a harmless no-op
+    // Take the temp disk path BEFORE drop so it is NOT deleted — the second
+    // boot must see the writes made in the first boot.
+    let persisted_disk = qemu.take_disk_path().expect("expected temp disk");
+    drop(qemu); // process already exited; child.kill() is a harmless no-op
 
     // ── Second boot: verify persistence ──────────────────────────────────────
-    let mut qemu2 = QemuRunner::boot_with_fresh_disk(&kernel_path(), &disk_path());
+    let mut qemu2 = QemuRunner::boot(&kernel_path(), &persisted_disk.to_string_lossy());
     qemu2.wait_for("ViOS >", BOOT_TIMEOUT)
         .unwrap_or_else(|e| panic!("second boot prompt failed: {e}\n{}", qemu2.dump()));
     assert!(
@@ -570,10 +573,10 @@ fn vfs_fat16_reboot_persistence() {
     std::thread::sleep(std::time::Duration::from_millis(500));
 
     qemu2.send_line("vcat /data/persist.txt");
-    // Use a larger timeout than CMD_TIMEOUT: with cache=none (O_DIRECT) reads
-    // are slower and the FAT16 mount adds latency in the second boot.
     qemu2.wait_for("REBOOT_OK", CMD_TIMEOUT)
         .unwrap_or_else(|e| panic!("persistence failed: {e}\n--- first boot ---\n{}\n--- second boot ---\n{}", first_boot_dump, qemu2.dump()));
+    drop(qemu2);
+    let _ = std::fs::remove_file(&persisted_disk);
 }
 
 /// Phase F-1: write a >253-byte marker to /tmp (proves content_len u16 works).
@@ -701,10 +704,11 @@ fn vfs_fat16_subdir_persistence() {
         "QEMU did not exit after shutdown\n{}", qemu.dump()
     );
     let first_boot_dump = qemu.dump();
+    let persisted_disk = qemu.take_disk_path().expect("expected temp disk");
     drop(qemu);
 
     // ── Second boot: verify the subdir file persisted ─────────────────────────
-    let mut qemu2 = QemuRunner::boot_with_fresh_disk(&kernel_path(), &disk_path());
+    let mut qemu2 = QemuRunner::boot(&kernel_path(), &persisted_disk.to_string_lossy());
     qemu2.wait_for("ViOS >", BOOT_TIMEOUT)
         .unwrap_or_else(|e| panic!("second boot prompt failed: {e}\n{}", qemu2.dump()));
     assert!(
@@ -719,21 +723,20 @@ fn vfs_fat16_subdir_persistence() {
             "subdir file not persisted across reboot: {e}\n--- first boot ---\n{first_boot_dump}\n--- second boot ---\n{}",
             qemu2.dump()
         ));
+    drop(qemu2);
+    let _ = std::fs::remove_file(&persisted_disk);
 }
 
 /// Phase H: recursive directory removal via `rm -r /data/dir` (OP_RMDIR_RECURSIVE).
 ///
 /// Phase H: recursive directory removal via `rm -r /data/dir` (OP_RMDIR_RECURSIVE).
 ///
-/// Phase X-1 fixed the VFS stack overflow (STACK_PAGES=64, static sector buffers,
-/// VirtIO VA→PA translation). Remaining issue: after removing a directory that
-/// contains a file, subsequent FAT16 operations hang — the multi-sector write
-/// sequence (file deletion + dir deletion) leaves the FAT or root-dir sector in a
-/// corrupt state that causes fatfs to loop on freed cluster chains (FAT16 0x0000).
-/// Root fix: investigate why the second BlockStream::write in remove_tree produces
-/// a corrupt sector (likely WR_SEC is overwritten between writes, or the sector
-/// number is wrong for one of the writes).
-#[ignore]
+/// Fixed by Phase X-1: STACK_PAGES=64 (256 KB) + VirtIO VA→PA translation via
+/// virt_to_phys() satp walk + reverting to stack-allocated sector buffers.
+/// Key insight: VirtIO DMA requires identity-mapped buffers.  Stack pages ARE
+/// identity-mapped; static BSS pages are NOT — using static buffers caused silent
+/// FAT corruption because DMA landed at wrong physical addresses.  With 256 KB
+/// stacks and correct DMA addressing, recursive delete completes cleanly.
 #[test]
 fn vfs_fat16_recursive_rmdir() {
     if !prerequisites_ok() { return; }

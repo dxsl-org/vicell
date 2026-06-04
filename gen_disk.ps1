@@ -52,6 +52,8 @@ $net_bin    = "$rel_dir\service-net"       # Phase 15: network service cell
 $comp_bin   = "$rel_dir\service-compositor" # Phase 16: compositor + GPU
 $nc_bin     = "$rel_dir\nc"               # Phase A: TCP netcat tool
 $curl_bin   = "$rel_dir\curl"             # Phase B: HTTP GET client
+$wget_bin   = "$rel_dir\wget"             # Phase U: HTTP wget tool
+$httpd_bin  = "$rel_dir\httpd"            # Phase U: HTTP server
 
 foreach ($pair in @(
     @{ Path = $init_bin;   Name = "app-init" },
@@ -134,6 +136,8 @@ if (Test-Path $net_bin)   { $table_args += "/bin/net=$net_bin" }
 if (Test-Path $comp_bin)  { $table_args += "/bin/compositor=$comp_bin" }
 if (Test-Path $nc_bin)    { $table_args += "/bin/nc=$nc_bin" }
 if (Test-Path $curl_bin)  { $table_args += "/bin/curl=$curl_bin" }
+if (Test-Path $wget_bin)  { $table_args += "/bin/wget=$wget_bin" }
+if (Test-Path $httpd_bin) { $table_args += "/bin/httpd=$httpd_bin" }
 python "$tools_dir\write-cell-table.py" @table_args
 
 Write-Host "Done. disk_v3.img is ready."

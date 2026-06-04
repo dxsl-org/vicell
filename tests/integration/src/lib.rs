@@ -92,6 +92,13 @@ impl QemuRunner {
         runner
     }
 
+    /// Take the temp disk path out of this runner so Drop does NOT delete it.
+    ///
+    /// Used by persistence tests: the caller is responsible for cleaning up.
+    pub fn take_disk_path(&mut self) -> Option<std::path::PathBuf> {
+        self.temp_disk.take()
+    }
+
     /// Boot QEMU with a SLIRP hostfwd: `127.0.0.1:<host_port>` → guest `guest_port`.
     ///
     /// Returns `(runner, host_port)`. Host port is discovered by binding `:0` then
