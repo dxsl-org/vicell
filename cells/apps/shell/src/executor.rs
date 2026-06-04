@@ -210,6 +210,25 @@ fn expand_token(s: &str) -> String {
                 i += 2;
                 continue;
             }
+            if next == b'#' {
+                // $# — positional argument count.
+                if let Some(v) = get_var("#") { result.push_str(v); }
+                i += 2;
+                continue;
+            }
+            if next == b'@' {
+                // $@ — all positional arguments joined with spaces.
+                if let Some(v) = get_var("@") { result.push_str(v); }
+                i += 2;
+                continue;
+            }
+            if next.is_ascii_digit() && next != b'0' {
+                // $1..$9 — single-digit positional parameter.
+                let key = unsafe { core::str::from_utf8_unchecked(&bytes[i+1..i+2]) };
+                if let Some(v) = get_var(key) { result.push_str(v); }
+                i += 2;
+                continue;
+            }
             if next.is_ascii_alphabetic() || next == b'_' {
                 let start = i + 1;
                 let end   = bytes[start..].iter()
@@ -445,6 +464,16 @@ fn case_matches(pattern: &str, value: &str) -> bool {
     pattern == "*" || pattern == value
 }
 
+/// Convert a small positional-arg index (1-9) to an owned `String` key.
+///
+/// Avoids `i32_to_str` which writes to a single shared static buffer —
+/// calling it twice invalidates the first result while the second is alive.
+fn usize_key(n: usize) -> String {
+    let digit = b'0' + (n as u8).min(9);
+    // SAFETY: `digit` is always a valid ASCII byte.
+    String::from(unsafe { core::str::from_utf8_unchecked(core::slice::from_ref(&digit)) })
+}
+
 /// Convert a small non-negative integer to a &str backed by a fixed buffer.
 ///
 /// Returns "0" for 0, the decimal string for 1-127, and "1" for anything else.
@@ -515,6 +544,7 @@ fn dispatch_builtin(prog: &str, args: &[&str], jobs: &mut Jobs) -> i32 {
         }
         "break"    => { set_loop_signal(LoopSignal::Break);    Ok(()) }
         "continue" => { set_loop_signal(LoopSignal::Continue); Ok(()) }
+        "read" => cmd_read(args),
         "exit" => {
             let code = args.first().and_then(|s| {
                 let mut n = 0i32;
@@ -535,16 +565,45 @@ fn dispatch_builtin(prog: &str, args: &[&str], jobs: &mut Jobs) -> i32 {
         _ => {
             // Check the function table before trying to spawn an external binary.
             if let Some(body) = get_function(prog) {
-                // Copy to a local stack buffer so the 'static reference is
+                // Bind positional parameters $1..$9, $#, $@ for the function body.
+                // Use owned Strings for index keys and saved values so we don't
+                // alias the shared i32_to_str static buffer or VARS slot memory.
+                let nargs = args.len().min(9);
+                // Save keys "#" and "@" plus positional indices "1".."9".
+                let mut saved: alloc::vec::Vec<(String, Option<String>)> =
+                    alloc::vec::Vec::with_capacity(nargs + 2);
+                for i in 1..=nargs {
+                    let key = usize_key(i);
+                    saved.push((key.clone(), get_var(&key).map(String::from)));
+                }
+                saved.push((String::from("#"), get_var("#").map(String::from)));
+                saved.push((String::from("@"), get_var("@").map(String::from)));
+                // Set new positional variables.
+                for i in 1..=nargs {
+                    set_var(&usize_key(i), args[i - 1]);
+                }
+                set_var("#", i32_to_str(nargs as i32));
+                set_var("@", &args.join(" "));
+
+                // Copy body to a local stack buffer so the 'static reference is
                 // not held across the re-entrant parse+execute call.
                 let mut buf = [0u8; 480];
                 let bb = body.as_bytes();
                 let blen = bb.len().min(479);
                 buf[..blen].copy_from_slice(&bb[..blen]);
-                if let Ok(s) = core::str::from_utf8(&buf[..blen]) {
+                let result = if let Ok(s) = core::str::from_utf8(&buf[..blen]) {
                     let ast = crate::parser::parse(s);
-                    return execute(&ast, jobs);
+                    execute(&ast, jobs)
+                } else { 1 };
+
+                // Restore saved positional variables.
+                for (k, v) in &saved {
+                    match v {
+                        Some(old) => set_var(k, old),
+                        None      => unset_var(k),
+                    }
                 }
+                return result;
             }
             return spawn_external(prog, args);
         }
@@ -602,6 +661,44 @@ fn cmd_test(args: &[&str]) -> ViResult<()> {
             }
         }
     }
+}
+
+/// `read [VAR]` — read one line from stdin (fd 0) into `$VAR` (default: `$REPLY`).
+///
+/// Blocks until a newline is received.  Uses `sys_read(0, ..)` — the same
+/// mechanism as `AsyncStdin::read_line` minus the async/ANSI machinery.
+fn cmd_read(args: &[&str]) -> ViResult<()> {
+    let var = args.first().copied().unwrap_or("REPLY");
+    let mut line = alloc::vec::Vec::<u8>::new();
+    loop {
+        let mut c = [0u8; 1];
+        match ostd::syscall::sys_read(0, &mut c) {
+            Ok(n) if n > 0 => {
+                match c[0] {
+                    b'\n' | b'\r' => break,
+                    0x7F | 0x08 if !line.is_empty() => {
+                        // Backspace — erase last char.
+                        line.pop();
+                        ostd::io::print("\x08 \x08");
+                    }
+                    b if line.len() < 127 => {
+                        line.push(b);
+                        // Echo the character so the user sees what they type.
+                        if let Ok(s) = core::str::from_utf8(core::slice::from_ref(&b)) {
+                            ostd::io::print(s);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            _ => { ostd::syscall::sys_yield(); }
+        }
+    }
+    ostd::io::println(""); // newline after input
+    if let Ok(s) = core::str::from_utf8(&line) {
+        set_var(var, s);
+    }
+    Ok(())
 }
 
 /// `source <path>` — read a shell script from VFS and execute each line.

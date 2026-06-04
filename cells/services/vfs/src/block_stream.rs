@@ -23,6 +23,21 @@ impl fatfs::IoBase for BlockStream {
     type Error = ();
 }
 
+// Static sector scratch buffers for block I/O.
+//
+// VFS is a single-threaded cooperative cell (no preemption, no concurrent
+// BlockStream I/O).  A static buffer is therefore safe and — crucially —
+// avoids placing 512 bytes on the VFS call stack on every fatfs sector
+// access.  Deep operations such as recursive directory removal nest many
+// fatfs I/O calls; each stack-allocated `[u8; 512]` pushes the stack closer
+// to its limit and eventually causes a store page fault.
+//
+// DMA correctness: `VirtioHal::share()` now performs a kernel page-table walk
+// (Phase X-1) to obtain the true physical address, so non-identity-mapped
+// static buffers are safe DMA targets.
+static mut RD_SEC: [u8; 512] = [0u8; 512];
+static mut WR_SEC: [u8; 512] = [0u8; 512];
+
 impl fatfs::Read for BlockStream {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize, ()> {
         if buf.is_empty() {
@@ -30,13 +45,10 @@ impl fatfs::Read for BlockStream {
         }
         let sector = self.pos / SECTOR_SIZE;
         let off    = (self.pos % SECTOR_SIZE) as usize;
-        // Stack-allocated sector buffer: VirtIO DMA uses the buffer address as a
-        // physical address.  Stack pages are identity-mapped (physical == virtual)
-        // in ViOS SAS, so the DMA lands at the correct physical location.
-        // BSS/static pages are NOT identity-mapped and therefore MUST NOT be used
-        // as VirtIO DMA targets — the DMA would write to the wrong physical memory.
-        let mut sec = [0u8; 512];
-        if !sys_blk_read(sector, &mut sec) {
+        // SAFETY: VFS runs as a single cooperative task; RD_SEC is never
+        // accessed re-entrantly (no preemption, no concurrent I/O).
+        let sec = unsafe { &mut RD_SEC };
+        if !sys_blk_read(sector, sec) {
             return Err(());
         }
         let n = core::cmp::min(SECTOR_SIZE as usize - off, buf.len());
@@ -54,21 +66,21 @@ impl fatfs::Write for BlockStream {
             let off    = (self.pos % SECTOR_SIZE) as usize;
             let chunk  = core::cmp::min(buf.len() - written, SECTOR_SIZE as usize - off);
 
+            // SAFETY: VFS is single-threaded; WR_SEC is never accessed re-entrantly.
+            let sec = unsafe { &mut WR_SEC };
+
             if off == 0 && chunk == SECTOR_SIZE as usize {
-                // Full-sector write — no need to read first.
-                let mut full = [0u8; 512]; // must be stack-allocated (VirtIO DMA constraint)
-                full.copy_from_slice(&buf[written..written + 512]);
-                if !sys_blk_write(sector, &full) {
+                sec.copy_from_slice(&buf[written..written + 512]);
+                if !sys_blk_write(sector, sec) {
                     return Err(());
                 }
             } else {
                 // Partial sector — read-modify-write.
-                let mut sec = [0u8; 512]; // must be stack-allocated (VirtIO DMA constraint)
-                if !sys_blk_read(sector, &mut sec) {
+                if !sys_blk_read(sector, sec) {
                     return Err(());
                 }
                 sec[off..off + chunk].copy_from_slice(&buf[written..written + chunk]);
-                if !sys_blk_write(sector, &sec) {
+                if !sys_blk_write(sector, sec) {
                     return Err(());
                 }
             }

@@ -723,14 +723,10 @@ fn vfs_fat16_subdir_persistence() {
 
 /// Phase H: recursive directory removal via `rm -r /data/dir` (OP_RMDIR_RECURSIVE).
 ///
-/// Phase H: recursive directory removal via `rm -r /data/dir` (OP_RMDIR_RECURSIVE).
-///
-/// Ignored: VFS cell stack overflows during `remove_tree` because fatfs uses
-/// stack-allocated 512-byte sector buffers for every block I/O call, and a
-/// single `rm -r` triggers enough nested fatfs calls to exceed the cell's
-/// allocated stack.  Root fix requires either larger user stacks or a
-/// non-stack VirtIO DMA buffer (which in turn requires VA→PA translation for
-/// non-identity-mapped pages — a pending ViOS SAS architectural fix).
+/// X-1 progress: VFS stack overflow fixed (STACK_PAGES=64 + static sector buffers).
+/// VirtIO DMA now uses virt_to_phys() for correct physical addressing (Phase X-1).
+/// Remaining issue: vcat after rm-r hangs — possibly fatfs directory-iterator
+/// state after deletion; under investigation.
 #[ignore]
 #[test]
 fn vfs_fat16_recursive_rmdir() {
@@ -1044,6 +1040,33 @@ fn shell_while_loop() {
     // Loop must exit after rm deletes the flag (not hang).
     qemu.wait_for("ViOS >", 15)
         .unwrap_or_else(|e| panic!("while loop did not exit after rm: {e}\n--- output ---\n{}", qemu.dump()));
+}
+
+// ── Phase X-2: Shell function positional args ────────────────────────────────
+
+/// Phase X-2: `$1 $2 $# $@` are set inside function bodies and restored after.
+#[test]
+fn shell_function_positional_args() {
+    if !prerequisites_ok() { return; }
+    let mut qemu = QemuRunner::boot_with_fresh_disk(&kernel_path(), &disk_path());
+    qemu.wait_for("ViOS >", BOOT_TIMEOUT)
+        .unwrap_or_else(|e| panic!("prompt: {e}\n{}", qemu.dump()));
+    std::thread::sleep(Duration::from_millis(300));
+
+    // Define a function that echoes $1 $2.
+    qemu.send_line("double() { echo $1 $2; }");
+    qemu.wait_for("ViOS >", CMD_TIMEOUT).unwrap_or_else(|e| panic!("def: {e}\n{}", qemu.dump()));
+
+    qemu.send_line("double ALPHA BETA");
+    qemu.wait_for("ALPHA BETA", CMD_TIMEOUT)
+        .unwrap_or_else(|e| panic!("$1 $2 not expanded: {e}\n--- output ---\n{}", qemu.dump()));
+
+    // $# = arg count.
+    qemu.send_line("argc() { echo $#; }");
+    qemu.wait_for("ViOS >", CMD_TIMEOUT).unwrap_or_else(|e| panic!("def argc: {e}\n{}", qemu.dump()));
+    qemu.send_line("argc a b c");
+    qemu.wait_for("3", CMD_TIMEOUT)
+        .unwrap_or_else(|e| panic!("$# not 3: {e}\n--- output ---\n{}", qemu.dump()));
 }
 
 // ── Phase W: case/esac + echo -e + nc multi-connection ───────────────────────

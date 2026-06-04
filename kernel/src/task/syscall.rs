@@ -1159,12 +1159,21 @@ pub fn handle_syscall(caller_id: usize, syscall: Syscall) -> SyscallResult {
             validate_user_buf(buf_ptr, 512, MAX_USER_BUF)?;
             use crate::task::drivers::virtio_blk::viVirtIOBlk;
             use api::block::ViBlockDevice;
-            // SAFETY: buf_ptr is a user-space 512-byte buffer validated above;
-            // SUM=1 (set by vios_syscall_dispatch) allows S-mode to write it.
-            let buf = unsafe { core::slice::from_raw_parts_mut(buf_ptr as *mut u8, 512) };
-            match viVirtIOBlk.read_sector(sector, buf) {
-                Ok(()) => Ok(1),
-                Err(_)  => Ok(0),
+            // Bounce buffer: VirtioHal::share() treats the buffer's virtual address
+            // as its physical address (identity-map assumption). Stack frames ARE
+            // identity-mapped; ELF BSS/heap pages are NOT — DMA would land at the
+            // wrong physical address without the bounce. Read into an on-stack buffer
+            // (always identity-mapped), then copy to the user buffer under SUM=1.
+            let mut bounce = [0u8; 512];
+            match viVirtIOBlk.read_sector(sector, &mut bounce) {
+                Ok(()) => {
+                    // SAFETY: buf_ptr is a validated 512-byte user buffer; SUM=1
+                    // (set by vios_syscall_dispatch) allows S-mode to write it.
+                    let buf = unsafe { core::slice::from_raw_parts_mut(buf_ptr as *mut u8, 512) };
+                    buf.copy_from_slice(&bounce);
+                    Ok(1)
+                }
+                Err(_) => Ok(0),
             }
         }
         Syscall::BlkWrite { sector, buf_ptr } => {
@@ -1180,12 +1189,15 @@ pub fn handle_syscall(caller_id: usize, syscall: Syscall) -> SyscallResult {
             validate_user_buf(buf_ptr, 512, MAX_USER_BUF)?;
             use crate::task::drivers::virtio_blk::viVirtIOBlk;
             use api::block::ViBlockDevice;
-            // SAFETY: buf_ptr is a user-space 512-byte buffer validated above;
-            // SUM=1 allows S-mode to read it.
-            let buf = unsafe { core::slice::from_raw_parts(buf_ptr as *const u8, 512) };
-            match viVirtIOBlk.write_sector(sector, buf) {
+            // Bounce buffer for the same identity-map reason as BlkRead above.
+            // SAFETY: buf_ptr is a validated 512-byte user buffer; SUM=1 allows
+            // S-mode to read it.
+            let user = unsafe { core::slice::from_raw_parts(buf_ptr as *const u8, 512) };
+            let mut bounce = [0u8; 512];
+            bounce.copy_from_slice(user);
+            match viVirtIOBlk.write_sector(sector, &bounce) {
                 Ok(()) => Ok(1),
-                Err(_)  => Ok(0),
+                Err(_) => Ok(0),
             }
         }
         Syscall::HotSwap { cell_id, path_ptr, path_len } => {

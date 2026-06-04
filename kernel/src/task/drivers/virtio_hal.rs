@@ -58,10 +58,14 @@ unsafe impl Hal for VirtioHal {
     }
 
     unsafe fn share(buffer: NonNull<[u8]>, _direction: BufferDirection) -> PhysAddr {
-        // SAFETY: identity mapping — virtual address IS the physical address for all
-        // heap-allocated DMA buffers in the kernel's single address space.
         let vaddr = buffer.as_ptr() as *mut u8 as usize;
-        vaddr
+        // Translate virtual → physical using the kernel page table.
+        // ViOS SAS does not guarantee VA==PA for all mappings (ELF segments are
+        // mapped at their load VA but allocated to arbitrary physical frames).
+        // Heap-allocated buffers and kernel-stack frames happen to be identity-
+        // mapped, but VFS BSS / static sector buffers are NOT — DMA must use the
+        // real physical address to avoid writing to the wrong physical location.
+        crate::memory::paging::virt_to_phys(vaddr).unwrap_or(vaddr)
     }
 
     unsafe fn unshare(_paddr: PhysAddr, _buffer: NonNull<[u8]>, _direction: BufferDirection) {

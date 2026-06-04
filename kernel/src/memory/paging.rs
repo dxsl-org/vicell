@@ -204,6 +204,38 @@ pub unsafe fn activate_paging(root_table_phys: PhysAddr) {
     root_table.activate();
 }
 
+/// Translate a virtual address to its physical address by walking the kernel
+/// page table.
+///
+/// Returns `Some(phys)` when a valid leaf PTE is found, `None` when the
+/// virtual address is unmapped.  Used by `VirtioHal::share()` so DMA
+/// descriptors carry the correct physical address regardless of whether the
+/// buffer lives in identity-mapped memory (kernel stack) or a remapped ELF
+/// segment (e.g. VFS cell BSS / static sector buffers).
+/// Translate a virtual address to its physical address by walking the kernel
+/// page table.
+///
+/// Reads the page-table root from the `satp` CSR directly (no lock taken) so
+/// this function is safe to call from any context, including interrupt handlers
+/// or while holding other locks (e.g. the VirtIO `BLOCK_DEVICE` lock that is
+/// held during `read_blocks`/`write_blocks`).  The page table root never
+/// changes after boot so reading satp without the KERNEL_ROOT lock is correct.
+pub fn virt_to_phys(vaddr: VAddr) -> Option<PhysAddr> {
+    use hal::traits::PageTableTrait;
+    // SAFETY: `satp` CSR holds the page-table root PPN (bits 43:0 in Sv39 mode).
+    // We only read it here; no write, so no ordering concern.
+    let satp: usize;
+    unsafe { core::arch::asm!("csrr {}, satp", out(reg) satp) };
+    // Sv39 PPN field is bits 43:0 of satp; shift left by 12 to get PA.
+    let root_ppn = satp & ((1 << 44) - 1);
+    let root_phys = root_ppn << 12;
+    if root_phys == 0 { return None; }
+    // SAFETY: root_phys is the physical address of the active root PageTable;
+    // valid and stable for the kernel's lifetime after `init_kernel_paging`.
+    let root_table = unsafe { &*(root_phys as *const hal::PageTable) };
+    root_table.translate(vaddr)
+}
+
 /// Unmap a virtual page in the kernel address space (clears the PTE).
 /// Used to create true guard pages that trap on access.
 pub fn unmap_page(vaddr: VAddr) -> PagingResult<()> {
