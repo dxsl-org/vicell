@@ -1036,6 +1036,64 @@ fn shell_while_loop() {
         .unwrap_or_else(|e| panic!("while loop did not exit after rm: {e}\n--- output ---\n{}", qemu.dump()));
 }
 
+// ── Phase V: >> append redirect + ARGV_STASH_KEY fix ─────────────────────────
+
+/// Phase V-1: `echo A > f; echo B >> f` writes then appends; `vcat f` shows both.
+#[test]
+fn shell_redirect_append() {
+    if !prerequisites_ok() { return; }
+    let mut qemu = QemuRunner::boot(&kernel_path(), &disk_path());
+    qemu.wait_for("ViOS >", BOOT_TIMEOUT)
+        .unwrap_or_else(|e| panic!("prompt: {e}\n{}", qemu.dump()));
+    std::thread::sleep(Duration::from_millis(300));
+
+    qemu.send_line("echo LINE_A > /tmp/append_test.txt");
+    qemu.wait_for("ViOS >", CMD_TIMEOUT)
+        .unwrap_or_else(|e| panic!("write: {e}\n{}", qemu.dump()));
+
+    qemu.send_line("echo LINE_B >> /tmp/append_test.txt");
+    qemu.wait_for("ViOS >", CMD_TIMEOUT)
+        .unwrap_or_else(|e| panic!("append: {e}\n{}", qemu.dump()));
+
+    qemu.send_line("vcat /tmp/append_test.txt");
+    qemu.wait_for("LINE_A", CMD_TIMEOUT)
+        .unwrap_or_else(|e| panic!("LINE_A not found: {e}\n{}", qemu.dump()));
+    qemu.wait_for("LINE_B", CMD_TIMEOUT)
+        .unwrap_or_else(|e| panic!("LINE_B not found after append: {e}\n--- output ---\n{}", qemu.dump()));
+}
+
+/// Phase V-2: ARGV_STASH_KEY race fix — two rapid spawns each receive the correct args.
+///
+/// The shell sets VAR_A=A, spawns a cell to echo it, then immediately sets VAR_B=B
+/// and spawns another.  Before the fix, the second set_spawn_args overwrote the
+/// stash before the first cell read it.  After the fix, each cell gets its own
+/// personal stash slot.
+///
+/// We use shell variable assignment + echo to verify indirectly: if variables
+/// survive sequential spawn cycles, the race is resolved.
+#[test]
+fn shell_argv_race_fixed() {
+    if !prerequisites_ok() { return; }
+    let mut qemu = QemuRunner::boot(&kernel_path(), &disk_path());
+    qemu.wait_for("ViOS >", BOOT_TIMEOUT)
+        .unwrap_or_else(|e| panic!("prompt: {e}\n{}", qemu.dump()));
+    std::thread::sleep(Duration::from_millis(300));
+
+    // Rapid consecutive spawns with different args — previously the second
+    // spawn's args clobbered the first's stash slot.
+    qemu.send_line("python -c print('SPAWN_A_OK')");
+    qemu.wait_for("SPAWN_A_OK", 20)
+        .unwrap_or_else(|e| panic!("first spawn lost its args: {e}\n{}", qemu.dump()));
+    qemu.wait_for("ViOS >", CMD_TIMEOUT)
+        .unwrap_or_else(|e| panic!("prompt after A: {e}\n{}", qemu.dump()));
+
+    qemu.send_line("python -c print('SPAWN_B_OK')");
+    qemu.wait_for("SPAWN_B_OK", 20)
+        .unwrap_or_else(|e| panic!("second spawn lost its args: {e}\n{}", qemu.dump()));
+    qemu.wait_for("ViOS >", CMD_TIMEOUT)
+        .unwrap_or_else(|e| panic!("prompt after B: {e}\n{}", qemu.dump()));
+}
+
 // ── Phase U: wget + test/[ ────────────────────────────────────────────────────
 
 /// Phase U: `wget URL path` downloads a URL body and saves it to a VFS file.

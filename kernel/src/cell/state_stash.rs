@@ -49,6 +49,14 @@ pub fn restore(key: u64, buf: &mut [u8]) -> usize {
     n
 }
 
+/// Remove and discard the entry for `key`, freeing its slot.
+///
+/// Used for one-shot keys (per-spawn argv personal slots) so they do not
+/// accumulate toward [`MAX_ENTRIES`]. No-op when `key` is absent.
+pub fn remove(key: u64) {
+    STASH.lock().remove(&key);
+}
+
 /// Boot-time self-test of the state-transfer primitive: stash a sentinel under
 /// a scratch key, restore it, and confirm the bytes round-trip. Logs the
 /// outcome so an integration test can assert it. The scratch entry is removed

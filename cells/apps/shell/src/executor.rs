@@ -357,8 +357,8 @@ fn exec_cmd(cmd: &Cmd, _stdin: &[u8], jobs: &mut Jobs) -> i32 {
         }
     }
 
-    // Phase C: capture `echo` output when a StdoutTo redirect is present.
-    // Only `echo` is supported — external-process capture requires pipe caps (Phase 17a).
+    // Capture `echo` output for `>` (overwrite) and `>>` (append) redirects.
+    // External-process capture requires pipe caps (Phase 17a) and is out of scope.
     if prog == "echo" {
         if let Some(Redirect::StdoutTo(path)) =
             cmd.redirects.iter().find(|r| matches!(r, Redirect::StdoutTo(_)))
@@ -371,20 +371,45 @@ fn exec_cmd(cmd: &Cmd, _stdin: &[u8], jobs: &mut Jobs) -> i32 {
             }
             return 0;
         }
+        if let Some(Redirect::StdoutAppend(path)) =
+            cmd.redirects.iter().find(|r| matches!(r, Redirect::StdoutAppend(_)))
+        {
+            let bytes = crate::commands::cmd_echo_to_vec(&args);
+            if !crate::cmd_fs::append_file(path, &bytes) {
+                ostd::io::print("echo: cannot append '");
+                ostd::io::print(path);
+                ostd::io::println("'");
+            }
+            return 0;
+        }
     }
 
-    // Apply input redirect if present (read from file into buffer).
-    // For v1.0 the redirected data is not plumbed into the command yet.
+    // Handle remaining redirects.  `StdinFrom` prints file content inline
+    // (Phase V scope — full stdin plumbing deferred to Phase 17a pipe caps).
     for r in &cmd.redirects {
         match r {
             Redirect::StdinFrom(path) => {
-                // Signal intent; actual piping deferred to Phase 17a pipe caps.
-                ostd::io::print("[redir < ");
+                let mut buf = alloc::vec![0u8; 4096];
+                let n = crate::cmd_fs::read_file_vfs(path, &mut buf);
+                if n > 0 {
+                    if let Ok(s) = core::str::from_utf8(&buf[..n]) {
+                        ostd::io::print(s);
+                    }
+                } else {
+                    ostd::io::print("shell: cannot open '");
+                    ostd::io::print(path);
+                    ostd::io::println("'");
+                }
+            }
+            Redirect::StdoutTo(path) => {
+                // Non-echo stdout redirect: external capture deferred to Phase 17a.
+                ostd::io::print("[redir > ");
                 ostd::io::print(path);
                 ostd::io::println("]");
             }
-            Redirect::StdoutTo(path) | Redirect::StdoutAppend(path) => {
-                ostd::io::print("[redir > ");
+            Redirect::StdoutAppend(path) => {
+                // Non-echo append redirect: same Phase 17a limitation.
+                ostd::io::print("[redir >> ");
                 ostd::io::print(path);
                 ostd::io::println("]");
             }

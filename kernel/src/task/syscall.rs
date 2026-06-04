@@ -807,11 +807,24 @@ pub fn handle_syscall(caller_id: usize, syscall: Syscall) -> SyscallResult {
             if !path_str.starts_with('/') {
                 return Err(SyscallError::InvalidInput);
             }
-            crate::loader::spawn_from_path(path_str).map_err(|e| match e {
+            let task_id = crate::loader::spawn_from_path(path_str).map_err(|e| match e {
                 types::ViError::NotFound => SyscallError::FileNotFound,
                 types::ViError::OutOfMemory => SyscallError::Unknown,
                 _ => SyscallError::InvalidInput,
-            })
+            })?;
+            // Transfer pending spawn args to a per-task personal slot so a
+            // subsequent spawn overwriting the global ARGV slot cannot race this
+            // cell before it is scheduled and reads its args.
+            // Personal key = ARGV_KEY ^ (task_id << 32) — task ids are small
+            // (<256) so the high-bit XOR stays in the argv key namespace.
+            const ARGV_KEY: u64 = 0x0061_7267_7600_0000; // = ostd ARGV_STASH_KEY
+            let mut argv_buf = [0u8; 512];
+            let n = crate::cell::state_stash::restore(ARGV_KEY, &mut argv_buf);
+            if n > 0 {
+                let personal_key = ARGV_KEY ^ ((task_id as u64) << 32);
+                crate::cell::state_stash::stash(personal_key, &argv_buf[..n]);
+            }
+            Ok(task_id)
         }
 
         // ── Capability-based file I/O ────────────────────────────────────────
@@ -1087,6 +1100,19 @@ pub fn handle_syscall(caller_id: usize, syscall: Syscall) -> SyscallResult {
             validate_user_buf(buf_ptr, buf_len, crate::cell::state_stash::MAX_STASH_LEN)?;
             // SAFETY: validated above — writable user buffer of exactly buf_len bytes.
             let buf = unsafe { core::slice::from_raw_parts_mut(buf_ptr as *mut u8, buf_len) };
+            // For ARGV_STASH_KEY: serve the caller's personal slot (populated by
+            // SpawnFromPath) first so rapid back-to-back spawns can't race.
+            // The personal entry is consumed on read (one-shot) so it never
+            // accumulates toward the MAX_ENTRIES cap.
+            const ARGV_KEY: u64 = 0x0061_7267_7600_0000; // = ostd ARGV_STASH_KEY
+            if key as u64 == ARGV_KEY {
+                let personal_key = ARGV_KEY ^ ((caller_id as u64) << 32);
+                let n = crate::cell::state_stash::restore(personal_key, buf);
+                if n > 0 {
+                    crate::cell::state_stash::remove(personal_key);
+                    return Ok(n);
+                }
+            }
             Ok(crate::cell::state_stash::restore(key as u64, buf))
         }
         Syscall::BlkFlush => {
