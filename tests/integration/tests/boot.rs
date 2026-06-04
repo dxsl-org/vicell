@@ -1036,6 +1036,68 @@ fn shell_while_loop() {
         .unwrap_or_else(|e| panic!("while loop did not exit after rm: {e}\n--- output ---\n{}", qemu.dump()));
 }
 
+// ── Phase U: wget + test/[ ────────────────────────────────────────────────────
+
+/// Phase U: `wget URL path` downloads a URL body and saves it to a VFS file.
+///
+/// Starts a host HTTP server, boots QEMU, runs `wget http://... /tmp/out.txt`,
+/// then `vcat /tmp/out.txt` to verify the body was written correctly.
+#[test]
+fn network_wget_downloads_to_vfs() {
+    if !prerequisites_ok() { return; }
+
+    let (port, _server) = spawn_http_server();
+
+    let mut qemu = QemuRunner::boot(&kernel_path(), &disk_path());
+    qemu.wait_for("ViOS >", BOOT_TIMEOUT)
+        .unwrap_or_else(|e| panic!("shell: {e}\n{}", qemu.dump()));
+    qemu.wait_for("DHCP acquired", 40)
+        .unwrap_or_else(|e| panic!("DHCP: {e}\n{}", qemu.dump()));
+
+    std::thread::sleep(Duration::from_millis(500));
+
+    qemu.send_line(&format!("wget http://10.0.2.2:{port}/ /tmp/wget_out.txt"));
+    qemu.wait_for("saved", 20)
+        .unwrap_or_else(|e| panic!("wget did not save: {e}\n{}", qemu.dump()));
+    qemu.wait_for("ViOS >", CMD_TIMEOUT)
+        .unwrap_or_else(|e| panic!("prompt after wget: {e}\n{}", qemu.dump()));
+
+    qemu.send_line("vcat /tmp/wget_out.txt");
+    qemu.wait_for("HELLO", CMD_TIMEOUT)
+        .unwrap_or_else(|e| panic!("vcat after wget: {e}\n{}", qemu.dump()));
+}
+
+/// Phase U: `test -f path` returns 0 when file exists, 1 when absent.
+/// `[ X = Y ]` tests string equality.
+#[test]
+fn shell_test_builtin() {
+    if !prerequisites_ok() { return; }
+    let mut qemu = QemuRunner::boot(&kernel_path(), &disk_path());
+    qemu.wait_for("ViOS >", BOOT_TIMEOUT)
+        .unwrap_or_else(|e| panic!("prompt: {e}\n{}", qemu.dump()));
+    assert!(qemu.output_contains("FAT16 /data volume mounted"), "FAT16 not mounted\n{}", qemu.dump());
+    std::thread::sleep(Duration::from_millis(300));
+
+    // -f: existing file → 0 → then branch runs.
+    qemu.send_line("vwrite /data/tf.txt X");
+    qemu.wait_for("ViOS >", CMD_TIMEOUT).unwrap_or_else(|e| panic!("vwrite: {e}\n{}", qemu.dump()));
+    qemu.send_line("if [ -f /data/tf.txt ]; then echo FILE_EXISTS; fi");
+    qemu.wait_for("FILE_EXISTS", CMD_TIMEOUT)
+        .unwrap_or_else(|e| panic!("test -f failed for existing file: {e}\n{}", qemu.dump()));
+
+    // -f: absent file → 1 → else branch runs.
+    qemu.send_line("if [ -f /data/no_such_file.txt ]; then echo WRONG; else echo FILE_ABSENT; fi");
+    qemu.wait_for("FILE_ABSENT", CMD_TIMEOUT)
+        .unwrap_or_else(|e| panic!("test -f failed for absent file: {e}\n{}", qemu.dump()));
+
+    // String equality.
+    qemu.send_line("VAL=hello");
+    qemu.wait_for("ViOS >", CMD_TIMEOUT).unwrap_or_else(|e| panic!("set: {e}\n{}", qemu.dump()));
+    qemu.send_line("if [ $VAL = hello ]; then echo STR_EQ_OK; fi");
+    qemu.wait_for("STR_EQ_OK", CMD_TIMEOUT)
+        .unwrap_or_else(|e| panic!("[ = ] failed: {e}\n{}", qemu.dump()));
+}
+
 // ── Phase T: Shell functions ──────────────────────────────────────────────────
 
 /// Phase T: `name() { body; }` defines a shell function called like a built-in.

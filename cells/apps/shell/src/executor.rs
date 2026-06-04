@@ -462,6 +462,15 @@ fn dispatch_builtin(prog: &str, args: &[&str], jobs: &mut Jobs) -> i32 {
         // ── Scripting ───────────────────────────────────────────────────
         // `.` is the POSIX short form of `source`.
         "source" | "." => cmd_source(args, jobs),
+        // `test`/`[`: condition evaluation.  Returns Ok(()) (exit 0) on true,
+        // Err (exit 1) on false.  `[` strips a trailing `]` argument.
+        "test" => cmd_test(args),
+        "[" => {
+            let stripped: Vec<&str> = args.iter().copied()
+                .filter(|&a| a != "]")
+                .collect();
+            cmd_test(&stripped)
+        }
         "break"    => { set_loop_signal(LoopSignal::Break);    Ok(()) }
         "continue" => { set_loop_signal(LoopSignal::Continue); Ok(()) }
         "exit" => {
@@ -513,6 +522,43 @@ fn print_jobs(jobs: &Jobs) {
         });
         ostd::io::print("  ");
         ostd::io::println(name);
+    }
+}
+
+/// `test` / `[` — evaluate a condition and return 0 (true) or 1 (false).
+///
+/// Supported forms:
+/// - `-f path`   : file exists and is non-empty (vcat returns 0)
+/// - `-z str`    : string is empty
+/// - `-n str`    : string is non-empty
+/// - `a = b`     : string equality
+/// - `a != b`    : string inequality
+fn cmd_test(args: &[&str]) -> ViResult<()> {
+    let ok   = Ok(());
+    let fail = Err(ViError::NotFound); // any non-Ok maps to exit code 1
+    match args {
+        ["-f", path] => {
+            // File-existence check: vcat returns 0 if the file is present and
+            // non-empty, 1 otherwise. Re-use the same VFS OP_READ path.
+            let mut buf = [0u8; 8];
+            if crate::cmd_fs::read_file_vfs(path, &mut buf) > 0 { ok } else { fail }
+        }
+        [s1, "-z"] | ["-z", s1] => if s1.is_empty() { ok } else { fail },
+        [s1, "-n"] | ["-n", s1] => if !s1.is_empty() { ok } else { fail },
+        _ => {
+            // String comparison: `a = b` or `a != b`.
+            // args may be ["a", "=", "b"] or ["a", "!=", "b"].
+            if args.len() == 3 {
+                let (a, op, b) = (args[0], args[1], args[2]);
+                match op {
+                    "=" | "==" => if a == b { ok } else { fail },
+                    "!="       => if a != b { ok } else { fail },
+                    _          => fail,
+                }
+            } else {
+                fail
+            }
+        }
     }
 }
 
