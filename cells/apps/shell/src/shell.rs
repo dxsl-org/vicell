@@ -58,6 +58,10 @@ impl<'a> ViShell<'a> {
                     }
                     
                     let _ = self.dispatch(line).await;
+                    // Check for `exit N` — built-in sets this flag.
+                    if crate::executor::take_exit_request().is_some() {
+                        return;
+                    }
                 }
             }
         }

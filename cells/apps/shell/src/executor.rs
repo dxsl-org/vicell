@@ -15,6 +15,33 @@ use crate::jobs::{Jobs, JobState};
 use ostd::prelude::*;
 use ostd::syscall;
 
+// ── Shell exit signal ─────────────────────────────────────────────────────────
+//
+// `exit [N]` sets this flag; the shell's main run() loop checks it after each
+// command and terminates when set.  Single-threaded — static is safe.
+
+static mut EXIT_REQUESTED: bool = false;
+static mut EXIT_CODE_VALUE: i32  = 0;
+
+/// Signal the shell to exit with the given code on its next loop iteration.
+pub fn request_exit(code: i32) {
+    // SAFETY: single shell task; no concurrent writes.
+    unsafe { EXIT_REQUESTED = true; EXIT_CODE_VALUE = code; }
+}
+
+/// True if `exit` has been called; clears the flag.
+pub fn take_exit_request() -> Option<i32> {
+    // SAFETY: single shell task; no concurrent reads/writes.
+    unsafe {
+        if EXIT_REQUESTED {
+            EXIT_REQUESTED = false;
+            Some(EXIT_CODE_VALUE)
+        } else {
+            None
+        }
+    }
+}
+
 // ── Loop control signal ───────────────────────────────────────────────────────
 //
 // `break` and `continue` built-ins set a static signal that the nearest
@@ -52,6 +79,19 @@ const MAX_VARS: usize = 16;
 // Slot layout: (occupied, key[32], value[128]).  NUL-terminated on set.
 static mut VARS: [(bool, [u8; 32], [u8; 128]); MAX_VARS] =
     [(false, [0u8; 32], [0u8; 128]); MAX_VARS];
+
+fn unset_var(key: &str) {
+    let kb = key.as_bytes();
+    let klen = kb.len().min(31);
+    // SAFETY: single shell task; no concurrent writes.
+    let store = unsafe { &mut VARS };
+    for slot in store.iter_mut() {
+        if slot.0 && slot.1[..klen] == kb[..klen] && slot.1[klen] == 0 {
+            slot.0 = false;
+            return;
+        }
+    }
+}
 
 fn set_var(key: &str, value: &str) {
     let kb = key.as_bytes();
@@ -98,17 +138,42 @@ fn get_var(key: &str) -> Option<&'static str> {
 
 /// Expand a single token: `$NAME` (whole-token only) → variable value.
 /// Non-`$` tokens are returned unchanged (as an owned String clone).
+/// Expand `$VAR` and `$?` references anywhere inside a token (mid-token expansion).
+///
+/// Scans for `$` followed by an identifier (`[A-Za-z_][A-Za-z0-9_]*`) or `?`.
+/// Any `$` that is not followed by a valid name is passed through unchanged.
+/// Fast path: tokens with no `$` are returned as-is (no allocation).
 fn expand_token(s: &str) -> String {
-    // Special variable $? — exit code of the last command.
-    if s == "$?" {
-        return get_var("?").map(String::from).unwrap_or_else(|| String::from("0"));
-    }
-    if let Some(name) = s.strip_prefix('$') {
-        if !name.is_empty() && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') {
-            return get_var(name).map(String::from).unwrap_or_default();
+    if !s.contains('$') { return String::from(s); }
+    let mut result = String::new();
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'$' && i + 1 < bytes.len() {
+            let next = bytes[i + 1];
+            if next == b'?' {
+                // $? — exit code of the last command.
+                if let Some(v) = get_var("?") { result.push_str(v); }
+                i += 2;
+                continue;
+            }
+            if next.is_ascii_alphabetic() || next == b'_' {
+                let start = i + 1;
+                let end   = bytes[start..].iter()
+                    .take_while(|&&b| b.is_ascii_alphanumeric() || b == b'_')
+                    .count() + start;
+                // SAFETY: bytes[start..end] contains only ASCII alphanumeric / '_'.
+                let name = unsafe { core::str::from_utf8_unchecked(&bytes[start..end]) };
+                if let Some(v) = get_var(name) { result.push_str(v); }
+                // Unset variables expand to empty string (POSIX default).
+                i = end;
+                continue;
+            }
         }
+        result.push(bytes[i] as char); // shell tokens are ASCII
+        i += 1;
     }
-    String::from(s)
+    result
 }
 
 /// Execute an `Ast` and return the last command's exit code.
@@ -342,6 +407,22 @@ fn dispatch_builtin(prog: &str, args: &[&str], jobs: &mut Jobs) -> i32 {
         "source" | "." => cmd_source(args, jobs),
         "break"    => { set_loop_signal(LoopSignal::Break);    Ok(()) }
         "continue" => { set_loop_signal(LoopSignal::Continue); Ok(()) }
+        "exit" => {
+            let code = args.first().and_then(|s| {
+                let mut n = 0i32;
+                for ch in s.bytes() {
+                    if !(b'0'..=b'9').contains(&ch) { return None; }
+                    n = n.saturating_mul(10).saturating_add((ch - b'0') as i32);
+                }
+                Some(n)
+            }).unwrap_or(0);
+            request_exit(code);
+            Ok(())
+        }
+        "unset" => {
+            for name in args { unset_var(name); }
+            Ok(())
+        }
         // ── External ────────────────────────────────────────────────────
         _ => return spawn_external(prog, args),
     };
