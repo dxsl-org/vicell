@@ -58,6 +58,10 @@ pub enum Ast {
     Background(Cmd),
     /// `cmd1 ; cmd2` — sequential execution.
     Sequence(Vec<Ast>),
+    /// `cmd1 && cmd2` — run cmd2 only if cmd1 exits 0 (success).
+    And(alloc::boxed::Box<Ast>, alloc::boxed::Box<Ast>),
+    /// `cmd1 || cmd2` — run cmd2 only if cmd1 exits non-zero (failure).
+    Or(alloc::boxed::Box<Ast>, alloc::boxed::Box<Ast>),
     /// `while COND; do BODY; done` — loop while COND exits 0.
     While {
         cond: alloc::boxed::Box<Ast>,
@@ -93,7 +97,9 @@ enum Tok {
     RedirectAppend, // >>
     RedirectIn,     // <
     RedirectErr,    // 2>
-    Ampersand,      // &
+    Ampersand,      // &   (background marker — single &)
+    And,            // &&  (short-circuit AND)
+    Or,             // ||  (short-circuit OR)
     Semicolon,      // ;
     // ── Conditional keywords ─────────────────────────────────────────────────
     // These variants are NEVER emitted by the tokenizer — `if`/`then`/`else`/`fi`
@@ -139,8 +145,16 @@ fn tokenize(line: &str) -> Vec<Tok> {
                     }
                 }
             }
-            '|' => { flush!(); tokens.push(Tok::Pipe); }
-            '&' => { flush!(); tokens.push(Tok::Ampersand); }
+            '|' => {
+                flush!();
+                if chars.peek() == Some(&'|') { chars.next(); tokens.push(Tok::Or); }
+                else { tokens.push(Tok::Pipe); }
+            }
+            '&' => {
+                flush!();
+                if chars.peek() == Some(&'&') { chars.next(); tokens.push(Tok::And); }
+                else { tokens.push(Tok::Ampersand); }
+            }
             ';' => { flush!(); tokens.push(Tok::Semicolon); }
             '<' => { flush!(); tokens.push(Tok::RedirectIn); }
             '>' => {
@@ -319,6 +333,19 @@ fn parse_if_stmt(tokens: &[Tok]) -> Ast {
 }
 
 fn parse_pipeline(tokens: &[Tok]) -> Ast {
+    // `&&` / `||` have lower precedence than pipelines — check first.
+    // Split on the FIRST occurrence; right side is parsed recursively so
+    // `A && B && C` builds `And(A, And(B, C))` with left-to-right evaluation.
+    if let Some(pos) = tokens.iter().position(|t| t == &Tok::And || t == &Tok::Or) {
+        let left  = parse_pipeline(&tokens[..pos]);
+        let right = parse_pipeline(&tokens[pos + 1..]);
+        return match &tokens[pos] {
+            Tok::And => Ast::And(alloc::boxed::Box::new(left), alloc::boxed::Box::new(right)),
+            Tok::Or  => Ast::Or(alloc::boxed::Box::new(left),  alloc::boxed::Box::new(right)),
+            _ => unreachable!(),
+        };
+    }
+
     let pipe_segs: Vec<&[Tok]> = split_on(tokens, |t| t == &Tok::Pipe);
 
     let cmds: Vec<Cmd> = pipe_segs.iter()

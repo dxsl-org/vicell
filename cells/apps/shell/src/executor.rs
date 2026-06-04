@@ -109,6 +109,14 @@ pub fn execute(ast: &Ast, jobs: &mut Jobs) -> i32 {
             }
             last
         }
+        Ast::And(left, right) => {
+            let code = execute(left, jobs);
+            if code == 0 { execute(right, jobs) } else { code }
+        }
+        Ast::Or(left, right) => {
+            let code = execute(left, jobs);
+            if code != 0 { execute(right, jobs) } else { code }
+        }
         Ast::While { cond, body } => {
             loop {
                 if execute(cond, jobs) != 0 { break; }

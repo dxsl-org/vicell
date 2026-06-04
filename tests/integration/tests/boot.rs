@@ -1036,6 +1036,59 @@ fn shell_while_loop() {
         .unwrap_or_else(|e| panic!("while loop did not exit after rm: {e}\n--- output ---\n{}", qemu.dump()));
 }
 
+// ── Phase Q: Shell && / || short-circuit chaining ────────────────────────────
+
+/// Phase Q: `cmd1 && cmd2` — cmd2 runs only when cmd1 exits 0.
+///
+/// echo always exits 0, so both sides must print.  A failing command (vcat
+/// on a non-existent path) must suppress the right-hand side.
+#[test]
+fn shell_and_operator() {
+    if !prerequisites_ok() { return; }
+    let mut qemu = QemuRunner::boot(&kernel_path(), &disk_path());
+    qemu.wait_for("ViOS >", BOOT_TIMEOUT)
+        .unwrap_or_else(|e| panic!("prompt: {e}\n{}", qemu.dump()));
+    std::thread::sleep(Duration::from_millis(300));
+
+    // True && True: both sides run.
+    qemu.send_line("echo AND_LEFT && echo AND_RIGHT");
+    qemu.wait_for("AND_LEFT", CMD_TIMEOUT)
+        .unwrap_or_else(|e| panic!("left not seen: {e}\n{}", qemu.dump()));
+    qemu.wait_for("AND_RIGHT", CMD_TIMEOUT)
+        .unwrap_or_else(|e| panic!("right not seen: {e}\n{}", qemu.dump()));
+
+    // False && True: right must NOT run.
+    qemu.send_line("vcat /no/such/file && echo SHOULD_NOT_APPEAR");
+    qemu.wait_for("ViOS >", CMD_TIMEOUT)
+        .unwrap_or_else(|e| panic!("prompt after failed &&: {e}\n{}", qemu.dump()));
+    assert!(!qemu.output_contains("SHOULD_NOT_APPEAR"),
+        "&& ran right side despite left failing\n{}", qemu.dump());
+}
+
+/// Phase Q: `cmd1 || cmd2` — cmd2 runs only when cmd1 exits non-zero.
+#[test]
+fn shell_or_operator() {
+    if !prerequisites_ok() { return; }
+    let mut qemu = QemuRunner::boot(&kernel_path(), &disk_path());
+    qemu.wait_for("ViOS >", BOOT_TIMEOUT)
+        .unwrap_or_else(|e| panic!("prompt: {e}\n{}", qemu.dump()));
+    std::thread::sleep(Duration::from_millis(300));
+
+    // False || True: fallback runs.
+    qemu.send_line("vcat /no/such/file || echo OR_FALLBACK");
+    qemu.wait_for("OR_FALLBACK", CMD_TIMEOUT)
+        .unwrap_or_else(|e| panic!("|| fallback not seen: {e}\n{}", qemu.dump()));
+
+    // True || True: right must NOT run.
+    qemu.send_line("echo OR_LEFT || echo SHOULD_NOT_APPEAR_2");
+    qemu.wait_for("OR_LEFT", CMD_TIMEOUT)
+        .unwrap_or_else(|e| panic!("left not seen: {e}\n{}", qemu.dump()));
+    qemu.wait_for("ViOS >", CMD_TIMEOUT)
+        .unwrap_or_else(|e| panic!("prompt: {e}\n{}", qemu.dump()));
+    assert!(!qemu.output_contains("SHOULD_NOT_APPEAR_2"),
+        "|| ran right side despite left succeeding\n{}", qemu.dump());
+}
+
 // ── Phase P: Shell for loop ───────────────────────────────────────────────────
 
 /// Phase P: `for VAR in word1 word2 …; do BODY; done` — iterates over a literal
