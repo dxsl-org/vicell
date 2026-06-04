@@ -23,3 +23,7 @@ path = "src/bin/nc.rs"
 [[bin]]
 name = "wget"
 path = "src/bin/wget.rs"
+
+[[bin]]
+name = "httpd"
+path = "src/bin/httpd.rs"

@@ -890,6 +890,62 @@ fn python_vnet_tcp_http_get() {
         .unwrap_or_else(|e| panic!("no HTTP 200 from Python: {e}\n--- output ---\n{}", qemu.dump()));
 }
 
+// ── Phase M: httpd — minimal HTTP/1.0 file server ────────────────────────────
+
+/// Phase M: `httpd <port> <vfs_path>` serves a VFS file over HTTP/1.0.
+///
+/// Flow:
+///  1. Write sentinel file to /tmp via `vwrite`.
+///  2. Start `httpd 9091 /tmp/resp.txt` as a background job (`&`).
+///  3. Wait for "httpd: listening".
+///  4. Host connects via QEMU SLIRP hostfwd and sends a bare GET request.
+///  5. Read the response; assert it contains the sentinel.
+#[test]
+fn network_httpd_serves_file() {
+    if !prerequisites_ok() { return; }
+
+    let (mut qemu, host_port) =
+        QemuRunner::boot_with_hostfwd(&kernel_path(), &disk_path(), 9091);
+
+    qemu.wait_for("ViOS >", BOOT_TIMEOUT)
+        .unwrap_or_else(|e| panic!("shell: {e}\n{}", qemu.dump()));
+    qemu.wait_for("DHCP acquired", 40)
+        .unwrap_or_else(|e| panic!("DHCP: {e}\n{}", qemu.dump()));
+
+    std::thread::sleep(Duration::from_millis(500));
+
+    // Write the file httpd will serve.
+    qemu.send_line("vwrite /tmp/resp.txt HTTPD_OK");
+    qemu.wait_for("ViOS >", CMD_TIMEOUT)
+        .unwrap_or_else(|e| panic!("vwrite: {e}\n{}", qemu.dump()));
+
+    // Start httpd in the background so the shell returns immediately.
+    qemu.send_line("httpd 9091 /tmp/resp.txt &");
+    qemu.wait_for("httpd: listening", 10)
+        .unwrap_or_else(|e| panic!("httpd did not listen: {e}\n{}", qemu.dump()));
+
+    std::thread::sleep(Duration::from_millis(200));
+
+    // Host sends a minimal HTTP/1.0 GET request.
+    let mut stream = TcpStream::connect(format!("127.0.0.1:{host_port}"))
+        .unwrap_or_else(|e| panic!("host connect failed: {e}\n{}", qemu.dump()));
+    stream.write_all(b"GET / HTTP/1.0\r\n\r\n").expect("write GET");
+    stream.flush().expect("flush");
+
+    // Read full response (server closes after serving).
+    let mut response = Vec::new();
+    use std::io::Read;
+    stream.set_read_timeout(Some(Duration::from_secs(10))).ok();
+    let _ = stream.read_to_end(&mut response);
+
+    let body = String::from_utf8_lossy(&response);
+    assert!(
+        body.contains("HTTPD_OK"),
+        "response did not contain HTTPD_OK\n--- response ---\n{body}\n--- QEMU ---\n{}",
+        qemu.dump()
+    );
+}
+
 // ── Phase L: Shell variables ──────────────────────────────────────────────────
 
 /// Phase L: `VAR=VALUE` sets a shell variable; `echo $VAR` expands it.
