@@ -817,12 +817,16 @@ pub fn handle_syscall(caller_id: usize, syscall: Syscall) -> SyscallResult {
             // cell before it is scheduled and reads its args.
             // Personal key = ARGV_KEY ^ (task_id << 32) — task ids are small
             // (<256) so the high-bit XOR stays in the argv key namespace.
+            // Use heap allocation (not stack) — the SpawnFromPath call chain
+            // is deep and a 512-byte stack buffer would overflow the kernel stack.
             const ARGV_KEY: u64 = 0x0061_7267_7600_0000; // = ostd ARGV_STASH_KEY
-            let mut argv_buf = [0u8; 512];
-            let n = crate::cell::state_stash::restore(ARGV_KEY, &mut argv_buf);
-            if n > 0 {
-                let personal_key = ARGV_KEY ^ ((task_id as u64) << 32);
-                crate::cell::state_stash::stash(personal_key, &argv_buf[..n]);
+            {
+                let mut argv_buf = alloc::vec![0u8; 512];
+                let n = crate::cell::state_stash::restore(ARGV_KEY, &mut argv_buf);
+                if n > 0 {
+                    let personal_key = ARGV_KEY ^ ((task_id as u64) << 32);
+                    crate::cell::state_stash::stash(personal_key, &argv_buf[..n]);
+                }
             }
             Ok(task_id)
         }

@@ -75,6 +75,17 @@ pub enum Ast {
         name: alloc::string::String,
         body: alloc::string::String,
     },
+    /// `case EXPR in pattern) BODY ;; … esac` — pattern-match dispatch.
+    ///
+    /// `expr` is the unexpanded word after `case`; expansion happens at
+    /// execute time.  Patterns are exact strings or `*` (wildcard).
+    /// Note: the whole statement must be on a single line or in a single
+    /// `source`-script line; mixing with `;`-sequences on the same line is
+    /// not supported (the outer `;` split would fragment the `;;` markers).
+    Case {
+        expr: alloc::string::String,
+        arms: alloc::vec::Vec<(alloc::string::String, alloc::boxed::Box<Ast>)>,
+    },
     /// `for VAR in word1 word2 …; do BODY; done` — iterate over a word list.
     ///
     /// Sets `$VAR` to each word in order, runs BODY, then advances. `$VAR`
@@ -229,6 +240,11 @@ pub fn parse(line: &str) -> Ast {
     if tokens.first() == Some(&Tok::Word("for".into())) {
         return parse_for_stmt(&tokens);
     }
+    // `case` must be parsed before semicolon splitting because `;;` arm
+    // separators are also Semicolon tokens and would fragment the statement.
+    if tokens.first() == Some(&Tok::Word("case".into())) {
+        return parse_case_stmt(&tokens);
+    }
 
     // Split on `;` into sub-sequences first.
     let segments: Vec<&[Tok]> = split_on(&tokens, |t| t == &Tok::Semicolon);
@@ -328,6 +344,58 @@ fn parse_for_stmt(tokens: &[Tok]) -> Ast {
         var,
         words,
         body: alloc::boxed::Box::new(body),
+    }
+}
+
+/// Parse `case EXPR in pattern1) BODY ;; pattern2) BODY ;; esac`.
+///
+/// `;;` is two consecutive `Tok::Semicolon` tokens.  Patterns are the first
+/// token of each arm with a trailing `)` stripped.  `*` is a catch-all.
+/// Malformed input (missing `in` or `esac`) falls back to `parse_tokens`.
+fn parse_case_stmt(tokens: &[Tok]) -> Ast {
+    let in_pos   = tokens.iter().position(|t| is_kw(t, "in"));
+    let esac_pos = tokens.iter().rposition(|t| is_kw(t, "esac"));
+    let (ip, ep) = match (in_pos, esac_pos) {
+        (Some(i), Some(e)) if e > i => (i, e),
+        _ => return parse_tokens(tokens),
+    };
+
+    // Expression: single word between `case` and `in`.
+    let expr = match tokens.get(1) {
+        Some(Tok::Word(w)) => w.clone(),
+        _ => String::new(),
+    };
+
+    // Arms: tokens[ip+1..ep] split on `;;` (two consecutive Semicolons).
+    let arm_tokens = &tokens[ip + 1..ep];
+    let mut arms: alloc::vec::Vec<(String, alloc::boxed::Box<Ast>)> = alloc::vec::Vec::new();
+    let mut start = 0;
+    let mut i = 0;
+    while i < arm_tokens.len() {
+        if i + 1 < arm_tokens.len()
+            && arm_tokens[i] == Tok::Semicolon
+            && arm_tokens[i + 1] == Tok::Semicolon
+        {
+            push_arm(&arm_tokens[start..i], &mut arms);
+            i += 2;
+            start = i;
+        } else {
+            i += 1;
+        }
+    }
+    push_arm(&arm_tokens[start..], &mut arms); // last arm (no trailing ;;)
+
+    Ast::Case { expr, arms }
+}
+
+fn push_arm(tokens: &[Tok], arms: &mut alloc::vec::Vec<(String, alloc::boxed::Box<Ast>)>) {
+    // Strip leading/trailing Semicolons left from the split.
+    let start = tokens.iter().position(|t| t != &Tok::Semicolon).unwrap_or(tokens.len());
+    let tokens = &tokens[start..];
+    if let Some(Tok::Word(pat)) = tokens.first() {
+        let pattern = String::from(pat.trim_end_matches(')'));
+        let body = parse_tokens(&tokens[1..]);
+        arms.push((pattern, alloc::boxed::Box::new(body)));
     }
 }
 

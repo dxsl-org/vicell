@@ -272,12 +272,50 @@ pub fn cmd_echo_to_vec(args: &[&str]) -> alloc::vec::Vec<u8> {
     out
 }
 
-/// `echo a b c` — print args joined by a single space, followed by newline.
+/// Expand `\n`, `\t`, `\\`, `\r` escape sequences in `s`.
+fn expand_echo_escapes(s: &str) -> alloc::string::String {
+    let mut out = alloc::string::String::new();
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            match chars.next() {
+                Some('n')  => out.push('\n'),
+                Some('t')  => out.push('\t'),
+                Some('r')  => out.push('\r'),
+                Some('\\') => out.push('\\'),
+                Some('0')  => out.push('\0'),
+                Some(other) => { out.push('\\'); out.push(other); }
+                None        => out.push('\\'),
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// `echo [-e] [-n] a b c` — print args joined by a single space.
+///
+/// `-e` interprets escape sequences (`\n`, `\t`, `\\`, `\r`).
+/// `-n` suppresses the trailing newline.
 pub fn cmd_echo<'a>(args: core::str::SplitWhitespace<'a>) -> ViResult<()> {
     let parts: alloc::vec::Vec<&str> = args.collect();
-    let bytes = cmd_echo_to_vec(&parts);
-    if let Ok(s) = core::str::from_utf8(&bytes) {
-        ostd::io::print(s);
+    let mut escape = false;
+    let mut no_newline = false;
+    let mut word_start = 0;
+    // Consume leading flags.
+    for (i, &a) in parts.iter().enumerate() {
+        if a == "-e" { escape = true; word_start = i + 1; }
+        else if a == "-n" { no_newline = true; word_start = i + 1; }
+        else if a == "-en" || a == "-ne" { escape = true; no_newline = true; word_start = i + 1; }
+        else { break; }
     }
+    let text = parts[word_start..].join(" ");
+    if escape {
+        ostd::io::print(&expand_echo_escapes(&text));
+    } else {
+        ostd::io::print(&text);
+    }
+    if !no_newline { ostd::io::println(""); }
     Ok(())
 }

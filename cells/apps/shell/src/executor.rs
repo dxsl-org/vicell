@@ -256,6 +256,16 @@ pub fn execute(ast: &Ast, jobs: &mut Jobs) -> i32 {
             }
             last
         }
+        Ast::Case { expr, arms } => {
+            let value = expand_token(expr);
+            for (pattern, body) in arms {
+                if case_matches(pattern, &value) {
+                    execute(body, jobs);
+                    break;
+                }
+            }
+            0
+        }
         Ast::FuncDef { name, body } => {
             define_function(name, body);
             0
@@ -426,6 +436,13 @@ fn exec_cmd(cmd: &Cmd, _stdin: &[u8], jobs: &mut Jobs) -> i32 {
     // Set $? to the exit code so scripts can inspect it.
     set_var("?", i32_to_str(code));
     code
+}
+
+/// Match a case pattern against a value.
+///
+/// `*` is a catch-all; everything else is exact string equality.
+fn case_matches(pattern: &str, value: &str) -> bool {
+    pattern == "*" || pattern == value
 }
 
 /// Convert a small non-negative integer to a &str backed by a fixed buffer.

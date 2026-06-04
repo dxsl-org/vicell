@@ -200,13 +200,13 @@ fn server_mode(port: u16) {
     };
     println("connected");
 
-    // RECV loop: print to serial AND echo back. Exit on peer close.
+    // RECV loop: print to serial AND echo back. Exit when peer closes.
     let mut recv_msg = [0u8; 13];
     recv_msg[0] = RECV_OP;
     recv_msg[1..9].copy_from_slice(&stream_cap.to_le_bytes());
     recv_msg[9..13].copy_from_slice(&256u32.to_le_bytes());
 
-    for _ in 0..500_000 {
+    'recv: for _ in 0..500_000 {
         let mut data = [0u8; 256];
         sys_send(NET_ENDPOINT, &recv_msg);
         match sys_recv(0, &mut data) {
@@ -225,17 +225,68 @@ fn server_mode(port: u16) {
                 let _ = sys_recv(0, &mut cnt);
             }
             SyscallResult::Ok(_) => {
-                // 0 bytes: check if peer has closed.
                 let st = query_state(stream_cap);
-                if st == 0x06 || st == 0x00 { break; } // CloseWait or Closed
+                if st == 0x06 || st == 0x00 { break 'recv; }
                 sys_yield();
             }
             _ => break,
         }
     }
-
     close_socket(stream_cap);
-    close_socket(cap);
+
+    // Loop back: accept the next connection on the same listener.
+    // Update accept_msg for the (unchanged) listen cap.
+    accept_msg[1..9].copy_from_slice(&cap.to_le_bytes());
+
+    // Re-enter the accept loop — use goto-style tail call by recursing
+    // into the outer accept state. Rather than recursion, update stream_cap
+    // inline by falling through to the top of the accept poll at the caller.
+    // Simplest approach: loop the whole accept+recv block.
+    loop {
+        println("waiting for next connection");
+        let next_cap: u64 = loop {
+            sys_send(NET_ENDPOINT, &accept_msg);
+            let mut r = [0u8; 8];
+            match sys_recv(0, &mut r) {
+                SyscallResult::Ok(_) => {
+                    let c = u64::from_le_bytes(r);
+                    if c != u64::MAX && c != 0 { break c; }
+                    sys_yield();
+                }
+                _ => { sys_yield(); }
+            }
+        };
+        println("connected");
+
+        let mut rmsg = [0u8; 13];
+        rmsg[0] = RECV_OP;
+        rmsg[1..9].copy_from_slice(&next_cap.to_le_bytes());
+        rmsg[9..13].copy_from_slice(&256u32.to_le_bytes());
+
+        'r2: for _ in 0..500_000 {
+            let mut data = [0u8; 256];
+            sys_send(NET_ENDPOINT, &rmsg);
+            match sys_recv(0, &mut data) {
+                SyscallResult::Ok(_) if data[0] != 0 => {
+                    let end = data.iter().position(|&b| b == 0).unwrap_or(256);
+                    if let Ok(s) = core::str::from_utf8(&data[..end]) { print(s); }
+                    let mut smsg = [0u8; 9 + 256];
+                    smsg[0] = SEND_OP;
+                    smsg[1..9].copy_from_slice(&next_cap.to_le_bytes());
+                    smsg[9..9 + end].copy_from_slice(&data[..end]);
+                    sys_send(NET_ENDPOINT, &smsg[..9 + end]);
+                    let mut cnt = [0u8; 4]; let _ = sys_recv(0, &mut cnt);
+                }
+                SyscallResult::Ok(_) => {
+                    let st = query_state(next_cap);
+                    if st == 0x06 || st == 0x00 { break 'r2; }
+                    sys_yield();
+                }
+                _ => break,
+            }
+        }
+        close_socket(next_cap);
+    }
 }
 
 /// Query SOCKET_STATE (0x19) → 1-byte smoltcp state code.
