@@ -48,6 +48,8 @@ impl<'a> ViShell<'a> {
                 if let Ok(line) = core::str::from_utf8(&buffer) {
                     // Add to history if not empty and not repeat of last
                     let trim_line = line.trim();
+                    // Skip comment lines (# prefix) without executing or adding to history.
+                    if trim_line.starts_with('#') { continue; }
                     if !trim_line.is_empty() {
                          if self.history.back().map(|s| s.as_str()) != Some(trim_line) {
                              if self.history.len() >= 32 {
@@ -56,7 +58,7 @@ impl<'a> ViShell<'a> {
                              self.history.push_back(String::from(trim_line));
                          }
                     }
-                    
+
                     let _ = self.dispatch(line).await;
                     // Check for `exit N` — built-in sets this flag.
                     if crate::executor::take_exit_request().is_some() {
