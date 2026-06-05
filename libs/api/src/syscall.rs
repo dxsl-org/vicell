@@ -32,6 +32,10 @@ pub enum ViSyscall {
     /// Revoke a capability (close).
     /// ABI: a0 = cap_id → 0 on success.
     CloseCap = 15,
+    /// Spawn a cell pinned to a specific hardware core.
+    /// ABI: a0 = path_ptr, a1 = path_len, a2 = priority: u8, a3 = core_id: usize.
+    /// On single-core systems core_id must be 0; any other value returns NotSupported.
+    SpawnPinned = 16,
     Wait = 8,          // Wait for task
     Yield = 104,       // Linux sched_yield is 24, but we use 104 in current code
     SetTimer = 35,     // Added SetTimer
@@ -112,6 +116,7 @@ impl From<usize> for ViSyscall {
             13 => ViSyscall::OpenCap,
             14 => ViSyscall::ReadCap,
             15 => ViSyscall::CloseCap,
+            16 => ViSyscall::SpawnPinned,
             8 => ViSyscall::Wait,
             104 => ViSyscall::Yield,
             35 => ViSyscall::SetTimer,

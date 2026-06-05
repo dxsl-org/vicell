@@ -5,6 +5,7 @@ use crate::*;
 pub mod frame;
 pub mod heap;
 pub mod paging;
+pub mod rt_heap;
 pub mod tests;
 
 /// Ownership registry entry.

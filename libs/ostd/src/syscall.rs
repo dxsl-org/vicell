@@ -40,7 +40,7 @@ unsafe fn syscall(id: ViSyscall, a0: usize, a1: usize, a2: usize, a3: usize) -> 
 /// Used for block I/O (ids 500/501) which intentionally have no `ViSyscall`
 /// entry — keeping them out of `libs/api` avoids the Interface-is-Sacred
 /// 2x-confirmation gate. The kernel dispatches them via the numeric fallback
-/// in `vios_syscall_dispatch`.
+/// in `ViCell_syscall_dispatch`.
 #[inline(always)]
 unsafe fn syscall_raw(id: usize, a0: usize, a1: usize, a2: usize, a3: usize) -> isize {
     let mut ret: isize;
@@ -186,6 +186,32 @@ pub fn sys_spawn_from_path(path: &str) -> SyscallResult {
             path.len(),
             0,
             0,
+        );
+        if ret > 0 {
+            SyscallResult::Ok(ret as usize)
+        } else {
+            SyscallResult::Err(SyscallError::Unknown)
+        }
+    }
+}
+
+/// Spawn a cell pinned to a specific hardware core.
+///
+/// On single-core systems `core_id` must be 0; any other value returns
+/// `SyscallError::Unknown` (maps to `ViError::NotSupported` in the kernel).
+///
+/// # Errors
+/// Returns `Err` if the path is not found, the ELF is invalid, or `core_id != 0`
+/// on a single-core kernel.
+pub fn sys_spawn_pinned(path: &str, priority: u8, core_id: usize) -> SyscallResult {
+    // SAFETY: path is a valid UTF-8 str; kernel copies it out before returning.
+    unsafe {
+        let ret = syscall(
+            ViSyscall::SpawnPinned,
+            path.as_ptr() as usize,
+            path.len(),
+            priority as usize,
+            core_id,
         );
         if ret > 0 {
             SyscallResult::Ok(ret as usize)

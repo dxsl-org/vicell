@@ -85,14 +85,44 @@ pub fn init() {
     unsafe {
         core::ptr::write(&mut *sched_guard, Some(Scheduler::new()));
     }
+    drop(sched_guard);
 
-    // unsafe {
-    //     ostd::syscall::register_trap_handler(crate::task::syscall::handle_software_trap);
-    // }
+    // Enable S-mode timer interrupt and arm the first preemption tick.
+    // Done after scheduler init so vi_timer_tick() sees a valid SCHEDULER.
+    #[cfg(target_arch = "riscv64")]
+    {
+        // SAFETY: csrsi on sie sets only the STIE bit (bit 5); safe from S-mode.
+        unsafe { core::arch::asm!("csrsi sie, 0x20"); }
+        let next = hal::common::timer::read_mtime() + hal::common::timer::TICKS_PER_10MS;
+        hal::common::sbi::set_timer(next);
+        info!("Timer preemption enabled (10 ms timeslice)");
+    }
+}
 
-    // if let Some(s) = sched_guard.as_mut() {
-    //     // TODO: Spawn init task via proper ELF loading
-    // }
+/// Called from the S-mode timer ISR via `extern "Rust"` linkage.
+///
+/// Increments the global tick counter, rearmed the timer for the next
+/// 10 ms slice, and yields the CPU so the scheduler can preempt the
+/// current task if a higher-priority task has become runnable.
+#[no_mangle]
+pub extern "Rust" fn vi_timer_tick() {
+    tick();
+
+    // Rearm timer anchored to current mtime so the slice is constant
+    // regardless of how long this ISR takes.
+    #[cfg(target_arch = "riscv64")]
+    {
+        let next = hal::common::timer::read_mtime() + hal::common::timer::TICKS_PER_10MS;
+        hal::common::sbi::set_timer(next);
+    }
+
+    // Run the scheduler.  If a higher-priority (or simply next round-robin)
+    // task is ready, this performs a context switch.  Safe to call from the
+    // timer ISR because:
+    //   (a) interrupts are disabled by hardware on trap entry (sstatus.SIE=0)
+    //   (b) yield_cpu() releases SCHEDULER lock before calling Context::switch
+    //   (c) trap.S restores the correct ViTrapFrame from the new task's stack
+    yield_cpu();
 }
 
 /// Core scheduling logic: picks next task and performs switch OUTSIDE of the lock.
@@ -614,8 +644,9 @@ pub fn ipc_send(
             if let Some(target) = sched.tasks.get_mut(&target_id) {
                 target.state = TaskState::Ready;
                 target.current_caller = Some(caller_id);
-                sched.ready_queue.push_back(target_id);
             }
+            let prio = sched.push_ready(target_id);
+            sched.pend_preempt_if_needed(prio);
 
             if let Some(caller) = sched.tasks.get_mut(&caller_id) {
                 caller.state = TaskState::Sending {
@@ -676,7 +707,7 @@ pub fn ipc_recv(
             // mechanism to unblock it unless ipc_reply is used.
             if let Some(sender_task) = sched.tasks.get_mut(&sender_id) {
                 sender_task.state = TaskState::Ready;
-                sched.ready_queue.push_back(sender_id);
+                sched.push_ready(sender_id);
             }
 
             if let Some(caller) = sched.tasks.get_mut(&caller_id) {
@@ -750,7 +781,7 @@ pub fn ipc_try_recv(
             // reply send blocks, creating a deadlock.
             if let Some(sender_task) = sched.tasks.get_mut(&sender_id) {
                 sender_task.state = TaskState::Ready;
-                sched.ready_queue.push_back(sender_id);
+                sched.push_ready(sender_id);
             }
 
             if let Some(caller) = sched.tasks.get_mut(&caller_id) {
@@ -771,8 +802,9 @@ pub fn ipc_reply(caller_id: usize, result: usize) -> core::result::Result<usize,
             if let Some(t) = sched.tasks.get_mut(&tid) {
                 t.state = TaskState::Ready;
                 t.reply_value = Some(result);
-                sched.ready_queue.push_back(tid);
             }
+            let prio = sched.push_ready(tid);
+            sched.pend_preempt_if_needed(prio);
             if let Some(task) = sched.tasks.get_mut(&caller_id) {
                 task.current_caller = None;
             }
@@ -879,7 +911,7 @@ pub fn ipc_map(caller_id: usize, grant_id: usize) -> core::result::Result<usize,
 /// Get scheduler statistics
 pub fn scheduler_stats() -> (usize, usize) {
     if let Some(sched) = SCHEDULER.lock().as_ref() {
-        (sched.tasks.len(), sched.ready_queue.len())
+        (sched.tasks.len(), sched.ready_count())
     } else {
         (0, 0)
     }
@@ -927,7 +959,7 @@ pub fn futex_wake(_caller_id: usize, addr: VAddr, count: usize) -> core::result:
         for tid in to_wake {
             if let Some(task) = sched.tasks.get_mut(&tid) {
                 task.state = TaskState::Ready;
-                sched.ready_queue.push_back(tid);
+                sched.push_ready(tid);
             }
         }
     }

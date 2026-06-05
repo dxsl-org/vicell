@@ -24,7 +24,77 @@ pub fn run_scheduler_tests() {
     test_blocked_then_ready_transition();
     test_waiting_task_not_scheduled();
     test_task_state_recv_deadline();
+    // Phase 25 additions
+    test_rt_preempts_normal_priority();
+    test_background_lower_than_normal_priority();
+    test_same_priority_round_robin();
     log::info!("=== Scheduler Tests PASSED ===");
+}
+
+/// RealTime tasks must always be selected before Normal tasks.
+fn test_rt_preempts_normal_priority() {
+    let mut sched = Scheduler::new();
+
+    let normal_id = sched.spawn("normal", CellId(0), Vec::new());
+    let rt_id = sched.spawn("rt", CellId(0), Vec::new());
+
+    // Set rt task to RealTime priority
+    if let Some(t) = sched.tasks.get_mut(&rt_id) {
+        t.priority = api::TaskPriority::RealTime as u8;
+    }
+
+    // pick_next must select the RealTime task first.
+    sched.pick_next();
+    assert_eq!(
+        sched.current_task_id,
+        Some(rt_id),
+        "RealTime task must preempt Normal task"
+    );
+    log::info!("  [ok] RealTime preempts Normal");
+    let _ = normal_id;
+}
+
+/// Background tasks must lose to Normal tasks.
+fn test_background_lower_than_normal_priority() {
+    let mut sched = Scheduler::new();
+
+    let bg_id = sched.spawn("bg", CellId(0), Vec::new());
+    let normal_id = sched.spawn("normal", CellId(0), Vec::new());
+
+    if let Some(t) = sched.tasks.get_mut(&bg_id) {
+        t.priority = api::TaskPriority::Background as u8;
+    }
+
+    sched.pick_next();
+    assert_eq!(
+        sched.current_task_id,
+        Some(normal_id),
+        "Normal task must run before Background task"
+    );
+    log::info!("  [ok] Background loses to Normal");
+}
+
+/// Tasks at the same priority level must share the CPU in FIFO order.
+fn test_same_priority_round_robin() {
+    let mut sched = Scheduler::new();
+
+    let id1 = sched.spawn("a", CellId(0), Vec::new());
+    let id2 = sched.spawn("b", CellId(0), Vec::new());
+    let id3 = sched.spawn("c", CellId(0), Vec::new());
+
+    // First pick: id1 (spawned first → front of queue)
+    sched.pick_next();
+    assert_eq!(sched.current_task_id, Some(id1));
+
+    // Second pick: id2
+    sched.pick_next();
+    assert_eq!(sched.current_task_id, Some(id2));
+
+    // Third pick: id3
+    sched.pick_next();
+    assert_eq!(sched.current_task_id, Some(id3));
+
+    log::info!("  [ok] Same-priority tasks round-robin in FIFO order");
 }
 
 fn test_scheduler_task_table() {
@@ -38,7 +108,7 @@ fn test_scheduler_task_table() {
     assert_eq!(sched.tasks.get(&id).unwrap().name, "test-task");
 
     // Verify task is in ready queue
-    assert_eq!(sched.ready_queue.len(), 1);
+    assert_eq!(sched.ready_count(), 1);
 }
 
 fn test_task_state_transitions() {
@@ -65,6 +135,7 @@ fn test_task_state_transitions() {
         mask: 0,
         buf_ptr: 0x2000,
         buf_len: 128,
+        deadline: None,
     };
 
     match task.state {
@@ -173,7 +244,7 @@ fn test_multiple_tasks_ready_queue() {
     let id3 = sched.spawn("task3", CellId(0), Vec::new());
 
     // All should be in ready queue
-    assert_eq!(sched.ready_queue.len(), 3);
+    assert_eq!(sched.ready_count(), 3);
 
     // All should be in task table
     assert!(sched.tasks.contains_key(&id1));
@@ -194,13 +265,13 @@ fn test_blocked_then_ready_transition() {
         task.state = TaskState::Sending { target: 99, msg_ptr: 0x1000, msg_len: 16 };
     }
     // Task should be removed from the ready queue.
-    assert!(!sched.ready_queue.contains(&id), "blocked task should not be in ready queue");
+    assert!(!sched.ready_queues.values().any(|q| q.contains(&id)), "blocked task should not be in ready queue");
 
     // Resolve: move back to Ready (simulates IPC delivery).
     if let Some(task) = sched.tasks.get_mut(&id) {
         task.state = TaskState::Ready;
-        sched.ready_queue.push_back(id);
     }
+    sched.push_ready(id);
 
     // Now pick_next should select it.
     let picked = sched.pick_next();
@@ -218,7 +289,9 @@ fn test_waiting_task_not_scheduled() {
     if let Some(task) = sched.tasks.get_mut(&waiter) {
         task.state = TaskState::Waiting { target };
         // Remove from ready queue (normally done by ipc_wait).
-        sched.ready_queue.retain(|&id| id != waiter);
+        for q in sched.ready_queues.values_mut() {
+            q.retain(|&id| id != waiter);
+        }
     }
 
     // Schedule: should pick `target`, not `waiter`.

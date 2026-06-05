@@ -150,8 +150,12 @@ pub struct Task {
     pub pending_future: Option<SyscallFuture>,
 
     /// Kernel capability bitfield. Granted at spawn (e.g. BLOCK_IO for `/bin/vfs`).
-    /// Empty for every other cell. Replaces the Phase G `can_block_io: bool`.
+    /// Empty for every other cell.
     pub kernel_perms: KernelPerms,
+
+    /// Scheduling priority tier.  Higher value = higher priority.
+    /// See `api::TaskPriority` for the three defined levels.
+    pub priority: u8,
 }
 
 impl Task {
@@ -178,6 +182,7 @@ impl Task {
             exit_code: None,
             pending_future: None,
             kernel_perms: KernelPerms::default(),
+            priority: api::TaskPriority::Normal as u8,
         }
     }
 

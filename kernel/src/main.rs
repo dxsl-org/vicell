@@ -170,6 +170,10 @@ pub extern "C" fn kmain(hartid: usize, dtb: usize) -> ! {
     puts("TRACE: init_heap done\n");
     log_info("Heap initialized");
 
+    // Initialize RT TLSF pool for RealTime cell stack allocation.
+    memory::rt_heap::init();
+    log_info("RT heap initialized");
+
     // Test Heap
     puts("TRACE: Testing Vec\n");
     let mut vec = alloc::vec::Vec::new();

@@ -38,6 +38,12 @@ impl Arch for RiscVArch {
     fn init(&self) {
         // Initialize trap handling (set stvec)
         trap::init();
+
+        // Enable S-mode software interrupt (SSIP) so RT cells can trigger
+        // zero-latency preemption via `csrsi sip, 0x2` from kernel code.
+        // SAFETY: csrsi on sie sets only the SSIE bit (bit 1); safe from S-mode.
+        #[cfg(target_arch = "riscv64")]
+        unsafe { core::arch::asm!("csrsi sie, 0x2"); }
     }
 
     unsafe fn switch_context(&self, old: *mut Self::Context, new: *const Self::Context) {

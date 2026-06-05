@@ -1,7 +1,13 @@
-/// Timer Interface (S-mode)
+//! Timer Interface (S-mode)
+//!
+//! Provides access to the RISC-V timer via SBI calls and the `time` CSR.
+//! Direct CLINT access is NOT available in S-mode — use SBI for `mtimecmp`.
+
+/// Ticks per 10 ms at the assumed 10 MHz `mtime` clock on QEMU virt.
 ///
-/// Provides access to the RISC-V timer via SBI calls and 'time' CSR.
-/// Direct CLINT access is NOT allowed in S-mode.
+/// Used to set the preemptive timeslice duration.  If the actual clock
+/// differs (detectable via DTB), callers should adjust accordingly.
+pub const TICKS_PER_10MS: u64 = 100_000;
 
 /// Read the current machine time (via 'time' CSR)
 pub fn read_mtime() -> u64 {

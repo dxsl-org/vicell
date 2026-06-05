@@ -1,4 +1,4 @@
-//! Trap frame structures and S-mode trap handling for ViOS.
+//! Trap frame structures and S-mode trap handling for ViCell.
 //! Uses Vi prefix per project conventions (Luật 6).
 //! TrapFrame uses borrowing (&mut) per Luật 8.
 
@@ -64,11 +64,20 @@ pub extern "C" fn vi_trap_handler(frame: &mut ViTrapFrame) {
     if is_interrupt {
         // Handle interrupts
         match code {
+            1 => {
+                // S-mode software interrupt — zero-latency RT preemption.
+                // Cleared here before yield so it does not re-fire immediately.
+                // SAFETY: csrci on sip.SSIP is permitted from S-mode (priv spec §4.1.3).
+                unsafe { core::arch::asm!("csrci sip, 0x2") };
+                // Reuse the timer tick path: just run the scheduler.
+                unsafe { vi_timer_tick(); }
+            }
             5 => {
-                // S-mode timer interrupt
-                // TODO: Clear timer and handle scheduling
-                // For now, mask it to prevent storm? Or update time?
-                // Just log once?
+                // S-mode timer interrupt — preemption point.
+                // SAFETY: vi_timer_tick is defined in kernel::task and linked
+                // via extern "Rust".  It increments the tick counter, rearmed
+                // the timer, and calls yield_cpu() to preempt if needed.
+                unsafe { vi_timer_tick(); }
             }
             9 => {
                 // S-mode external interrupt (PLIC)
@@ -107,34 +116,34 @@ pub extern "C" fn vi_trap_handler(frame: &mut ViTrapFrame) {
             2 => {
                 // Illegal instruction
                 panic!(
-                    "ViOS: Illegal instruction at 0x{:X}, stval=0x{:X}",
+                    "ViCell: Illegal instruction at 0x{:X}, stval=0x{:X}",
                     frame.sepc, frame.stval
                 );
             }
             12 => {
                 // Instruction page fault
                 panic!(
-                    "ViOS: Instruction page fault at 0x{:X}, addr=0x{:X}",
+                    "ViCell: Instruction page fault at 0x{:X}, addr=0x{:X}",
                     frame.sepc, frame.stval
                 );
             }
             13 => {
                 // Load page fault
                 panic!(
-                    "ViOS: Load page fault at 0x{:X}, addr=0x{:X}",
+                    "ViCell: Load page fault at 0x{:X}, addr=0x{:X}",
                     frame.sepc, frame.stval
                 );
             }
             15 => {
                 // Store page fault
                 panic!(
-                    "ViOS: Store page fault at 0x{:X}, addr=0x{:X}",
+                    "ViCell: Store page fault at 0x{:X}, addr=0x{:X}",
                     frame.sepc, frame.stval
                 );
             }
             _ => {
                 panic!(
-                    "ViOS: Unhandled exception: scause={}, sepc=0x{:X}, stval=0x{:X}",
+                    "ViCell: Unhandled exception: scause={}, sepc=0x{:X}, stval=0x{:X}",
                     code, frame.sepc, frame.stval
                 );
             }
@@ -161,14 +170,16 @@ fn plic_complete(irq: u32) {
 /// Handle syscall from userspace (Vi prefix per Luật 6)
 fn vi_handle_syscall(frame: &mut ViTrapFrame) {
     extern "Rust" {
-        fn vios_syscall_dispatch(frame: &mut ViTrapFrame);
+        fn ViCell_syscall_dispatch(frame: &mut ViTrapFrame);
     }
     unsafe {
-        vios_syscall_dispatch(frame);
+        ViCell_syscall_dispatch(frame);
     }
 }
 
 extern "Rust" {
     fn vi_handle_virtio_irq(irq: u32);
     fn vi_handle_uart_irq();
+    /// Called on every S-mode timer interrupt.  Defined in `kernel::task`.
+    fn vi_timer_tick();
 }

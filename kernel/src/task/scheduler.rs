@@ -23,11 +23,16 @@ fn dummy_raw_waker() -> RawWaker {
 static DUMMY_VTABLE: RawWakerVTable =
     RawWakerVTable::new(|_| dummy_raw_waker(), |_| {}, |_| {}, |_| {});
 
-/// Round-Robin Scheduler with Central Task Table (Hubris-like)
+/// Priority-aware Scheduler with Central Task Table (Hubris-like).
+///
+/// Three priority levels (Background=0, Normal=1, RealTime=2) are stored as
+/// separate `VecDeque` queues keyed by `u8`.  `pop_ready()` always returns
+/// from the highest non-empty level, giving O(1) selection for 3 levels.
 pub struct Scheduler {
     pub tasks: BTreeMap<usize, Box<Task>>,
     pub zombies: Vec<Box<Task>>,
-    pub ready_queue: VecDeque<usize>,
+    /// Per-priority ready queues.  Key = priority `u8`; higher key = higher priority.
+    pub ready_queues: BTreeMap<u8, VecDeque<usize>>,
     pub current_task_id: Option<usize>,
     pub next_task_id: usize,
 }
@@ -43,10 +48,70 @@ impl Scheduler {
         Self {
             tasks: BTreeMap::new(),
             zombies: Vec::new(),
-            ready_queue: VecDeque::new(),
+            ready_queues: BTreeMap::new(),
             current_task_id: None,
             next_task_id: 1,
         }
+    }
+
+    /// Push task `id` onto the ready queue at its priority level.
+    ///
+    /// Returns the priority level used so callers can optionally call
+    /// `pend_preempt_if_needed(priority)` to trigger zero-latency RT preemption.
+    pub fn push_ready(&mut self, id: usize) -> u8 {
+        let priority = self.tasks.get(&id)
+            .map(|t| t.priority)
+            .unwrap_or(api::TaskPriority::Normal as u8);
+        self.ready_queues
+            .entry(priority)
+            .or_insert_with(VecDeque::new)
+            .push_back(id);
+        priority
+    }
+
+    /// Pop the task with the highest priority from the ready queues.
+    ///
+    /// Ties within the same priority level are broken by FIFO insertion order.
+    pub fn pop_ready(&mut self) -> Option<usize> {
+        for queue in self.ready_queues.values_mut().rev() {
+            if let Some(id) = queue.pop_front() {
+                return Some(id);
+            }
+        }
+        None
+    }
+
+    /// Total number of tasks across all priority ready queues.
+    pub fn ready_count(&self) -> usize {
+        self.ready_queues.values().map(|q| q.len()).sum()
+    }
+
+    /// Pend an S-mode software interrupt if `new_priority` exceeds the current
+    /// running task's priority.
+    ///
+    /// Call this after any syscall that transitions a task from blocked → Ready
+    /// so that a newly-runnable RealTime cell preempts a Normal/Background cell
+    /// within the same syscall return, rather than waiting for the next timer tick.
+    ///
+    /// The interrupt fires when the trap handler returns via `sret` and
+    /// `sstatus.SIE` is restored by hardware.
+    #[cfg(target_arch = "riscv64")]
+    pub fn pend_preempt_if_needed(&self, new_priority: u8) {
+        let current_priority = self.current_task_id
+            .and_then(|id| self.tasks.get(&id))
+            .map(|t| t.priority)
+            .unwrap_or(0);
+
+        if new_priority > current_priority {
+            // SAFETY: csrsi on sip.SSIP is permitted from S-mode (RISC-V priv spec §4.1.3).
+            // The interrupt fires after sret restores sstatus.SIE.
+            unsafe { core::arch::asm!("csrsi sip, 0x2") };
+        }
+    }
+
+    #[cfg(not(target_arch = "riscv64"))]
+    pub fn pend_preempt_if_needed(&self, _new_priority: u8) {
+        // No-op on non-riscv64 targets.
     }
 
     pub fn spawn(
@@ -102,7 +167,7 @@ impl Scheduler {
         );
 
         self.tasks.insert(id, task);
-        self.ready_queue.push_back(id);
+        self.push_ready(id);
         self.next_task_id += 1;
         id
     }
@@ -156,7 +221,7 @@ impl Scheduler {
         }
 
         self.tasks.insert(id, task);
-        self.ready_queue.push_back(id);
+        self.push_ready(id);
         self.next_task_id += 1;
         id
     }
@@ -167,14 +232,10 @@ impl Scheduler {
             self.zombies.push(task);
         }
 
-        // Remove from ready queue if present
-        let mut new_kq = VecDeque::new();
-        while let Some(id) = self.ready_queue.pop_front() {
-            if id != tid {
-                new_kq.push_back(id);
-            }
+        // Remove from ready queues if present
+        for queue in self.ready_queues.values_mut() {
+            queue.retain(|&id| id != tid);
         }
-        self.ready_queue = new_kq;
     }
 
     /// Picks the next task to run and returns pointers for context switch.
@@ -202,7 +263,7 @@ impl Scheduler {
             }
         }
         for id in waking_tasks {
-            self.ready_queue.push_back(id);
+            self.push_ready(id);
         }
 
         // 2. Poll Async Tasks
@@ -244,7 +305,7 @@ impl Scheduler {
             }
         }
         for id in polled_tasks {
-            self.ready_queue.push_back(id);
+            self.push_ready(id);
         }
 
         // 3. Decide if current task needs to yield
@@ -253,13 +314,13 @@ impl Scheduler {
             if let Some(task) = self.tasks.get_mut(&cid) {
                 if task.state == TaskState::Running {
                     task.state = TaskState::Ready;
-                    self.ready_queue.push_back(cid);
+                    self.push_ready(cid);
                 }
             }
         }
 
-        // 4. Get next task
-        let next_id = self.ready_queue.pop_front();
+        // 4. Get next task (highest-priority first; FIFO within same level)
+        let next_id = self.pop_ready();
 
         if let Some(nid) = next_id {
             if let Some(next_task) = self.tasks.get_mut(&nid) {
@@ -341,7 +402,7 @@ impl Scheduler {
     }
 
     pub fn has_ready_tasks(&self) -> bool {
-        !self.ready_queue.is_empty()
+        self.ready_queues.values().any(|q| !q.is_empty())
     }
 }
 

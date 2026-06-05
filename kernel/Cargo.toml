@@ -1,5 +1,5 @@
 [package]
-name = "vios-kernel"
+name = "vicell-kernel"
 version = "0.2.0"
 edition = "2021"
 license = "MPL-2.0"
@@ -10,6 +10,7 @@ api = { path = "../libs/api" }
 log = { version = "0.4", default-features = false }
 virtio-drivers = "0.7.0"
 linked_list_allocator = "0.10"
+rlsf = { version = "0.2", default-features = false }
 hal = { path = "../hal/core", package = "hal-core", default-features = false, features = ["riscv64"] }
 async-trait = "0.1.89"
 fatfs = { git = "https://github.com/rafalh/rust-fatfs", default-features = false, features = ["alloc"] }

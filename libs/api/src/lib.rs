@@ -3,7 +3,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Public API for ViOS.
+//! Public API for ViCell.
 
 // Disable `no_std` when running the test harness so `#[test]` can link
 // against the host libstd.  All production builds remain bare-metal.
@@ -17,6 +17,8 @@ pub use types::*;
 
 pub mod allocator;
 pub mod async_io;
+pub mod task;
+pub use task::TaskPriority;
 pub mod cap;
 pub mod benchmark;
 pub mod block;

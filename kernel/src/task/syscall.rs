@@ -104,7 +104,7 @@ fn validate_user_buf(ptr: usize, len: usize, max: usize) -> Result<(), SyscallEr
     Ok(())
 }
 
-/// The Fundamental Verbs of ViOS IPC (Hubris ABI + Lease System)
+/// The Fundamental Verbs of ViCell IPC (Hubris ABI + Lease System)
 #[derive(Debug, Copy, Clone)]
 pub enum Syscall {
     /// 0: Send (Blocking Message Send)
@@ -188,6 +188,9 @@ pub enum Syscall {
     /// 12: SpawnFromPath (Spawn cell by filesystem path)
     /// ABI: path_ptr in a0, path_len in a1.
     SpawnFromPath { path_ptr: usize, path_len: usize },
+    /// 16: SpawnPinned — spawn cell pinned to a core (single-core: core_id must be 0).
+    /// ABI: a0=path_ptr, a1=path_len, a2=priority: u8, a3=core_id: usize.
+    SpawnPinned { path_ptr: usize, path_len: usize, priority: u8, core_id: usize },
     /// 13: OpenCap — open a file and return a CapId.
     OpenCap { path_ptr: usize, path_len: usize },
     /// 14: ReadCap — read bytes from a cap-backed file.
@@ -612,7 +615,7 @@ pub fn handle_syscall(caller_id: usize, syscall: Syscall) -> SyscallResult {
                     if let Some(w) = sched.tasks.get_mut(&wid) {
                         w.state = TaskState::Ready;
                         w.reply_value = Some(code);
-                        sched.ready_queue.push_back(wid);
+                        sched.push_ready(wid);
                     }
                 }
             }
@@ -826,6 +829,39 @@ pub fn handle_syscall(caller_id: usize, syscall: Syscall) -> SyscallResult {
                 if n > 0 {
                     let personal_key = ARGV_KEY ^ ((task_id as u64) << 32);
                     crate::cell::state_stash::stash(personal_key, &argv_buf[..n]);
+                }
+            }
+            Ok(task_id)
+        }
+
+        Syscall::SpawnPinned { path_ptr, path_len, priority, core_id } => {
+            // On single-core builds only core 0 exists.  Return NotSupported for
+            // any other core_id so callers can detect SMP unavailability.
+            if core_id != 0 {
+                return Err(SyscallError::NotSupported);
+            }
+            if path_len == 0 || path_len > crate::loader::disk_layout::MAX_CELL_PATH {
+                return Err(SyscallError::InvalidInput);
+            }
+            validate_user_buf(path_ptr, path_len, crate::loader::disk_layout::MAX_CELL_PATH)?;
+            // SAFETY: validated above; SUM=1.
+            let path_str = unsafe {
+                let slice = core::slice::from_raw_parts(path_ptr as *const u8, path_len);
+                core::str::from_utf8(slice).map_err(|_| SyscallError::InvalidInput)?
+            };
+            if !path_str.starts_with('/') {
+                return Err(SyscallError::InvalidInput);
+            }
+            // Spawn at requested priority; future SMP can use core_id for affinity.
+            let task_id = crate::loader::spawn_from_path(path_str).map_err(|e| match e {
+                types::ViError::NotFound => SyscallError::FileNotFound,
+                types::ViError::OutOfMemory => SyscallError::Unknown,
+                _ => SyscallError::InvalidInput,
+            })?;
+            // Set priority on the spawned task.
+            if let Some(sched) = crate::task::SCHEDULER.lock().as_mut() {
+                if let Some(task) = sched.tasks.get_mut(&task_id) {
+                    task.priority = priority;
                 }
             }
             Ok(task_id)
@@ -1168,7 +1204,7 @@ pub fn handle_syscall(caller_id: usize, syscall: Syscall) -> SyscallResult {
             match viVirtIOBlk.read_sector(sector, &mut bounce) {
                 Ok(()) => {
                     // SAFETY: buf_ptr is a validated 512-byte user buffer; SUM=1
-                    // (set by vios_syscall_dispatch) allows S-mode to write it.
+                    // (set by ViCell_syscall_dispatch) allows S-mode to write it.
                     let buf = unsafe { core::slice::from_raw_parts_mut(buf_ptr as *mut u8, 512) };
                     buf.copy_from_slice(&bounce);
                     Ok(1)
@@ -1222,12 +1258,12 @@ use api::syscall::ViSyscall;
 use hal::arch::ViTrapFrame;
 
 #[no_mangle]
-pub extern "Rust" fn vios_syscall_dispatch(frame: &mut ViTrapFrame) {
+pub extern "Rust" fn ViCell_syscall_dispatch(frame: &mut ViTrapFrame) {
     let syscall_id = frame.regs[17];
     let a0 = frame.regs[10];
     let a1 = frame.regs[11];
     let a2 = frame.regs[12];
-    let _a3 = frame.regs[13];
+    let a3 = frame.regs[13];
 
     // Debug log
     // log::info!("SYSCALL DISPATCH: ID={}, a0={:X}, sstatus={:X}", syscall_id, a0, frame.sstatus);
@@ -1243,7 +1279,7 @@ pub extern "Rust" fn vios_syscall_dispatch(frame: &mut ViTrapFrame) {
         ViSyscall::RecvScatter => Syscall::RecvScatter { mask: a0, iovec_ptr: a1, iovec_count: a2 },
         ViSyscall::RecvTimeout => Syscall::RecvTimeout {
             mask: a0, buf_ptr: a1, buf_len: a2,
-            deadline: (super::system_ticks() as u64).wrapping_add(_a3 as u64),
+            deadline: (super::system_ticks() as u64).wrapping_add(a3 as u64),
         },
         ViSyscall::Reply => Syscall::Reply { caller: a0, result: a1 },
         // SetTimer? ID 3?
@@ -1265,6 +1301,9 @@ pub extern "Rust" fn vios_syscall_dispatch(frame: &mut ViTrapFrame) {
         ViSyscall::Exec => Syscall::Exec { path_ptr: a0, path_len: a1 },
         ViSyscall::SpawnFromMem => Syscall::SpawnFromMem { args_ptr: a0 },
         ViSyscall::SpawnFromPath => Syscall::SpawnFromPath { path_ptr: a0, path_len: a1 },
+        ViSyscall::SpawnPinned => Syscall::SpawnPinned {
+            path_ptr: a0, path_len: a1, priority: a2 as u8, core_id: a3,
+        },
         ViSyscall::OpenCap   => Syscall::OpenCap { path_ptr: a0, path_len: a1 },
         ViSyscall::ReadCap   => Syscall::ReadCap { cap_id: a0, buf_ptr: a1, buf_len: a2 },
         ViSyscall::CloseCap  => Syscall::CloseCap { cap_id: a0 },
@@ -1287,7 +1326,7 @@ pub extern "Rust" fn vios_syscall_dispatch(frame: &mut ViTrapFrame) {
         ViSyscall::Seek => Syscall::Seek { fd: a0, offset: a1 as isize, whence: a2 },
         ViSyscall::FileOp => Syscall::FileOp { op: a0, arg1: a1, arg2: a2 },
         ViSyscall::GetTime => Syscall::GetTime { op: a0 },
-        ViSyscall::GpuFlush  => Syscall::GpuFlush { data_ptr: a0, data_len: a1, xy: a2, wh: _a3 },
+        ViSyscall::GpuFlush  => Syscall::GpuFlush { data_ptr: a0, data_len: a1, xy: a2, wh: a3 },
         ViSyscall::NetTx     => Syscall::NetTx { frame_ptr: a0, frame_len: a1 },
         ViSyscall::NetRx     => Syscall::NetRx { buf_ptr: a0, buf_len: a1 },
         ViSyscall::StateStash   => Syscall::StateStash { key: a0, buf_ptr: a1, buf_len: a2 },
