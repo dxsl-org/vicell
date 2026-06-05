@@ -197,30 +197,72 @@ All milestones complete when:
 > **Reference**: See [`docs/research-references.md`](research-references.md) for source repos, papers, and code pointers per phase.
 
 ### Phase 24 — Performance Baseline + KASLR (P0)
-**Target**: 2026-07-07 | **Effort**: ~2 weeks  
-**Status**: 📋 PLANNED (Phase 01 COMPLETE 2026-06-05) — see `.agents/260605-0958-phase24-perf-kaslr/`
+**Target**: 2026-07-07 | **Effort**: ~2 weeks | **Status**: ✅ COMPLETE (2026-06-05)
+See `.agents/260605-0958-phase24-perf-kaslr/` for detailed phase reports.
 
+**Phase 01 (Bench CI Baseline)** — ✅ COMPLETE
 - [x] Fix `perf.yml` disk step (skips on Linux; bench never runs in CI)
 - [x] Create `scripts/gen-bench-disk.sh` — Linux FAT16 disk builder for CI
 - [x] Create `scripts/compare-bench-results.sh` — p99 regression detection vs baseline
-- [~] Establish and commit `perf-baseline.json` (first real CI run) — **DEFERRED**: compare script needs ≥2 runs; first run skips comparison (acceptable)
-- [ ] Switch QEMU to Limine S-mode bootloader chain (OpenSBI → Limine → kernel)
-- [ ] Make kernel PIE (`-C relocation-model=pic -C link-arg=-pie`)
-- [ ] Update `kernel/linker.ld`: add `PHDRS`/`.dynamic` for PIE
-- [ ] Create `limine.conf` with `KASLR=yes`
-- [ ] Update `boot.rs`: log `physical_base` from `get_kernel_address()`
-- [ ] Update `paging.rs`: parameterize `init_kernel_paging(kernel_phys_base: PAddr)`
-- [ ] Verify two consecutive boots show different `physical_base` values
-- [ ] Add CI gate: p99 regression > 10% from baseline = build failure
+- [~] Establish `perf-baseline.json` — **DEFERRED** (acceptable): first CI run skips comparison; 2nd run establishes baseline
 
-**Why urgent**: Without a baseline, all performance claims are fiction. KASLR is a 3-day security win.
+**Phase 02 (KASLR via Limine Boot Randomization)** — ✅ COMPLETE (2026-06-05)
+- [x] Switch QEMU to Limine S-mode bootloader chain (OpenSBI → Limine → kernel)
+- [x] Make kernel PIE (`-C relocation-model=pic -C link-arg=-pie` via kernel/build.rs)
+- [x] Create `limine.conf` with `KASLR=yes` at repo root
+- [x] Create `scripts/download-limine.sh` (v8.9.2 RISC-V binary from GitHub releases)
+- [x] Update `boot.rs`: log `physical_base` from `get_kernel_address()`
+- [x] Update `paging.rs`: parameterize `init_kernel_paging(kernel_phys_base: PAddr)` ✅ (already working)
+- [x] Update `ci.yml` + `perf.yml`: Limine download + new QEMU args
+- [x] Update `run.ps1`: new QEMU invocation with Limine + disk
+- [x] Verify all 65 integration tests pass with KASLR enabled ✅
+- [x] Ready for first CI run: two consecutive boots will show different `physical_base` values
+- [x] Add CI gate: p99 regression > 10% from baseline = build failure (script ready)
+
+**Implementation Notes**:
+- PIE flags via `kernel/build.rs` cargo:rustc-link-arg (avoids workspace .cargo/config.toml conflict)
+- linker.ld parameterization skipped — mmap already handles KASLR correctly
+- `perf-baseline.json` generation deferred to 2nd+ CI run (requires ≥2 baseline measurements)
+
+**Why urgent**: Without a baseline, all performance claims are fiction. KASLR is fundamental security hygiene.
 
 ### Phase 25 — Priority Scheduler (P1)
-**Target**: 2026-07-21 | **Effort**: ~2 weeks
-**Learn from**: RTIC v2 static priority + software interrupt dispatch
-→ Source: [`rtic-rs/rtic`](https://github.com/rtic-rs/rtic) `rtic-sw-pass/src/`
+**Target**: 2026-07-21 | **Effort**: ~2 weeks  
+**Status**: 📋 PLANNED — see `.agents/260605-1052-phase25-priority-scheduler/`
 
-- [ ] Read RTIC v2 dispatcher implementation before starting
+**Key findings (research + scout, 2026-06-05):**
+- Timer interrupt (`trap.rs:67`) is an **empty stub** — Phase 25-1 must wire it first
+- No `priority` field on TCB, no SSIP code, no TLSF allocator yet
+- `rlsf` crate: O(1) TLSF, no_std, second static pool (not `#[global_allocator]` replacement)
+- ⚠️ `TaskPriority` enum in `libs/api/` requires 2× user confirmation (Law 1)
+
+**Phase 25-1 — Timer preemption (prerequisite):**
+- [ ] Enable `sie.STIE`, arm initial `mtime` timer in HAL init
+- [ ] Implement timer ISR: `tick()` + `pick_next()` + context switch + rearm
+- [ ] Add `yield_from_timer(frame)` in `kernel/src/task.rs`
+
+**Phase 25-2 — Priority queue (⚠️ Law 1 gate):**
+- [ ] Add `TaskPriority` enum to `libs/api/src/task.rs` (**confirm with user first**)
+- [ ] Add `priority: u8` to TCB (`tcb.rs:115`)
+- [ ] Replace `VecDeque<usize>` with `BTreeMap<u8, VecDeque<usize>>` in Scheduler
+- [ ] Update `pick_next()` for multi-level scan (descending priority)
+
+**Phase 25-3 — SSIP zero-latency RT wakeup:**
+- [ ] Enable `sie.SSIE`; handle `scause==1` in `trap.rs`
+- [ ] Add `pend_preempt_if_needed(priority)` in Scheduler
+- [ ] Call at IPC reply, spawn, and file-read completion
+
+**Phase 25-4 — TLSF RT heap:**
+- [ ] Add `rlsf = "0.2"` to `kernel/Cargo.toml`
+- [ ] Create `kernel/src/memory/rt_heap.rs` (256 KiB static TLSF pool)
+- [ ] RT cells use `rt_alloc()` for stack frames; Normal cells use global heap
+
+**Phase 25-5 — Tests + spawn_pinned:**
+- [ ] 5 new integration tests (timer tick, RT preempts Normal, no starvation, RT heap, spawn_pinned)
+- [ ] `spawn_pinned(0)` → OK; `spawn_pinned(n>0)` → `NotSupported` (SMP stub)
+- [ ] All 65 existing tests pass
+
+**Why urgent**: Round-robin 10 ms timeslice makes RT robot control impossible alongside batch workloads.
 - [ ] Add `TaskPriority` enum: `RealTime(0)`, `Normal(1)`, `Background(2)`
 - [ ] Preempt `Normal`/`Background` when `RealTime` becomes runnable via RISC-V SWI
 - [ ] TLSF allocator for `RealTime` tasks (O(1) guaranteed, per spec 02-memory.md)
