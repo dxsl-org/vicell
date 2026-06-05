@@ -176,6 +176,38 @@ ViCell development is organized into 4 major phases, each with specific mileston
 - Two new integration tests (mqtt_publish, mqtt_subscribe with mock broker)
 - Key insight: ostd bump allocator exhausted by nested IPC polling; fixed with single-poll-per-iteration + outer yield loop
 
+**Phase X-6 — ForceExit Syscall (kernel kill -9 equivalent)** 📋 PLANNED:
+
+> **Root cause documented (2026-06-05):** `cmd_kill` uses `sys_send(tid, [0xFF])`.
+> If the target is NOT in `TaskState::Recv`, `ipc_send` puts the **SHELL** into
+> `TaskState::Sending` indefinitely — creating a deadlock chain.
+> Mitigated by state-check before send (commit f0e7ad34+), but cannot kill
+> tasks stuck inside VFS/net IPC.
+
+**Design:**
+- New `ViSyscall::ForceExit` (opcode 61) — **⚠️ Law 1, requires 2x confirmation**
+- Caller must hold `SpawnCap` (already exists on shell/init)
+- Kernel handler (non-blocking, returns immediately to caller):
+  1. `exit_task(tid)` — remove from scheduler
+  2. Scan all tasks in `TaskState::Sending { target: tid }` → unblock with error sentinel (`reply_value = usize::MAX`)
+  3. `revoke_all_for(cell_id)` — cap table cleanup
+  4. `deregister quota(cell_id)` — memory cleanup
+  5. Audit log `CellExit` with force flag
+- VFS/net cells: handle `sys_send` reply errors gracefully (don't crash when client is gone)
+
+**Files (estimated ~60 lines total):**
+- `libs/api/src/syscall.rs` — add `ForceExit = 61` (⚠️ Law 1)
+- `libs/ostd/src/syscall.rs` — add `pub fn sys_force_exit(tid: usize) -> SyscallResult`
+- `kernel/src/task/syscall.rs` — ForceExit handler + stuck-sender unblock
+- `cells/apps/shell/src/commands.rs` — `cmd_kill` uses `sys_force_exit`
+- `cells/services/vfs/src/main.rs` — handle reply-send errors
+
+**Acceptance criteria:**
+- `kill <tid>` terminates any task regardless of its state
+- Shell does NOT block when target is in Recv or non-Recv state
+- Tasks stuck in VFS IPC are terminated; VFS continues serving
+- Tasks that were Sending TO killed task are unblocked with error
+
 ### Phase 1 Acceptance Criteria
 
 All milestones complete when:

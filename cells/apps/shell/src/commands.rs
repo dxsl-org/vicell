@@ -342,10 +342,13 @@ pub fn cmd_top() -> ViResult<()> {
 
 /// `kill <tid>` — send a cooperative shutdown request to the target task.
 ///
-/// The target receives an IPC message with opcode `0xFF`.  It will exit only
-/// if it is currently in a recv-any (`sys_recv(0, ..)`) state.  Tasks blocked
-/// on a specific sender (e.g., VFS) will not receive the message.
-/// Use `ps` after kill to verify the task has stopped.
+/// Checks task state via `sys_get_procs` before sending to avoid blocking the
+/// shell.  `sys_send` to a non-Recv task would put the shell in
+/// `TaskState::Sending` indefinitely — so we only send when the target is
+/// confirmed to be in Waiting (Recv) state.
+///
+/// Limitation: cannot terminate tasks blocked inside VFS/net IPC.  A kernel-level
+/// `ForceExit` syscall is planned (see roadmap Phase X-6) to handle those cases.
 pub fn cmd_kill<'a>(mut args: core::str::SplitWhitespace<'a>) -> ViResult<()> {
     let tid_str = match args.next() {
         Some(s) => s,
@@ -358,9 +361,33 @@ pub fn cmd_kill<'a>(mut args: core::str::SplitWhitespace<'a>) -> ViResult<()> {
     }
     if tid == 0 { crate::executor::shell_println("kill: invalid tid (0)"); return Ok(()); }
 
-    // Cooperative shutdown IPC: single byte 0xFF = "please exit".
-    let msg = [0xFFu8];
-    syscall::sys_send(tid, &msg);
-    crate::executor::shell_print(&alloc::format!("kill: signal sent to task {}\n", tid));
+    // Safety check: only send to a task in Waiting (Recv-any) state.
+    // Sending to a task in any other state blocks the shell indefinitely because
+    // ipc_send puts the caller into TaskState::Sending until the target enters Recv.
+    let mut procs = [api::syscall::ProcessInfo::default(); 16];
+    let target_state = syscall::sys_get_procs(&mut procs).ok()
+        .and_then(|n| procs[..n].iter().find(|p| p.id == tid).map(|p| p.state));
+
+    match target_state {
+        None => {
+            crate::executor::shell_print(&alloc::format!("kill: no task with tid {}\n", tid));
+        }
+        Some(2) => {
+            // Waiting state = task is in sys_recv — safe to send the signal.
+            let msg = [0xFFu8];
+            syscall::sys_send(tid, &msg);
+            crate::executor::shell_print(&alloc::format!(
+                "kill: signal sent to task {} — run 'ps' to verify termination\n", tid
+            ));
+        }
+        Some(state) => {
+            let state_name = match state { 0 => "Ready", 1 => "Running", 3 => "Dead", _ => "?" };
+            crate::executor::shell_print(&alloc::format!(
+                "kill: task {} is '{}' — not in a receivable state.\n\
+                 kill: forced termination requires ForceExit syscall (planned).\n",
+                tid, state_name
+            ));
+        }
+    }
     Ok(())
 }
