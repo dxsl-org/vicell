@@ -65,8 +65,10 @@ pub fn charge(cell_id_raw: usize, size: usize) -> bool {
         return true; // no slot in IN_USE — uncapped
     }
     // Optimistic add; roll back on breach.
+    // Use saturating_add to prevent wrapping past usize::MAX — a hostile layout.size()
+    // near MAX would otherwise make the comparison read false and bypass the limit.
     let prev = IN_USE[cell_id_raw].fetch_add(size, Ordering::Relaxed);
-    if prev + size > limit {
+    if prev.saturating_add(size) > limit {
         IN_USE[cell_id_raw].fetch_sub(size, Ordering::Relaxed);
         false
     } else {
@@ -75,11 +77,18 @@ pub fn charge(cell_id_raw: usize, size: usize) -> bool {
 }
 
 /// Refund `size` bytes when the Cell frees memory.  Lock-free.
+///
+/// Uses saturating subtraction to prevent underflow if a deallocation is
+/// attributed to a cell that has already been deregistered (e.g., dealloc
+/// of a Box shared with another cell arrives after the originating cell exited).
 pub fn refund(cell_id_raw: usize, size: usize) {
     if cell_id_raw == 0 || cell_id_raw >= MAX_CELLS {
         return;
     }
-    IN_USE[cell_id_raw].fetch_sub(size, Ordering::Relaxed);
+    // fetch_update with saturating_sub prevents wrapping to usize::MAX on spurious frees.
+    let _ = IN_USE[cell_id_raw].fetch_update(Ordering::Relaxed, Ordering::Relaxed, |cur| {
+        Some(cur.saturating_sub(size))
+    });
 }
 
 /// Current byte usage for a Cell (for diagnostics).

@@ -19,7 +19,7 @@
 
 use api::fast_ipc::{TrustedHandle, VfsCell};
 use api::ipc::{VfsRequest, IPC_BUF_SIZE};
-use core::sync::atomic::{AtomicPtr, Ordering};
+use core::sync::atomic::{AtomicPtr, AtomicUsize, Ordering};
 
 /// Signature of a registered VFS fast-IPC handler.
 ///
@@ -29,6 +29,9 @@ pub type VfsFastHandler =
     unsafe fn(req: &VfsRequest<'_>, out: &mut [u8; IPC_BUF_SIZE]) -> usize;
 
 static VFS_HANDLER_PTR: AtomicPtr<()> = AtomicPtr::new(core::ptr::null_mut());
+/// Raw CellId of the cell that registered the VFS handler; 0 = unregistered.
+/// Used to clear the handler pointer when the VFS cell crashes.
+static VFS_HANDLER_CELL: AtomicUsize = AtomicUsize::new(0);
 
 /// Register the VFS fast-IPC handler.
 ///
@@ -42,6 +45,38 @@ pub fn register_vfs(handler: VfsFastHandler) {
         unsafe { core::mem::transmute(handler) },
         Ordering::Release,
     );
+}
+
+/// Record which cell (by CellId raw value) owns the registered VFS handler.
+///
+/// Call this immediately after `register_vfs` so the kernel can clear the
+/// handler pointer if the owning cell crashes.
+pub fn set_vfs_handler_cell(cell_id_raw: usize) {
+    VFS_HANDLER_CELL.store(cell_id_raw, Ordering::Relaxed);
+}
+
+/// Clear the VFS handler pointer if `cell_id_raw` is the registered owner.
+///
+/// Called by the kernel fault-isolation path when a cell is terminated, so
+/// that a future `call_vfs` does not jump into stale/replaced code.
+pub fn clear_vfs_if_cell(cell_id_raw: usize) {
+    if VFS_HANDLER_CELL.load(Ordering::Relaxed) == cell_id_raw && cell_id_raw != 0 {
+        VFS_HANDLER_PTR.store(core::ptr::null_mut(), Ordering::Release);
+        VFS_HANDLER_CELL.store(0, Ordering::Relaxed);
+    }
+}
+
+/// `extern "Rust"` shim so the kernel (which does not depend on ostd) can
+/// call `set_vfs_handler_cell` via link-time symbol resolution.
+#[no_mangle]
+pub extern "Rust" fn vi_set_fast_ipc_vfs_cell(cell_id: usize) {
+    set_vfs_handler_cell(cell_id);
+}
+
+/// `extern "Rust"` shim so the kernel can call `clear_vfs_if_cell`.
+#[no_mangle]
+pub extern "Rust" fn vi_clear_fast_ipc_vfs_cell(cell_id: usize) {
+    clear_vfs_if_cell(cell_id);
 }
 
 /// Call the registered VFS handler directly, bypassing the ecall trap.

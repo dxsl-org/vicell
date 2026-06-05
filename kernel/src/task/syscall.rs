@@ -1401,28 +1401,40 @@ pub extern "Rust" fn ViCell_syscall_dispatch(frame: &mut ViTrapFrame) {
     {
         let sc = ViSyscall::from(syscall_id);
         let bit = sc.allowlist_bit();
-        // Also check bit 36 for raw block-I/O opcodes (500/501/503) that bypass from().
+        // Also check bit 36 for raw block-I/O opcodes (500/501/503) that have their
+        // own match arms and bypass the ViSyscall::from() mapping.
         let blk_io_bit: Option<u8> = if matches!(syscall_id, 500 | 501 | 503) { Some(36) } else { None };
 
-        if bit.is_some() || blk_io_bit.is_some() {
-            let allowlist = super::SCHEDULER.lock().as_ref()
-                .and_then(|s| s.tasks.get(&caller_id))
-                .map(|t| t.syscall_allowlist)
-                .unwrap_or(u64::MAX); // task gone → fail-open
+        // Read allowlist once; drop lock before handle_syscall re-acquires it.
+        let allowlist = super::SCHEDULER.lock().as_ref()
+            .and_then(|s| s.tasks.get(&caller_id))
+            .map(|t| t.syscall_allowlist)
+            .unwrap_or(0); // task absent (impossible in practice) → deny-all for safety
 
-            if let Some(b) = bit {
-                if allowlist & (1u64 << b) == 0 {
-                    frame.regs[10] = SyscallError::PermissionDenied as usize;
-                    return;
-                }
+        // Deny unknown opcodes that may still reach real handlers via the legacy
+        // inner-match fallback — their `allowlist_bit()` returns None, so without this
+        // guard they bypass the allowlist check entirely.  Only Yield and Exit are
+        // safe to permit unconditionally.
+        if sc == ViSyscall::Unknown
+            && !matches!(syscall_id, 60 | 104) // Exit | Yield always permitted
+            && allowlist != u64::MAX            // permit-all bypasses (default for existing cells)
+        {
+            frame.regs[10] = SyscallError::PermissionDenied as usize;
+            return;
+        }
+
+        if let Some(b) = bit {
+            if allowlist & (1u64 << b) == 0 {
+                frame.regs[10] = SyscallError::PermissionDenied as usize;
+                return;
             }
-            if let Some(b) = blk_io_bit {
-                if allowlist & (1u64 << b) == 0 {
-                    frame.regs[10] = SyscallError::PermissionDenied as usize;
-                    return;
-                }
+        }
+        if let Some(b) = blk_io_bit {
+            if allowlist & (1u64 << b) == 0 {
+                frame.regs[10] = SyscallError::PermissionDenied as usize;
+                return;
             }
-        } // SCHEDULER lock released here
+        }
     }
 
     // Enable Access to User Memory (SUM) on RISC-V

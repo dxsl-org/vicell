@@ -100,6 +100,12 @@ pub fn init() {
     }
 }
 
+// Extern symbols defined in libs/ostd (linked at final link step).
+extern "Rust" {
+    fn vi_set_fast_ipc_vfs_cell(cell_id: usize);
+    fn vi_clear_fast_ipc_vfs_cell(cell_id: usize);
+}
+
 /// Exposes `terminate_current_cell_on_fault` to the HAL trap handler via
 /// `extern "Rust"` linkage.
 #[no_mangle]
@@ -176,6 +182,11 @@ pub fn terminate_current_cell_on_fault(scause: usize, sepc: usize) {
         let cell_id = types::CellId(cell_id_raw as u64);
         crate::memory::cell_quota::deregister(cell_id);
     }
+
+    // If the faulting cell owned the fast-IPC VFS handler, null the pointer so
+    // future call_vfs() invocations don't jump into dead/replaced cell state.
+    // SAFETY: vi_clear_fast_ipc_vfs_cell is defined in libs/ostd and linked.
+    unsafe { vi_clear_fast_ipc_vfs_cell(cell_id_raw); }
 
     // Reset cell ID to 0 (kernel context) so subsequent allocations are not
     // charged to the now-dead Cell.

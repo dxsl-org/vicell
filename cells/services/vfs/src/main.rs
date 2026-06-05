@@ -453,6 +453,8 @@ pub fn main() {
     *GLOBAL_VFS.lock() = Some(vfs);
 
     // Register the fast-IPC handler so trusted Cells can bypass ecall for VFS reads.
+    // The kernel records the VFS cell's ID at spawn time so it can clear this
+    // pointer if VFS crashes — see loader.rs fast_ipc::set_vfs_handler_cell call.
     ostd::fast_ipc::register_vfs(vfs_fast_handler);
     let mut buf = [0u8; 512];
 

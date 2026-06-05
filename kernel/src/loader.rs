@@ -2,6 +2,11 @@
 
 use types::*;
 
+// Symbol defined in libs/ostd; called to record which cell owns the VFS fast-IPC handler.
+extern "Rust" {
+    fn vi_set_fast_ipc_vfs_cell(cell_id: usize);
+}
+
 pub mod disk_layout;
 pub mod early;
 pub mod elf;
@@ -110,6 +115,9 @@ pub fn spawn_from_path(path: &str) -> ViResult<usize> {
         if let Some(task) = sched.tasks.get_mut(&tid) {
             if path.ends_with("/bin/vfs") {
                 task.block_io_cap = Some(crate::task::cap::BlockIoCap::new());
+                // Track VFS cell so the fast-IPC handler pointer can be cleared on crash.
+                // SAFETY: vi_set_fast_ipc_vfs_cell is defined in libs/ostd and linked.
+                unsafe { vi_set_fast_ipc_vfs_cell(cell_id.0 as usize); }
             }
             if path.ends_with("/bin/net") {
                 task.network_cap = Some(crate::task::cap::NetworkCap::new());
