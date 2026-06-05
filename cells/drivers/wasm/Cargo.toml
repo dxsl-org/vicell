@@ -3,10 +3,11 @@ name = "driver-wasm"
 version = "0.2.0"
 edition = "2021"
 
-[dependencies]
-types = { path = "../../../libs/types" }
-api = { path = "../../../libs/api" }
-ostd = { path = "../../../libs/ostd" }
-
 [lib]
-crate-type = ["staticlib"]
+# No staticlib — this is a Rust library linked by the WASM host cell binary.
+
+[dependencies]
+types    = { path = "../../../libs/types" }
+api      = { path = "../../../libs/api" }
+ostd     = { path = "../../../libs/ostd" }
+wasmi    = { version = "1", default-features = false, features = ["prefer-btree-collections"] }

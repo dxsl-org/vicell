@@ -1,4 +1,4 @@
-# ViOS v0.2 Workspace - Cell-Based Architecture
+# ViCell v0.2 Workspace - Cell-Based Architecture
 
 [workspace]
 resolver = "2"
@@ -39,6 +39,7 @@ members = [
     "cells/apps/init",
     "cells/apps/shell",
     "cells/apps/bench",
+    "cells/apps/wasm",
     "cells/apps/hello",
     "cells/apps/utils",
     "cells/apps/sys-tools",
@@ -53,7 +54,7 @@ members = [
 [workspace.package]
 version = "0.2.0"
 edition = "2021"
-authors = ["ViOS Team"]
+authors = ["ViCell Team"]
 
 [workspace.dependencies]
 spin = { version = "0.9", default-features = false, features = ["spin_mutex"] }
