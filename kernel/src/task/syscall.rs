@@ -1302,9 +1302,6 @@ pub extern "Rust" fn ViCell_syscall_dispatch(frame: &mut ViTrapFrame) {
     let a2 = frame.regs[12];
     let a3 = frame.regs[13];
 
-    // Debug log
-    // log::info!("SYSCALL DISPATCH: ID={}, a0={:X}, sstatus={:X}", syscall_id, a0, frame.sstatus);
-
     // Helper to construct Syscall enum
     // Note: This mapping manually unpacks registers to arguments based on the Syscall definition.
     // This duplicates logic slightly but keeps the kernel side robust.
@@ -1397,6 +1394,36 @@ pub extern "Rust" fn ViCell_syscall_dispatch(frame: &mut ViTrapFrame) {
     };
 
     let caller_id = super::current_task_id();
+
+    // Per-Cell syscall allowlist check.
+    // Read the bitset and drop the SCHEDULER lock BEFORE calling handle_syscall,
+    // which acquires its own internal locks — avoids contention on the Spinlock.
+    {
+        let sc = ViSyscall::from(syscall_id);
+        let bit = sc.allowlist_bit();
+        // Also check bit 36 for raw block-I/O opcodes (500/501/503) that bypass from().
+        let blk_io_bit: Option<u8> = if matches!(syscall_id, 500 | 501 | 503) { Some(36) } else { None };
+
+        if bit.is_some() || blk_io_bit.is_some() {
+            let allowlist = super::SCHEDULER.lock().as_ref()
+                .and_then(|s| s.tasks.get(&caller_id))
+                .map(|t| t.syscall_allowlist)
+                .unwrap_or(u64::MAX); // task gone → fail-open
+
+            if let Some(b) = bit {
+                if allowlist & (1u64 << b) == 0 {
+                    frame.regs[10] = SyscallError::PermissionDenied as usize;
+                    return;
+                }
+            }
+            if let Some(b) = blk_io_bit {
+                if allowlist & (1u64 << b) == 0 {
+                    frame.regs[10] = SyscallError::PermissionDenied as usize;
+                    return;
+                }
+            }
+        } // SCHEDULER lock released here
+    }
 
     // Enable Access to User Memory (SUM) on RISC-V
     #[cfg(target_arch = "riscv64")]

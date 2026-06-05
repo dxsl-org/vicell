@@ -84,6 +84,23 @@ pub fn spawn_from_path(path: &str) -> ViResult<usize> {
         &crate::audit::encode_u32x2(tid as u32, 0u32),
     );
 
+    // Read per-Cell syscall allowlist from ELF section __ViCell_syscalls.
+    // The section (if present) contains a u64 LE bitset; absent = permit-all.
+    {
+        let allowlist = match ElfLoader.get_section(&elf_bytes, "__ViCell_syscalls") {
+            Ok(bytes) if bytes.len() >= 8 => {
+                // SAFETY: bytes slice is valid data from the loaded ELF.
+                u64::from_le_bytes(bytes[..8].try_into().expect("8-byte __ViCell_syscalls section"))
+            }
+            _ => u64::MAX, // no section → permit-all (backwards compatible)
+        };
+        if let Some(sched) = crate::task::SCHEDULER.lock().as_mut() {
+            if let Some(task) = sched.tasks.get_mut(&tid) {
+                task.syscall_allowlist = allowlist;
+            }
+        }
+    }
+
     // Register per-cell memory quota (4 MiB default) using the real CellId.
     crate::memory::cell_quota::register(cell_id, crate::memory::cell_quota::DEFAULT_QUOTA_BYTES);
 

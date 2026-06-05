@@ -137,6 +137,11 @@ pub struct Task {
     /// Scheduling priority tier.  Higher value = higher priority.
     /// See `api::TaskPriority` for the three defined levels.
     pub priority: u8,
+
+    /// Per-Cell syscall allowlist.  Each bit corresponds to a syscall via
+    /// `api::ViSyscall::allowlist_bit()`.  `u64::MAX` = permit all (default,
+    /// used when the Cell ELF does not embed a `__ViCell_syscalls` section).
+    pub syscall_allowlist: u64,
 }
 
 impl Task {
@@ -166,6 +171,7 @@ impl Task {
             network_cap:  None,
             spawn_cap:    None,
             priority: api::TaskPriority::Normal as u8,
+            syscall_allowlist: u64::MAX, // permit-all until ELF section is read
         }
     }
 

@@ -28,17 +28,8 @@ static CAT_ELF:   &[u8] = include_bytes!("../../../../kernel/src/embedded/cat");
 static LS_ELF:    &[u8] = include_bytes!("../../../../kernel/src/embedded/ls");
 static LUA_ELF:   &[u8] = include_bytes!("../../../../kernel/src/embedded/lua");
 
-// IPC opcodes.
-const OP_GET_FILE: u8 = 1; // path -> (ptr:u64, len:u64)
-const OP_LIST_DIR: u8 = 2; // path -> newline-separated names
-const OP_STAT:     u8 = 3; // path -> (size:u64, is_dir:u8, pad:[u8;7])
-const OP_WRITE:    u8 = 4; // [path_len:u8][content_len:u16 LE][path][content] → /data FAT16 or /tmp RamFS
-const OP_READ:     u8 = 8; // path -> file bytes (up to 480), empty = not found
-const OP_MKDIR:    u8 = 5; // path -> 0=ok, 1=err
-const OP_RMDIR:            u8 = 6;  // path -> 0=ok, 1=err (only empty dirs)
-const OP_UNLINK:           u8 = 7;  // path -> 0=ok, 1=err (only files)
-const OP_RMDIR_RECURSIVE:  u8 = 9;  // path -> 0=ok, 1=err — recursive tree delete (/data only)
-const OP_APPEND:           u8 = 10; // [path_len:u8][content_len:u16 LE][path][content] → seek-to-end append
+// IPC now uses typed api::ipc::VfsRequest / VfsResponse via postcard encoding.
+// Raw byte opcode constants removed — see libs/api/src/ipc.rs.
 
 #[derive(Clone)]
 struct RamFile {
@@ -70,7 +61,7 @@ impl VfsManager {
     pub fn new() -> Self {
         let mut root = Box::new(RamFile::new_dir("/"));
         root.children.insert(String::from("readme.txt"),
-            Box::new(RamFile::new_file("readme.txt", b"Welcome to ViOS!\n")));
+            Box::new(RamFile::new_file("readme.txt", b"Welcome to ViCell!\n")));
 
         let mut bin = Box::new(RamFile::new_dir("bin"));
         for (name, data) in [
@@ -426,10 +417,43 @@ fn fat16_mkdir(fs: Option<&DataFs>, path: &str) -> bool {
     ensure_dir_chain(fs.root_dir(), rel).is_ok()
 }
 
+// Global VFS manager for the fast-IPC handler (which runs outside the main recv loop).
+// Protected by a spinlock; on single-hart there is no actual contention.
+static GLOBAL_VFS: ostd::prelude::Mutex<Option<VfsManager>> = ostd::prelude::Mutex::new(None);
+
+/// Fast-IPC handler: serves VfsRequest::GetFile without ecall overhead.
+///
+/// # Safety
+/// Called with S-mode interrupts disabled (guaranteed by `ostd::fast_ipc::call_vfs`).
+unsafe fn vfs_fast_handler(
+    req: &api::ipc::VfsRequest<'_>,
+    out: &mut [u8; api::ipc::IPC_BUF_SIZE],
+) -> usize {
+    let resp = match req {
+        api::ipc::VfsRequest::GetFile(path) => {
+            if let Some(vfs) = GLOBAL_VFS.lock().as_ref() {
+                if let Some((ptr, len)) = vfs.get_file_content(path) {
+                    api::ipc::VfsResponse::DataPtr { ptr: ptr as u64, len: len as u64 }
+                } else {
+                    api::ipc::VfsResponse::Err(1)
+                }
+            } else {
+                api::ipc::VfsResponse::Err(0xFF)
+            }
+        }
+        _ => api::ipc::VfsResponse::Err(0xFE), // other ops must use ecall path
+    };
+    api::ipc::encode(&resp, out).map(|s| s.len()).unwrap_or(0)
+}
+
 #[no_mangle]
 pub fn main() {
-    println("VFS Service v0.2: RamFS + mkdir/rmdir/unlink IPC");
-    let mut vfs = VfsManager::new();
+    println("VFS Service v0.2: RamFS + mkdir/rmdir/unlink IPC (typed postcard)");
+    let vfs = VfsManager::new();
+    *GLOBAL_VFS.lock() = Some(vfs);
+
+    // Register the fast-IPC handler so trusted Cells can bypass ecall for VFS reads.
+    ostd::fast_ipc::register_vfs(vfs_fast_handler);
     let mut buf = [0u8; 512];
 
     // Mount the persistent FAT16 volume on the VirtIO disk. On failure (no disk
@@ -450,136 +474,104 @@ pub fn main() {
     loop {
         match ostd::syscall::sys_recv(0, &mut buf) {
             ostd::syscall::SyscallResult::Ok(sender) if sender > 0 => {
-                let path_len = buf[1] as usize;
-                let path = core::str::from_utf8(&buf[2..2usize.saturating_add(path_len)]).ok();
-
-                // NOTE: `path` (from buf[2..]) is the 2-byte-header parse used by
-                // mkdir/rmdir/unlink. OP_WRITE/OP_APPEND re-parse from buf[4..] (4-byte
-                // header). Future opcodes must pick ONE scheme and NOT use the loop-level
-                // `path` if they use the 4-byte header.
-                match buf[0] {
-                    OP_GET_FILE => {
-                        if let Some(p) = path {
-                            let mut resp = [0u8; 16];
+                // Encode the response into a local buffer while holding the VFS lock,
+                // then DROP the lock before sys_send.  If ipc_send blocks (client not
+                // yet in Recv), yield_cpu switches to another cell.  That cell may call
+                // call_vfs which also acquires GLOBAL_VFS — a deadlock if we still hold
+                // the lock during the send.
+                let mut encoded = [0u8; 512];
+                let encoded_len: usize;
+                {
+                    let mut resp_buf = [0u8; 512];
+                    // Acquire VFS state; released at end of this block, before sys_send.
+                    let mut gvfs = GLOBAL_VFS.lock();
+                    let vfs = gvfs.as_mut().expect("VFS initialized before serving requests");
+                    // Decode typed request; `take_from_bytes` tolerates trailing zeros
+                    // in the 512-byte receive buffer left over from previous messages.
+                    let resp: api::ipc::VfsResponse = match api::ipc::decode::<api::ipc::VfsRequest>(&buf) {
+                    Ok(req) => match req {
+                        api::ipc::VfsRequest::GetFile(p) => {
                             if let Some((ptr, len)) = vfs.get_file_content(p) {
-                                resp[0..8].copy_from_slice(&(ptr as u64).to_le_bytes());
-                                resp[8..16].copy_from_slice(&(len as u64).to_le_bytes());
-                            }
-                            ostd::syscall::sys_send(sender, &resp);
-                        }
-                    }
-                    OP_LIST_DIR => {
-                        if let Some(p) = path {
-                            let mut resp = [0u8; 480];
-                            let n = vfs.list_dir(p, &mut resp);
-                            ostd::syscall::sys_send(sender, &resp[..n]);
-                        }
-                    }
-                    OP_STAT => {
-                        if let Some(p) = path {
-                            let mut resp = [0u8; 16];
-                            vfs.stat(p, &mut resp);
-                            ostd::syscall::sys_send(sender, &resp);
-                        }
-                    }
-                    OP_WRITE => {
-                        // Header: [4][path_len:u8][content_len:u16 LE][path][content]
-                        let pl = buf[1] as usize;
-                        let cl = u16::from_le_bytes([buf[2], buf[3]]) as usize;
-                        let ok = if 4 + pl + cl <= buf.len() {
-                            match core::str::from_utf8(&buf[4..4 + pl]) {
-                                Ok(p) if p.starts_with("/data/") => {
-                                    write_fat16(fat_fs.as_ref(), p, &buf[4 + pl..4 + pl + cl])
-                                }
-                                Ok(p) if p.starts_with("/tmp/") => {
-                                    vfs.write_file(p, &buf[4 + pl..4 + pl + cl])
-                                }
-                                _ => false,
-                            }
-                        } else { false };
-                        ostd::syscall::sys_send(sender, if ok { b"\x00" } else { b"\x01" });
-                    }
-                    OP_READ => {
-                        if let Some(p) = path {
-                            if p.starts_with("/data/") {
-                                read_fat16(fat_fs.as_ref(), p, sender);
-                            } else if let Some(data) = vfs.get_file_data(p) {
-                                let n = data.len().min(480);
-                                ostd::syscall::sys_send(sender, &data[..n]);
+                                api::ipc::VfsResponse::DataPtr { ptr: ptr as u64, len: len as u64 }
                             } else {
-                                ostd::syscall::sys_send(sender, b"");
+                                api::ipc::VfsResponse::Err(1)
                             }
                         }
-                    }
-                    OP_MKDIR => {
-                        if let Some(p) = path {
+                        api::ipc::VfsRequest::ListDir(p) => {
+                            let mut tmp = [0u8; 480];
+                            let n = vfs.list_dir(p, &mut tmp);
+                            resp_buf[..n].copy_from_slice(&tmp[..n]);
+                            // Encode raw bytes as VfsResponse::Data — borrows resp_buf.
+                            // The encode happens inside the lock; sys_send happens
+                            // outside (lock released at end of the enclosing block).
+                            api::ipc::VfsResponse::Data(&resp_buf[..n])
+                        }
+                        api::ipc::VfsRequest::Stat(p) => {
+                            if let Some(node) = vfs.find_node(p) {
+                                api::ipc::VfsResponse::Stat {
+                                    size: node.data.len() as u64,
+                                    is_dir: node.is_dir,
+                                }
+                            } else {
+                                api::ipc::VfsResponse::Err(1)
+                            }
+                        }
+                        api::ipc::VfsRequest::Write { path, content } => {
+                            let ok = if path.starts_with("/data/") {
+                                write_fat16(fat_fs.as_ref(), path, content)
+                            } else if path.starts_with("/tmp/") {
+                                vfs.write_file(path, content)
+                            } else { false };
+                            if ok { api::ipc::VfsResponse::Ok } else { api::ipc::VfsResponse::Err(1) }
+                        }
+                        api::ipc::VfsRequest::Append { path, content } => {
+                            let ok = if path.starts_with("/data/") {
+                                append_fat16(fat_fs.as_ref(), path, content)
+                            } else if path.starts_with("/tmp/") {
+                                let mut data = vfs.get_file_data(path)
+                                    .map(|d| d.to_vec())
+                                    .unwrap_or_default();
+                                data.extend_from_slice(content);
+                                vfs.write_file(path, &data)
+                            } else { false };
+                            if ok { api::ipc::VfsResponse::Ok } else { api::ipc::VfsResponse::Err(1) }
+                        }
+                        api::ipc::VfsRequest::Mkdir(p) => {
                             let ok = if p.starts_with("/data/") {
                                 fat16_mkdir(fat_fs.as_ref(), p)
-                            } else {
-                                vfs.mkdir(p)
-                            };
-                            ostd::syscall::sys_send(sender, if ok { b"\x00" } else { b"\x01" });
+                            } else { vfs.mkdir(p) };
+                            if ok { api::ipc::VfsResponse::Ok } else { api::ipc::VfsResponse::Err(1) }
                         }
-                    }
-                    OP_RMDIR => {
-                        if let Some(p) = path {
-                            // Phase H: rmdir_fat16 verifies the target IS a directory
-                            // before calling remove() — POSIX type semantics (ENOTDIR).
+                        api::ipc::VfsRequest::Rmdir(p) => {
+                            // Verifies the target IS a directory — POSIX ENOTDIR semantics.
                             let ok = if p.starts_with("/data/") {
                                 rmdir_fat16(fat_fs.as_ref(), p)
-                            } else {
-                                vfs.rmdir(p)
-                            };
-                            ostd::syscall::sys_send(sender, if ok { b"\x00" } else { b"\x01" });
+                            } else { vfs.rmdir(p) };
+                            if ok { api::ipc::VfsResponse::Ok } else { api::ipc::VfsResponse::Err(1) }
                         }
-                    }
-                    OP_UNLINK => {
-                        if let Some(p) = path {
+                        api::ipc::VfsRequest::Unlink(p) => {
                             let ok = if p.starts_with("/data/") {
                                 unlink_fat16(fat_fs.as_ref(), p)
-                            } else {
-                                vfs.unlink(p)
-                            };
-                            ostd::syscall::sys_send(sender, if ok { b"\x00" } else { b"\x01" });
+                            } else { vfs.unlink(p) };
+                            if ok { api::ipc::VfsResponse::Ok } else { api::ipc::VfsResponse::Err(1) }
                         }
-                    }
-                    OP_RMDIR_RECURSIVE => {
-                        if let Some(p) = path {
-                            // Recursive delete only for the persistent FAT16 volume.
-                            // /tmp RamFS is volatile and out of scope for recursive delete.
-                            let ok = if p.starts_with("/data/") {
-                                rmdir_recursive_fat16(fat_fs.as_ref(), p)
-                            } else {
-                                false
-                            };
-                            ostd::syscall::sys_send(sender, if ok { b"\x00" } else { b"\x01" });
+                        api::ipc::VfsRequest::RmdirRecursive(p) => {
+                            // Recursive delete only supported on the persistent FAT16 volume.
+                            let ok = p.starts_with("/data/") && rmdir_recursive_fat16(fat_fs.as_ref(), p);
+                            if ok { api::ipc::VfsResponse::Ok } else { api::ipc::VfsResponse::Err(1) }
                         }
-                    }
-                    OP_APPEND => {
-                        // Same header as OP_WRITE: [op][path_len:u8][content_len:u16 LE][path][content]
-                        let pl = buf[1] as usize;
-                        let cl = u16::from_le_bytes([buf[2], buf[3]]) as usize;
-                        let ok = if 4 + pl + cl <= buf.len() {
-                            match core::str::from_utf8(&buf[4..4 + pl]) {
-                                Ok(p) if p.starts_with("/data/") =>
-                                    append_fat16(fat_fs.as_ref(), p, &buf[4 + pl..4 + pl + cl]),
-                                Ok(p) if p.starts_with("/tmp/") => {
-                                    let content = &buf[4 + pl..4 + pl + cl];
-                                    let mut data = vfs.get_file_data(p)
-                                        .map(|d| d.to_vec())
-                                        .unwrap_or_default();
-                                    data.extend_from_slice(content);
-                                    vfs.write_file(p, &data)
-                                }
-                                _ => false,
-                            }
-                        } else { false };
-                        ostd::syscall::sys_send(sender, if ok { b"\x00" } else { b"\x01" });
-                    }
-                    _ => {
-                        ostd::syscall::sys_send(sender, b"");
-                    }
-                }
+                    },
+                    Err(_) => api::ipc::VfsResponse::Err(0xFF), // malformed request
+                    };
+                    // Encode while holding the lock (safe: no sys_send yet).
+                    encoded_len = api::ipc::encode(&resp, &mut encoded).map(|s| s.len()).unwrap_or(0);
+                    let _ = resp_buf; // suppress unused warning
+                } // GLOBAL_VFS lock released here — before sys_send
+
+                // Send after releasing the lock so a blocked ipc_send + yield_cpu
+                // cannot switch to a cell that deadlocks on GLOBAL_VFS.
+                ostd::syscall::sys_send(sender, &encoded[..encoded_len]);
+                buf = [0u8; 512];
             }
             _ => {
                 ostd::task::yield_now();

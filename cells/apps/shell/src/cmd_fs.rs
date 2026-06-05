@@ -6,18 +6,8 @@
 use ostd::prelude::*;
 use ostd::syscall;
 
-/// VFS service cell endpoint.
-///
-/// Boot order: init=1, user_hello=2 (kernel smoke-test), vfs=3 (init's first
-/// sys_spawn_from_path). The previous value `2` silently routed all mkdir/rm
-/// IPC to the user_hello task instead of the VFS service. Verified from QEMU
-/// serial log — see kernel/src/task/syscall.rs ServiceLookup table.
+/// VFS service cell endpoint (task ID 3: init=1, user_hello=2, vfs=3).
 const VFS_ENDPOINT: usize = 3;
-const OP_MKDIR:           u8 = 5;
-const OP_RMDIR:           u8 = 6;
-const OP_UNLINK:          u8 = 7;
-const OP_RMDIR_RECURSIVE: u8 = 9;
-const OP_APPEND:          u8 = 10;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -43,19 +33,19 @@ fn collect_lines(data: &[u8]) -> Vec<&str> {
     text.lines().collect()
 }
 
-/// Send an OP_MKDIR/RMDIR/UNLINK IPC message to the VFS cell.
-fn vfs_path_op(opcode: u8, path: &str) -> bool {
-    let path_bytes = path.as_bytes();
-    let path_len = path_bytes.len().min(253) as u8;
-    let mut buf = [0u8; 256];
-    buf[0] = opcode;
-    buf[1] = path_len;
-    buf[2..2 + path_len as usize].copy_from_slice(&path_bytes[..path_len as usize]);
-    syscall::sys_send(VFS_ENDPOINT, &buf[..2 + path_len as usize]);
-    // Receive 1-byte reply: 0=ok, non-zero=error.
-    let mut reply = [0u8; 4];
+/// Send a typed VfsRequest to the VFS cell and return whether it succeeded.
+fn vfs_req_ok(req: &api::ipc::VfsRequest<'_>) -> bool {
+    let mut send_buf = [0u8; 512];
+    let n = match api::ipc::encode(req, &mut send_buf) {
+        Ok(s) => s.len(),
+        Err(_) => return false,
+    };
+    syscall::sys_send(VFS_ENDPOINT, &send_buf[..n]);
+    let mut reply = [0u8; 64];
     match syscall::sys_recv(0, &mut reply) {
-        syscall::SyscallResult::Ok(_) => reply[0] == 0,
+        syscall::SyscallResult::Ok(_) => {
+            matches!(api::ipc::decode::<api::ipc::VfsResponse>(&reply), Ok(api::ipc::VfsResponse::Ok))
+        }
         _ => false,
     }
 }
@@ -209,7 +199,7 @@ pub fn cmd_mkdir<'a>(mut args: core::str::SplitWhitespace<'a>) -> ViResult<()> {
         Some(p) => p,
         None => { ostd::io::println("Usage: mkdir <path>"); return Ok(()); }
     };
-    if vfs_path_op(OP_MKDIR, path) {
+    if vfs_req_ok(&api::ipc::VfsRequest::Mkdir(path)) {
         // Success — silent like POSIX mkdir.
     } else {
         ostd::io::print("mkdir: cannot create directory '");
@@ -227,7 +217,7 @@ pub fn cmd_rmdir<'a>(mut args: core::str::SplitWhitespace<'a>) -> ViResult<()> {
         Some(p) => p,
         None => { ostd::io::println("Usage: rmdir <path>"); return Ok(()); }
     };
-    if !vfs_path_op(OP_RMDIR, path) {
+    if !vfs_req_ok(&api::ipc::VfsRequest::Rmdir(path)) {
         ostd::io::print("rmdir: failed to remove '");
         ostd::io::print(path);
         ostd::io::println("' (not empty or not found)");
@@ -250,7 +240,7 @@ pub fn cmd_rm<'a>(mut args: core::str::SplitWhitespace<'a>) -> ViResult<()> {
     let ok = if recursive && path.starts_with("/data/") {
         rm_recursive(path)
     } else {
-        vfs_path_op(OP_UNLINK, path)
+        vfs_req_ok(&api::ipc::VfsRequest::Unlink(path))
     };
     if !ok {
         ostd::io::print("rm: cannot remove '");
@@ -260,65 +250,24 @@ pub fn cmd_rm<'a>(mut args: core::str::SplitWhitespace<'a>) -> ViResult<()> {
     Ok(())
 }
 
-/// Send OP_RMDIR_RECURSIVE to VFS — recursively deletes a `/data/` directory tree.
+/// Recursively delete a `/data/` directory tree via VFS IPC.
 pub fn rm_recursive(path: &str) -> bool {
-    let pb = path.as_bytes();
-    let pl = pb.len().min(253) as u8;
-    let mut buf = [0u8; 256];
-    buf[0] = OP_RMDIR_RECURSIVE;
-    buf[1] = pl;
-    buf[2..2 + pl as usize].copy_from_slice(&pb[..pl as usize]);
-    syscall::sys_send(VFS_ENDPOINT, &buf[..2 + pl as usize]);
-    let mut reply = [0u8; 4];
-    match syscall::sys_recv(0, &mut reply) {
-        syscall::SyscallResult::Ok(_) => reply[0] == 0,
-        _ => false,
-    }
+    vfs_req_ok(&api::ipc::VfsRequest::RmdirRecursive(path))
 }
 
-const OP_WRITE: u8 = 4;
-const OP_READ:  u8 = 8;
-
-/// Write `content` to `path` via VFS OP_WRITE (4-byte header:
-/// opcode, path_len:u8, content_len:u16 LE). Path+content capped to 512 bytes.
-/// The VFS server enforces `/data/`/`/tmp/` authorization.
+/// Write `content` to `path` via typed VFS IPC.
+/// The VFS server enforces `/data/`/`/tmp/` path authorization.
 pub fn write_file(path: &str, content: &[u8]) -> bool {
-    let pb = path.as_bytes();
-    let pl = pb.len().min(255);
-    let cl = content.len().min(512_usize.saturating_sub(4 + pl));
-    let mut buf = [0u8; 512];
-    buf[0] = OP_WRITE;
-    buf[1] = pl as u8;
-    buf[2..4].copy_from_slice(&(cl as u16).to_le_bytes());
-    buf[4..4 + pl].copy_from_slice(&pb[..pl]);
-    buf[4 + pl..4 + pl + cl].copy_from_slice(&content[..cl]);
-    syscall::sys_send(VFS_ENDPOINT, &buf[..4 + pl + cl]);
-    let mut reply = [0u8; 1];
-    match syscall::sys_recv(0, &mut reply) {
-        syscall::SyscallResult::Ok(_) => reply[0] == 0,
-        _ => false,
-    }
+    vfs_req_ok(&api::ipc::VfsRequest::Write { path, content })
 }
 
-/// Append `content` to `path` via OP_APPEND (same 4-byte header as OP_WRITE).
-/// Path + content capped to 512 bytes per call — caller chunks for larger payloads.
+/// Append `content` to `path` via typed VFS IPC.
+/// Caller must chunk if content exceeds the 512-byte IPC buffer capacity.
 pub fn append_file(path: &str, content: &[u8]) -> bool {
-    let pb = path.as_bytes();
-    let pl = pb.len().min(255);
-    let cl = content.len().min(512_usize.saturating_sub(4 + pl));
-    let mut buf = [0u8; 512];
-    buf[0] = OP_APPEND;
-    buf[1] = pl as u8;
-    buf[2..4].copy_from_slice(&(cl as u16).to_le_bytes());
-    buf[4..4 + pl].copy_from_slice(&pb[..pl]);
-    buf[4 + pl..4 + pl + cl].copy_from_slice(&content[..cl]);
-    syscall::sys_send(VFS_ENDPOINT, &buf[..4 + pl + cl]);
-    let mut reply = [0u8; 1];
-    match syscall::sys_recv(0, &mut reply) {
-        syscall::SyscallResult::Ok(_) => reply[0] == 0,
-        _ => false,
-    }
+    vfs_req_ok(&api::ipc::VfsRequest::Append { path, content })
 }
+
+
 
 /// `vwrite <path> <text>` — write text to a VFS path via OP_WRITE (test helper).
 pub fn cmd_vwrite<'a>(mut args: core::str::SplitWhitespace<'a>) -> ViResult<()> {
@@ -344,21 +293,43 @@ pub fn cmd_vappend<'a>(mut args: core::str::SplitWhitespace<'a>) -> ViResult<()>
     Ok(())
 }
 
-/// Read file content from VFS via OP_READ; returns byte count written into `out`.
+/// Read file content from VFS, trying the fast-IPC path first then falling back to ecall.
 ///
-/// Returns 0 if the file is not found or the path is a directory.
-/// Uses zero-scan to detect byte count (sys_recv returns sender_id, not length).
+/// Fast path: `ostd::fast_ipc::call_vfs` calls the VFS handler directly (~3 cycles).
+/// Fallback: `sys_send`/`sys_recv` round-trip via ecall (~200 cycles).
 pub fn read_file_vfs(path: &str, out: &mut [u8]) -> usize {
-    let pb = path.as_bytes();
-    let pl = pb.len().min(253) as u8;
-    let mut req = [0u8; 256];
-    req[0] = OP_READ;
-    req[1] = pl;
-    req[2..2 + pl as usize].copy_from_slice(&pb[..pl as usize]);
-    syscall::sys_send(VFS_ENDPOINT, &req[..2 + pl as usize]);
-    match syscall::sys_recv(0, out) {
-        syscall::SyscallResult::Ok(_) => {
-            out.iter().rposition(|&b| b != 0).map(|i| i + 1).unwrap_or(0)
+    let req = api::ipc::VfsRequest::GetFile(path);
+    let mut fast_buf = [0u8; api::ipc::IPC_BUF_SIZE];
+
+    // Try fast-IPC path — returns 0 if VFS handler not registered yet.
+    // SAFETY: fast_buf is exclusive; TrustedHandle::default() is a ZST no-op.
+    let fast_n = unsafe {
+        ostd::fast_ipc::call_vfs(api::fast_ipc::TrustedHandle::default(), &req, &mut fast_buf)
+    };
+
+    let decode_buf: &[u8] = if fast_n > 0 {
+        &fast_buf[..fast_n]
+    } else {
+        // Fallback: full ecall round-trip.
+        let mut send_buf = [0u8; 512];
+        let n = match api::ipc::encode(&req, &mut send_buf) {
+            Ok(s) => s.len(),
+            Err(_) => return 0,
+        };
+        syscall::sys_send(VFS_ENDPOINT, &send_buf[..n]);
+        match syscall::sys_recv(0, &mut fast_buf) {
+            syscall::SyscallResult::Ok(_) => &fast_buf,
+            _ => return 0,
+        }
+    };
+
+    match api::ipc::decode::<api::ipc::VfsResponse>(decode_buf) {
+        Ok(api::ipc::VfsResponse::DataPtr { ptr, len }) => {
+            // SAFETY: VFS returned a pointer into its own SAS memory;
+            // VFS is blocked (fast path) or waiting for next recv (ecall path).
+            let data_len = (len as usize).min(out.len());
+            unsafe { core::ptr::copy_nonoverlapping(ptr as *const u8, out.as_mut_ptr(), data_len); }
+            data_len
         }
         _ => 0,
     }
