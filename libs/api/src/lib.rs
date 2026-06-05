@@ -17,6 +17,8 @@ pub use types::*;
 
 pub mod allocator;
 pub mod async_io;
+pub mod fast_ipc;
+pub mod ipc;
 pub mod task;
 pub use task::TaskPriority;
 pub mod cap;

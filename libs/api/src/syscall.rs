@@ -100,6 +100,62 @@ pub enum ViSyscall {
     GetProcs = 30,
 }
 
+impl ViSyscall {
+    /// Stable bit index (0-36) for the per-Cell syscall allowlist stored in
+    /// `Task::syscall_allowlist`.
+    ///
+    /// Bit indices are independent of raw opcode values so they remain stable
+    /// even if opcodes are renumbered.  Returns `None` for syscalls that are
+    /// always permitted (Yield, Exit) — filtering them would prevent a Cell
+    /// from ever yielding or cleanly shutting down.
+    ///
+    /// Bit 36 is reserved for raw block-I/O syscalls (opcodes 500-503) which
+    /// bypass `ViSyscall::from()` and must be checked separately at dispatch.
+    pub const fn allowlist_bit(self) -> Option<u8> {
+        match self {
+            Self::Send          => Some(0),
+            Self::Recv          => Some(1),
+            Self::TryRecv       => Some(2),
+            Self::Reply         => Some(3),
+            Self::Call          => Some(4),
+            Self::Spawn         => Some(5),
+            Self::SpawnFromMem  => Some(6),
+            Self::SpawnFromPath => Some(7),
+            Self::SpawnPinned   => Some(8),
+            Self::Wait          => Some(9),
+            Self::Log           => Some(10),
+            Self::SetTimer      => Some(11),
+            Self::ShmAlloc      => Some(12),
+            Self::ShmMap        => Some(13),
+            Self::GetProcs      => Some(14),
+            Self::OpenCap       => Some(15),
+            Self::ReadCap       => Some(16),
+            Self::CloseCap      => Some(17),
+            Self::Open          => Some(18),
+            Self::Read          => Some(19),
+            Self::Write         => Some(20),
+            Self::Close         => Some(21),
+            Self::ReadDir       => Some(22),
+            Self::Seek          => Some(23),
+            Self::FileOp        => Some(24),
+            Self::GetTime       => Some(25),
+            Self::GpuFlush      => Some(26),
+            Self::NetTx         => Some(27),
+            Self::NetRx         => Some(28),
+            Self::RecvTimeout   => Some(29),
+            Self::SendGather    => Some(30),
+            Self::RecvScatter   => Some(31),
+            Self::HotSwap       => Some(32),
+            Self::StateStash    => Some(33),
+            Self::StateRestore  => Some(34),
+            Self::Exec          => Some(35),
+            // Yield and Exit are always permitted — a Cell must be able to
+            // yield the CPU and exit cleanly regardless of its allowlist.
+            Self::Yield | Self::Exit | Self::Unknown => None,
+        }
+    }
+}
+
 impl From<usize> for ViSyscall {
     fn from(id: usize) -> Self {
         match id {

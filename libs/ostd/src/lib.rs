@@ -8,9 +8,9 @@
 
 extern crate alloc;
 
-// ostd - ViOS Standard Library
+// ostd - ViCell Standard Library
 //
-// Replacement for Rust's std library for ViOS Cells.
+// Replacement for Rust's std library for ViCell Cells.
 // INTERFACE ONLY - NO IMPLEMENTATION YET.
 
 pub use api::*;
@@ -20,9 +20,10 @@ pub use alloc::boxed;
 pub use alloc::string;
 pub use alloc::vec;
 
-/// Result type used throughout ViOS.
+/// Result type used throughout ViCell.
 pub type Result<T, E = ViError> = core::result::Result<T, E>;
 
+pub mod fast_ipc;
 pub mod startup;
 pub mod sync;
 pub mod syscall;

@@ -11,6 +11,8 @@ unsafe_code = "deny"
 [dependencies]
 libm = "0.2.15"
 types = { path = "../types" }
+postcard = { version = "1", default-features = false, features = ["postcard-derive"] }
+serde = { version = "1", default-features = false, features = ["derive"] }
 
 
 [features]
