@@ -290,19 +290,33 @@ See `.agents/260605-0958-phase24-perf-kaslr/` for detailed phase reports.
 - [ ] Low-priority `log-flusher` background Cell writes to `/data/kernel.log`
 
 ### Phase 27 — Direct IPC + Typed Channels + Syscall Filter (P2)
-**Target**: 2026-08-25 | **Effort**: ~4 weeks
-**Learn from**:
-- Hubris synchronous IPC + lease system → [`oxidecomputer/hubris`](https://github.com/oxidecomputer/hubris) `sys/kern/src/`
-- RustyHermit libOS vtable pattern → [`hermit-os/kernel`](https://github.com/hermit-os/kernel) `src/syscalls/`
-- Singularity typed channels → [SOSP 2007 paper](https://www.microsoft.com/en-us/research/publication/singularity-rethinking-the-software-stack/)
-- Tock syscall filter → [`tock/tock`](https://github.com/tock/tock) `kernel/src/process.rs`
+**Target**: 2026-08-25 | **Effort**: ~4 weeks  
+**Status**: 📋 PLANNED — see `.agents/260605-1206-phase27-direct-ipc-typed-channels-syscall-filter/`
 
-- [ ] Read Hubris `lease.rs` and RustyHermit `src/syscalls/net.rs` before starting
-- [ ] Implement vtable-based direct function call for trusted cell pairs (bypass syscall)
-- [ ] Implement Lease type with auto-revoke on call-return (replace opaque CapId for memory loans)
-- [ ] Define typed IPC request enums in `libs/api/` (replace raw `[u8; 512]` buffers)
-- [ ] Add `allowed_syscalls: &[u32]` to Cell ELF metadata; kernel enforce at dispatch
-- [ ] Benchmark: direct IPC vs. syscall IPC — confirm spec's "2–3 cycle" claim
+**Research findings (2026-06-05):**
+- Hermit vtable = function-pointer table, not true ring-bypass; real speedup is SAS = no privilege switch → direct `jalr` (~3 cycles vs ~100 ecall)
+- postcard crate recommended for typed enums into existing `[u8; 512]` buffer
+- Syscall filter: u64 bitset in TCB + `__ViCell_syscalls` ELF section (xmas-elf already supports arbitrary sections); check BEFORE handle_syscall to avoid SCHEDULER double-lock
+- Existing VFS 3-byte header needs version-gate on postcard migration
+- Raw opcodes 500-503 (BlkRead/Write) bypass ViSyscall::from() — need separate raw-id allowlist path
+
+**Phase 27-1 — Typed IPC Enums (⚠️ Law 1):**
+- [ ] Add `postcard` + `serde` to `libs/api/Cargo.toml`
+- [ ] Create `libs/api/src/ipc.rs` (VfsRequest, VfsResponse, NetRequest, NetResponse)
+- [ ] Migrate VFS service with version-gate byte (0xFF prefix)
+
+**Phase 27-2 — Syscall Allowlist (⚠️ Law 1 for allowlist_bit()):**
+- [ ] Add `allowlist_bit() -> Option<u8>` to `ViSyscall` in libs/api
+- [ ] Add `syscall_allowlist: u64` to Task TCB
+- [ ] Read `__ViCell_syscalls` ELF section in `spawn_from_path()`
+- [ ] Add check at top of `ViCell_syscall_dispatch` (lock-drop pattern to avoid double-lock)
+- [ ] Add `KEEP(*(__ViCell_syscalls))` to linker scripts
+
+**Phase 27-3 — Direct IPC vtable (⚠️ Law 1 for TrustedHandle):**
+- [ ] Create `TrustedHandle<T>` + `VfsCell`/`NetCell` markers in `libs/api/src/fast_ipc.rs`
+- [ ] Create `kernel/src/fast_ipc.rs` with `VFS_FAST_HANDLER: Option<fn>` static
+- [ ] VFS cell registers handler at init; shell uses fast path for `cat`/`ls`
+- [ ] Benchmark: direct vtable call vs ecall round-trip
 
 ### Phase 28 — Tier 2 WASM + RISC-V ePMP Cell Boundaries (P2)
 **Target**: 2026-09-22 | **Effort**: ~5 weeks
