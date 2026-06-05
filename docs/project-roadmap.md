@@ -428,14 +428,35 @@ See `.agents/260605-0958-phase24-perf-kaslr/` for detailed phase reports.
 **Status**: 📋 PLANNED
 
 ### Milestone 2.1: Complete VFS Service
-**Status**: 📋 PLANNED  
+**Status**: 📋 PLANNED — see `.agents/260605-1538-milestone-2-1-vfs-complete/`  
 **Priority**: P0
 
-- Write support for FAT32
-- Directory creation/deletion/listing
-- File permissions (read/write/execute)
-- Async file operations (non-blocking)
-- Disk quota tracking
+**Research findings (2026-06-05):**
+- FAT32: **NOT needed** at current 40MB disk scale. FAT16 is correct; fatfs auto-detects at 256MB+.
+- Permissions: **CellId-based capability gating**, not POSIX mode bits. No persistent FAT metadata.
+- Async: **Two-opcode protocol** (ReadAsync → PendingHandle, Poll) — no executor changes needed.
+- Quota: `QuotaTracker` exists in `quota.rs` but is NOT wired to the write path — easy P0 fix.
+
+**Phase 2.1-1 — Wire quota enforcement (P0, 2 days):**
+- [ ] Add `can_charge()` to QuotaTracker; call before Write/Append
+- [ ] Release quota in Unlink handler
+
+**Phase 2.1-2 — Complete directory listing (P1, 3 days):**
+- [ ] FAT16 subdirectory listing via `fatfs::Dir::iter()` for `/data/subdir`
+- [ ] Type prefix (`d:`/`f:`) in ListDir responses
+
+**Phase 2.1-3 — Capability-based access control (P1, 4 days):**
+- [ ] `AccessTable` with per-prefix `can_read`/`can_write` rules (CellId-gated)
+- [ ] Gate all mutating ops behind `can_write(sender_cell, path)`
+- [ ] Extension point for Phase 30 ELF manifests
+
+**Phase 2.1-4 — Non-blocking async read (P2, 5 days):**
+- [ ] `VfsRequest::ReadAsync` + `VfsRequest::Poll` + `VfsResponse::PendingHandle`
+- [ ] `PendingTable` in VFS global state
+
+**Phase 2.1-5 — Integration test suite (P1, 3 days):**
+- [ ] `cells/apps/vfs-test/` binary with 7 automated test scenarios
+- [ ] Quota, access control, async, directory, edge cases
 
 **Dependency**: Phase 1 (VirtIO)
 
