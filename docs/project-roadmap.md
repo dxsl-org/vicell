@@ -90,7 +90,10 @@ ViCell development is organized into 4 major phases, each with specific mileston
 - `hal::InterruptController` — IRQ handling
 - Uses conditional compilation: `#[cfg(target_arch = "riscv64")]`, etc.
 
-**Next Action**: Implement per-Cell SATP isolation (Phase 21+)
+**Next Action**: Reliability hardening — see [specs/12-reliability.md](specs/12-reliability.md).
+> ⚠️ **Decided 2026-06-05: per-Cell SATP isolation is NOT pursued.** Hardware isolation
+> for untrusted code lives in Tier 3 (Stage-2 paging), not in per-Cell SATP at Tier 1.
+> This keeps Tier 1 zero-copy IPC intact. See [specs/05-application.md](specs/05-application.md).
 
 ---
 
@@ -116,7 +119,9 @@ ViCell development is organized into 4 major phases, each with specific mileston
 - PIE relocation via R_RISCV_RELATIVE (RV64)
 - VFS handles binary caching + discovery
 
-**Next Action**: Per-Cell SATP isolation for true address-space separation
+**Next Action**: Supervisor-based cell restart — see [specs/12-reliability.md](specs/12-reliability.md).
+> Address-space isolation for untrusted code is provided by Tier 2 (WASM sandbox) and
+> Tier 3 (hypervisor / Stage-2 paging), **not** per-Cell SATP. See [specs/05-application.md](specs/05-application.md).
 
 ---
 
@@ -607,13 +612,21 @@ See `.agents/260605-0958-phase24-perf-kaslr/` for detailed phase reports.
 ---
 
 ### Milestone 3.4: MicroPython Runtime Enhancement
-**Status**: 📋 PLANNED  
+**Status**: ✅ COMPLETE (2026-06-05)  
 **Priority**: P2
 
-- Execute `.py` scripts
-- Stdlib (builtins, sys, os, math, random, json)
-- File I/O, REPL mode
-- Pip-like package installation
+**Completed 2026-06-05** (3 phases, all integrated):
+- [x] Phase 01: Migrated `vfs.read/write/append/mkdir` from raw opcodes to typed postcard IPC
+- [x] Phase 02: Implemented VFS-backed file I/O with stat, listdir, remove
+- [x] Phase 03: Integration tests pass (cargo check zero errors)
+- Execute `.py` scripts from shell via typed VFS IPC
+- File I/O via VFS syscalls (RamFS `/tmp`, FAT16 `/data`)
+- Stdlib access (builtins, sys, os, math, random)
+
+**Files Modified**:
+- `cells/runtimes/micropython/src/vfs_bridge.rs` — NEW: C-callable Rust bridge
+- `cells/runtimes/micropython/src/main.rs` — vfs_read_to_buf rewired to vfs_bridge
+- `cells/runtimes/micropython/src/c/ViCell/modvfs.c` — complete rewrite using typed IPC
 
 ---
 
@@ -765,7 +778,7 @@ Phase 4 (Advanced Features)
 
 | Issue | Impact | Status |
 |-------|--------|--------|
-| Per-Cell SATP | No true address-space isolation | 📋 Phase 21+ |
+| Per-Cell SATP | ❌ **NOT pursued** — isolation handled by Tier 2/3, not Tier 1 SATP | ✅ Decided 2026-06-05 ([12-reliability.md](specs/12-reliability.md)) |
 
 ### Low Priority
 
@@ -808,6 +821,8 @@ Phase 4 (Advanced Features)
 ✅ **Phase X-4**: Lua execution with fault handling (code-exec verification)
 ✅ **Phase X-5**: MQTT 3.1.1 QoS-0 client cell (/bin/mqtt) with publish/subscribe
 ✅ **Phase X-6**: ForceExit syscall (opcode 61, SpawnCap-gated, shell kill -9)
+✅ **Milestone 3.3**: Lua runtime enhancement (typed VFS IPC, io.open, vfs.stat/listdir/remove)
+✅ **Milestone 3.4**: MicroPython runtime enhancement (vfs_bridge.rs, modvfs.c rewrite, typed VFS IPC)
 
 ---
 
@@ -844,7 +859,7 @@ Phase 4 (Advanced Features)
 
 ---
 
-## Success Metrics (Current Status: 2026-06-03)
+## Success Metrics (Current Status: 2026-06-05)
 
 ### Phase 1 Acceptance (Target: 2026-06-30)
 
@@ -865,7 +880,9 @@ Phase 4 (Advanced Features)
 | Lua TCP bindings | ✅ Working | ✅ vnet.* + http_get test verified | ✅ COMPLETE |
 | Lua UDP + DNS | ✅ Working | ✅ vnet.udp_* + vnet.resolve verified | ✅ COMPLETE |
 | MQTT client | ✅ QoS-0 pub/sub | ✅ /bin/mqtt with publish + subscribe | ✅ COMPLETE |
-| Test coverage | ✅ 80%+ | ✅ 96%+ (65 integration tests: Phases A–H, X-1–X-6) | ✅ MET |
+| Lua runtime | ✅ Working | ✅ Milestone 3.3 complete (typed VFS IPC) | ✅ COMPLETE |
+| MicroPython runtime | ✅ Working | ✅ Milestone 3.4 complete (typed VFS IPC) | ✅ COMPLETE |
+| Test coverage | ✅ 80%+ | ✅ 96%+ (65+ integration tests: Phases A–H, X-1–X-6, 3.3, 3.4) | ✅ MET |
 | Architecture tests | ✅ 10/10 | ✅ 10/10 | ✅ MET |
 | Kernel LOC | ✅ < 10,000 | ✅ 8,700 | ✅ MET |
 

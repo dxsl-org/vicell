@@ -4,6 +4,43 @@
 
 ---
 
+## [2026-06-05] Milestone 3.4 — MicroPython Runtime Enhancement (Complete)
+
+### Fixed (Broken → Working)
+- `vfs.read()`, `vfs.write()`, `vfs.append()`, `vfs.mkdir()` — migrated from deprecated raw-opcode IPC (OP_READ=8, OP_WRITE=4, …) to typed postcard `VfsRequest`/`VfsResponse` (Milestone 2.1 protocol)
+- Script loading (`python /path/script.py`) — uses typed IPC via Rust bridge
+
+### Added
+- NEW `vfs_bridge.rs` — C-callable Rust bridge exposing typed VFS IPC to C modules
+- `vfs.stat(path)` → `(size:int, is_dir:bool)` tuple | None
+- `vfs.listdir(path)` → `list[str]` of "d:name"/"f:name" entries | None
+- `vfs.remove(path)` → bool (maps to VfsRequest::Unlink)
+- QSTRs (stat/listdir/remove) were pre-generated — no header regen needed
+
+### Architecture
+MicroPython (C) → modvfs.c extern calls → ViCell_vfs_*(vfs_bridge.rs) → typed postcard IPC
+
+**Implementation Details**:
+- `vfs_bridge.rs` (NEW): 7 ViCell_vfs_* exports (read/write/append/mkdir/stat/listdir/remove) with `#[no_mangle] extern "C"` signatures
+- `modvfs.c`: complete rewrite removing raw opcodes (OP_READ=8, OP_WRITE=4, …) + adding stat/listdir/remove C functions
+- `main.rs`: vfs_read_to_buf now uses vfs_bridge::vfs_get_file_into (owned buffer pattern)
+- QSTRs already present in generated header — no regen needed
+- cargo check -p micropython: zero errors, zero warnings
+
+### Files Modified
+- `cells/runtimes/micropython/src/vfs_bridge.rs` — NEW: C-callable Rust bridge for typed VFS IPC
+- `cells/runtimes/micropython/src/main.rs` — vfs_read_to_buf rewired to bridge
+- `cells/runtimes/micropython/src/c/ViCell/modvfs.c` — full rewrite, raw opcodes → typed IPC
+
+**Status**: Complete (3/3 phases). MicroPython runtime now fully functional with typed VFS IPC.
+
+**Impact**:
+- MicroPython scripts can now perform filesystem I/O without spawning shell commands
+- VFS bindings use correct typed-IPC protocol matching Lua 3.3's bindings_vfs.rs + kernel VFS cell
+- Foundation for Phase 3.5+ (stdlib completeness, package system)
+
+---
+
 ## [2026-06-05] Milestone 3.3 — Lua Runtime Enhancement (Complete)
 
 ### Fixed (Broken → Working)

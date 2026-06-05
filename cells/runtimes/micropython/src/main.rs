@@ -5,10 +5,7 @@ extern crate ostd;
 extern crate api;
 
 mod net_bridge;
-
-/// Net service cell endpoint (boot order: vfs=3, config=4, input=5, net=6).
-const VFS_ENDPOINT: usize = 3;
-const OP_READ: u8 = 8;
+mod vfs_bridge;
 
 // MicroPython embed API — provided by embed_util.c (ports/embed/port).
 extern "C" {
@@ -25,24 +22,12 @@ extern "C" {
 /// GC heap for the Python interpreter.
 static mut HEAP: [u8; 256 * 1024] = [0u8; 256 * 1024];
 
-/// Read up to `buf.len()` bytes from a VFS path via OP_READ IPC.
+/// Read file content from VFS into `buf` via typed postcard IPC.
 ///
-/// Returns byte count (zero-scan from reply; sys_recv returns sender_id, not length).
-/// Matches the pattern used by the Lua cell's `vfs_read_to_buf`.
+/// Delegates to `vfs_bridge::vfs_get_file_into` which sends `VfsRequest::GetFile`
+/// and copies the `DataPtr` reply — replacing the broken raw `OP_READ=8` protocol.
 fn vfs_read_to_buf(path: &str, buf: &mut [u8]) -> usize {
-    let pb = path.as_bytes();
-    let pl = pb.len().min(253) as u8;
-    let mut req = [0u8; 256];
-    req[0] = OP_READ;
-    req[1] = pl;
-    req[2..2 + pl as usize].copy_from_slice(&pb[..pl as usize]);
-    ostd::syscall::sys_send(VFS_ENDPOINT, &req[..2 + pl as usize]);
-    buf.fill(0);
-    match ostd::syscall::sys_recv(0, buf) {
-        ostd::syscall::SyscallResult::Ok(_) =>
-            buf.iter().rposition(|&b| b != 0).map(|i| i + 1).unwrap_or(0),
-        _ => 0,
-    }
+    vfs_bridge::vfs_get_file_into(path, buf)
 }
 
 #[no_mangle]
@@ -107,7 +92,7 @@ pub extern "C" fn main(_argc: isize, _argv: *const *const u8) -> isize {
     }
 
     // No args: interactive REPL.
-    ostd::io::println("MicroPython v1.24.1 on ViOS (Cellular SAS)");
+    ostd::io::println("MicroPython v1.24.1 on ViCell (Cellular SAS)");
     ostd::io::println("Type \"help()\" for more information.");
     // SAFETY: interpreter is initialised above; pyexec_friendly_repl runs the REPL.
     unsafe { pyexec_friendly_repl() };
