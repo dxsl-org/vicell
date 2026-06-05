@@ -319,19 +319,31 @@ See `.agents/260605-0958-phase24-perf-kaslr/` for detailed phase reports.
 - [ ] Benchmark: direct vtable call vs ecall round-trip
 
 ### Phase 28 — Tier 2 WASM + RISC-V ePMP Cell Boundaries (P2)
-**Target**: 2026-09-22 | **Effort**: ~5 weeks
-**Learn from**:
-- Iso-UniK ePMP "reverse priority isolation" → [Springer paper](https://link.springer.com/article/10.1186/s42400-020-00051-9)
-- Midori failure: Tier 3 VM = mandatory escape hatch
-- RedLeaf limitations: [PLOS 2021 paper](https://arkivm.github.io/publications/2021-plos-rust-isolation.pdf)
+**Target**: 2026-09-22 | **Effort**: ~5 weeks  
+**Status**: 📋 PLANNED — see `.agents/260605-1406-phase28-wasm-cells-epmp/`
 
-- [ ] Read "Isolation in Rust: What is Missing?" (2021) before designing isolation boundary
-- [ ] Implement RISC-V ePMP (Smepmp) enforcement: 1 PMP entry per Cell
-- [ ] "Reverse priority isolation": kernel region = most restricted PMP entry
-- [ ] Integrate WasmEdge `no_std` or Wasmtime `no_std` for RISC-V
-- [ ] WASM cells run in linear memory sandbox — Spectre-isolated from Tier 1
-- [ ] Load `.wasm` cells via ELF loader path (wrapped in custom section)
-- [ ] Expose WASI 2.0 Component Model interfaces for Cell contracts
+**Research findings (2026-06-05):**
+- WasmEdge: **discard** (C++ + libc, incompatible with no_std bare-metal)
+- **wasmi v1** chosen: pure Rust, no_std + alloc, RISC-V confirmed, fuel metering, 2 deps
+- WASI 2.0 Component Model: **skip** (unstable toolchain, canonical ABI overhead) — use 4 custom `vi.*` imports
+- Loading: WASM cell = Tier 1 Rust host ELF that reads `.wasm` from VFS (`/data/apps/*.wasm`)
+- ePMP: **blocked by M-mode architecture** — PMP CSRs require M-mode, violations trap to M-mode. Full per-Cell ePMP deferred; static boot-time kernel protection as optional Phase 28-4
+
+**Phase 28-1 — wasmi integration:**
+- [ ] Add wasmi v1 (`no_std`, `prefer-btree-collections`) to `cells/drivers/wasm/Cargo.toml`
+- [ ] Implement `WasmRuntime::new()`, `load_module()`, `new_store()` with fuel metering
+
+**Phase 28-2 — `vi.*` host imports:**
+- [ ] `vi.send(target, ptr, len)`, `vi.recv(ptr, max_len, sender_out)`, `vi.log(ptr, len)`, `vi.exit(code)`
+- [ ] Register via `Linker::func_wrap` in `imports.rs`
+
+**Phase 28-3 — WASM host cell (`/bin/wasm`):**
+- [ ] Tier 1 Rust ELF that reads `.wasm` path from argv, loads via VFS, runs via wasmi
+- [ ] Fuel-cooperative loop: `OutOfFuel` trap → `set_fuel()` + `yield_cpu()`
+
+**Phase 28-4 — PMP foundation (optional, P2):**
+- [ ] `hal/arch/riscv/src/common/pmp.rs` with NAPOT helpers + `init_static_regions()`
+- [ ] Static kernel R-X / data R-W protection at boot (if M-mode accessible)
 
 ### Phase 29 — Heap Snapshotting / Instant On (P2)
 **Target**: 2026-10-06 | **Effort**: ~3 weeks
