@@ -157,10 +157,24 @@ Erlang/OTP-style "let it crash + restart".
       test). Live-verified: `exit` → shell faults (reason=MAX) → died/restarting/restarted, new tid +
       prompt, exactly 1 fault, 0 panics.
 - [ ] Remaining polish (not blocking): `parent_cell_id` for finer watch-gating; app-level liveness
-      heartbeat. Separate shell bug: `exit` builtin FAULTS (scause=0xf) — supervisor restarts it
-      regardless (Transient/Permanent both restart on the abnormal exit).
+      heartbeat. **Shell `exit` fault FIXED** (commit 844409f4): its root cause was the cell
+      heap leak below — the shell OOM'd during command processing and store-faulted. With the
+      freeing allocator + a direct `sys_exit`, `exit` now exits cleanly (reason 0) and init's
+      Transient policy keeps it down; a crash still restarts.
 
 ### 4.4 — Stop slow death (P1)
+- [x] **Freeing cell heap allocator (userspace)** — DONE 2026-06-06 (commit 844409f4). The biggest
+      slow-death source: `ostd`'s allocator was a bump allocator whose `dealloc` was a NO-OP, so
+      EVERY cell leaked all allocations and eventually exhausted its 4 MiB arena → null alloc →
+      store-fault. A guaranteed death for any long-running cell (shell, all services). Replaced with
+      `linked_list_allocator` (kernel-shared crate) via a `static mut Heap` — no spinlock, because a
+      `LockedHeap`'s atomic write-back faults when the const-init allocator static lands in a cell's
+      read-only RELRO segment. OOM now exits the cell for supervised restart (fresh heap) instead of
+      hanging. Companion linker-script fix (all 10 cell `.ld`): place `.data.rel.ro`/`.got` in
+      writable `.data`, and page-align trailing read-only sections off `.bss`'s last page (the loader
+      maps that shared page RW for `.bss` then remaps it read-only for the manifest/`.eh_frame`,
+      faulting writes to `.bss` globals such as the heap state). Verified: 0 boot faults; cells can
+      now run indefinitely.
 - [x] **Reap zombies → free dead-cell stacks** — DONE 2026-06-06 (commit 6bb1cc3a). Zombies were
       never removed, so `Stack::drop` never ran and every cell death leaked its kernel+user stacks.
       `Scheduler::take_reapable_zombies` (called from `yield_cpu`, dropped outside the SCHEDULER lock
