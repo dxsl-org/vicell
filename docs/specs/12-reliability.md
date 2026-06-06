@@ -101,12 +101,12 @@ Ordered by ROI for never-die. Items are independent of the (dropped) SATP decisi
       SBI SRST **cold reboot** (`sbi::system_reset`) after printing diagnostics, falling back to the
       halt loop only if firmware lacks SRST. Cell faults unaffected. Verified in QEMU (injected panic
       reboots vs freezes; normal boot still reaches `ViCell >`).
-- [ ] **Re-enable stack guard pages** — BLOCKED (deeper than "cheap"; attempted 2026-06-06, reverted).
-      Unmapping the guard frame faults boot: the kernel writes to `base_addr` during task
-      stack/context setup → store page fault (scause=15) at `stval=base_addr`, `sepc≈0x80204eec`.
-      Prerequisite: find & relocate that write off the guard frame (context/trap-frame init must not
-      touch `base_addr`), OR give stacks user-VAs disjoint from the identity map. See the DEFERRED
-      note in [kernel/src/task/stack.rs](../../kernel/src/task/stack.rs).
+- [x] **Stack guard pages** — DONE 2026-06-06 (commit a8fa971c). Root cause of the earlier block
+      found + fixed: the spawn paths zeroed the stack from `kstack.base` (the guard frame itself)
+      for `STACK_FRAMES` pages — writing *through* the guard. Now zero from `base+PAGE_SIZE` (the
+      usable pages only), then unmap the guard frame + `sfence.vma` in `stack.rs::allocate`. A stack
+      overflow now traps. Verified: boot reaches `ViCell >` with guards active, 0 unmap failures.
+      Remaining verification: a deliberate-overflow test cell to confirm the trap fires (follow-up).
 
 ### 4.2 — Detection (P0)
 - [x] **Kernel watchdog** — DONE 2026-06-06 (commit 0c34ff8f). `pick_next` charges a `run_ticks`
@@ -117,11 +117,12 @@ Ordered by ROI for never-die. Items are independent of the (dropped) SATP decisi
       (verified: a naive version killed bench/shell; RT-only fires 0× on a normal boot+bench). The
       RT-runaway kill path is logically exercised every tick; a dedicated RT-spin test cell is the
       remaining verification.
-- [ ] **Deadline enforcement.** Wake `Recv{deadline}` tasks whose deadline passed (closes
-      infinite-block-on-dead-peer). SIMPLER than first thought: the dispatch already stores an
-      ABSOLUTE deadline (`system_ticks() + timeout`, [syscall.rs](../../kernel/src/task/syscall.rs)),
-      so just extend `pick_next`'s existing `Sleeping{until}` sweep to also sweep `Recv{deadline}`
-      and return a timeout error. No clock-unit mismatch / no libs/api change.
+- [x] **Deadline enforcement** — DONE 2026-06-06 (commit f2623057). `pick_next` sweeps
+      `Recv{deadline}` alongside `Sleeping{until}`; a timed-out receiver is woken with the timeout
+      sentinel (`regs[10]=0`, matching ostd `sys_recv_timeout`'s `Ok(0)`). Closes
+      infinite-block-on-dead-peer. Also reconciled the unit (10ms scheduler ticks; ostd doc was
+      stale at 100ns — no cell calls it yet, so defined cleanly). Verified: no boot regression;
+      positive timeout-fires path is unexercised until a cell uses RecvTimeout (follow-up test).
 
 ### 4.3 — Recovery: Supervisor Tree (P0, highest ROI)
 ~70% latent in the architecture today. Erlang/OTP-style "let it crash + restart". Needs 4
