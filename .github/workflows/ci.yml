@@ -19,6 +19,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Fast static guard (no build): every Cell's linker base must be off the kernel
+      # MMIO identity maps, below RAM, and unique. In the SAS all cells share one page
+      # table, so a colliding base silently clobbers MMIO/neighbour PTEs. Runs first so
+      # a layout regression fails in seconds, before the expensive clippy/build.
+      - name: Check Cell VA layout (SAS)
+        run: python3 scripts/check-cell-va-layout.py
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
