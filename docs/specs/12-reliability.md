@@ -158,11 +158,16 @@ Erlang/OTP-style "let it crash + restart".
       zombie is reaped (outside the SCHEDULER lock). Race-safe with same-VA respawn: `CellSegments::drop`
       only unmaps a VA that still resolves to its own frame (else respawn already re-pointed it).
       Verified: 3 crash→reclaim→restart cycles, all restarts reach the prompt, 0 panics.
-- [ ] **`load_segments` overwrite-guard** (reject a cell whose load VA is already mapped — would have
-      caught the bench-VA collision loudly; core SAS silent-corruption defense). STILL blocked: reclaim
-      is LAZY (reaper), so a dead cell's VA can persist past a same-VA respawn, which currently works
-      via `map_page` silently overwriting. Needs **eager teardown** (unmap a dying cell's segments at
-      death, before its VA can be reused) before the guard can be enabled without breaking respawn.
+- [ ] **`load_segments` overwrite-guard** (reject a cell whose load VA is already mapped — the SAS
+      silent-corruption defense that would have caught the bench-VA collision). ATTEMPTED + REVERTED
+      2026-06-06: added eager-teardown (`CellSegments::eager_unmap` at death) + a `virt_to_phys`
+      guard at load. It **false-rejected vfs (`0x2000000`) and bench (`0xC000000`) at their FIRST
+      page on a fresh boot** — `virt_to_phys` reports those cell base-VAs as already-mapped *before
+      the cell loads*. Unexplained (only some cells; not the identity map, which is ≥0x8000_0000).
+      MUST investigate first (dump the PTE for `0x2000000` before vfs's load): either a real latent
+      VA-layout collision (large BSS overlapping a neighbour, like bench was) or a `virt_to_phys`
+      quirk. Until understood, a VA-collision guard is unsafe. (Intra-ELF segment-boundary overlaps
+      are a *separate* benign case the guard must also skip via the cell's own `mapped` set.)
 - [ ] **GC for async-pinned buffers** orphaned by a crashed owner (else 24/7 robots leak to OOM).
       Needs owner→pin tracking (the metadata registry that does not yet exist).
 
