@@ -135,14 +135,17 @@ Erlang/OTP-style "let it crash + restart".
       > Prereq bug fixed first: init had a pre-existing instruction-fault during boot — the bench
       > cell lacked a linker script and clobbered init's `.text` PTE (commit e6798320). Also the
       > boot gate's fault pattern was broken and hid it (fixed). Both were masking init's death.
-- [ ] **Full multi-child supervision** — needs **wait-any**: a `Syscall::NotifyOnExit { watched }`
-      push notification (a `libs/api` change → **Law 1, 2× confirm**) so one supervisor can watch
-      vfs/net/config/... simultaneously (sys_wait blocks on one child only). Plus: parent tracking
-      (`parent_cell_id` on Task, also gates who may watch whom), restart policies
-      (permanent/transient/temporary) + intensity/backoff, stable service-ID registry (so a
-      restarted vfs/net keeps its well-known endpoint), and a dedicated `cells/services/supervisor`.
-      Shell-side note: the shell's `exit` builtin currently FAULTS (scause=0xf) instead of clean
-      sys_exit — a separate shell bug; the supervisor restarts it correctly either way.
+- [x] **Full multi-child supervision** — DONE 2026-06-06 (commits ca06abab + e1cf1abb).
+      `ViSyscall::NotifyOnExit = 204` (Law 1, 2× confirmed) gives wait-any: `exit_task` delivers a
+      death notification to each watcher (wakes a parked `Recv` returning the dead tid, or queues to
+      `Task::pending_deaths` for the next `Recv` — never missed during respawn); SpawnCap-gated.
+      init now supervises ALL services (vfs/config/input/net/compositor/shell) with one `sys_recv`
+      loop, restarting whichever dies + re-arming. Verified: boot reaches `ViCell >` "supervising
+      services"; exiting the shell → "service died — restarting"/"service restarted", 2nd prompt, 0
+      panics. Remaining polish (not blocking): restart policies (permanent/transient/temporary) +
+      time-windowed intensity/backoff (needs a ticks syscall), stable service-ID registry (so a
+      restarted vfs/net keeps its endpoint for clients), `parent_cell_id` for finer watch-gating.
+      Separate shell bug: `exit` builtin FAULTS (scause=0xf) — supervisor restarts it regardless.
 
 ### 4.4 — Stop slow death (P1)
 - [x] **Reap zombies → free dead-cell stacks** — DONE 2026-06-06 (commit 6bb1cc3a). Zombies were
