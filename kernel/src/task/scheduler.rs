@@ -156,11 +156,14 @@ impl Scheduler {
         let stack_top = kstack.top;
         let stack_base = kstack.base;
 
-        // Zero the stack
-        // SAFETY: We own the allocated stack memory.
+        // Zero the usable stack pages. Skip the guard frame at `stack_base` (it is
+        // unmapped — a write there faults); the usable region starts one page above
+        // base and spans exactly STACK_FRAMES pages. (The old code zeroed from base,
+        // which clobbered the guard AND missed the top usable page.)
+        // SAFETY: we own these freshly-allocated, mapped frames exclusively.
         unsafe {
             core::ptr::write_bytes(
-                stack_base as *mut u8,
+                (stack_base + crate::memory::paging::PAGE_SIZE) as *mut u8,
                 0,
                 STACK_FRAMES * crate::memory::paging::PAGE_SIZE,
             );
@@ -217,8 +220,10 @@ impl Scheduler {
         // SAFETY: We own the allocated stack memory exclusively. The pointer is valid.
         // Setting up task context with valid register values for thread initialization.
         unsafe {
+            // Skip the guard frame at `stack_base` (unmapped); zero only the
+            // STACK_FRAMES usable pages that begin one page above base.
             core::ptr::write_bytes(
-                stack_base as *mut u8,
+                (stack_base + crate::memory::paging::PAGE_SIZE) as *mut u8,
                 0,
                 STACK_FRAMES * crate::memory::paging::PAGE_SIZE,
             );

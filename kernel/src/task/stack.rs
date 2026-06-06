@@ -105,9 +105,8 @@ impl Stack {
         let usable_start_idx = if guard { 1 } else { 0 };
 
         // SAS identity map: all RAM is already identity-mapped RWX by
-        // init_kernel_paging. The usable pages are re-mapped below. The guard
-        // frame (base_addr) is left mapped for now — see the GUARD PAGE DEFERRED
-        // note after the mapping loop.
+        // init_kernel_paging. The usable pages are re-mapped below, then the guard
+        // frame (base_addr) is unmapped after the loop so an overflow traps.
 
         // Usable Pages
         let flags = if user_mode {
@@ -132,15 +131,25 @@ impl Stack {
             paging::map_page(allocator, addr, addr, flags).map_err(|_| ViError::OutOfMemory)?;
         }
 
-        // GUARD PAGE DEFERRED: unmapping base_addr here makes boot fault with a
-        // store page fault (scause=15) at stval=base_addr — the kernel WRITES to
-        // the guard frame during task stack/context setup (verified 2026-06-06,
-        // sepc≈0x80204eec). Re-enabling the guard requires first finding and
-        // relocating that write (the context/trap-frame init must not touch
-        // base_addr), or giving stacks user-VAs disjoint from the identity map.
-        // Until then the guard frame stays mapped (no overflow protection).
-        // Tracked in docs/specs/12-reliability.md §4.1.
-        let _ = guard;
+        // Guard page: drop the bottom frame's pre-existing identity mapping so a
+        // stack overflow (a write below base_addr+PAGE_SIZE) faults instead of
+        // silently corrupting the neighbouring frame. The spawn paths zero only
+        // the usable pages (skipping base_addr), so nothing legitimately writes to
+        // the guard frame. The frame stays owned by this Stack (freed in Drop);
+        // only its PTE is cleared. unmap_page locks KERNEL_ROOT (not FRAME_ALLOCATOR,
+        // which we still hold) — no deadlock.
+        if guard {
+            if paging::unmap_page(base_addr).is_err() {
+                // Non-fatal: stack is still usable, just unguarded. Loud so a
+                // silently-unprotected stack is never mistaken for a guarded one.
+                error!("Stack guard NOT active: unmap of guard frame 0x{:X} failed", base_addr);
+            } else {
+                // Flush the stale identity TLB entry so the unmap takes effect now.
+                // SAFETY: sfence.vma is a privileged S-mode fence; always safe to issue.
+                #[cfg(target_arch = "riscv64")]
+                unsafe { core::arch::asm!("sfence.vma") };
+            }
+        }
 
         // Calculate Top (Stack grows down)
         // Top is at the END of the allocated range.
