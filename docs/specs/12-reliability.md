@@ -109,10 +109,19 @@ Ordered by ROI for never-die. Items are independent of the (dropped) SATP decisi
       note in [kernel/src/task/stack.rs](../../kernel/src/task/stack.rs).
 
 ### 4.2 — Detection (P0)
-- [ ] **Deadline enforcement in the scheduler.** Make `RecvTimeout`'s `deadline` real: on each
-      timer tick, wake/timeout tasks whose deadline passed. Closes infinite-block-on-dead-peer.
-- [ ] **Kernel watchdog tick.** Detect a cell that monopolizes the CPU (esp. a `RealTime`-priority
-      `loop{}`) and force-yield / kill it. Prevents livelock = "alive but paralyzed".
+- [x] **Kernel watchdog** — DONE 2026-06-06 (commit 0c34ff8f). `pick_next` charges a `run_ticks`
+      per 10ms tick a task is found Running, reset on voluntary block AND on every syscall entry
+      (cells are poll-based, so a syscall = progress). Crossing the 5s budget terminates the cell
+      via `exit_task` + audit. **Scoped to RealTime priority only**: under preemptive round-robin,
+      Normal/Background compute-heavy cells don't starve others, so killing them would false-positive
+      (verified: a naive version killed bench/shell; RT-only fires 0× on a normal boot+bench). The
+      RT-runaway kill path is logically exercised every tick; a dedicated RT-spin test cell is the
+      remaining verification.
+- [ ] **Deadline enforcement.** Wake `Recv{deadline}` tasks whose deadline passed (closes
+      infinite-block-on-dead-peer). SIMPLER than first thought: the dispatch already stores an
+      ABSOLUTE deadline (`system_ticks() + timeout`, [syscall.rs](../../kernel/src/task/syscall.rs)),
+      so just extend `pick_next`'s existing `Sleeping{until}` sweep to also sweep `Recv{deadline}`
+      and return a timeout error. No clock-unit mismatch / no libs/api change.
 
 ### 4.3 — Recovery: Supervisor Tree (P0, highest ROI)
 ~70% latent in the architecture today. Erlang/OTP-style "let it crash + restart". Needs 4
