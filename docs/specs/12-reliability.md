@@ -74,7 +74,7 @@ embedded/robotics OS (QNX/seL4 class), not relative to zero.
 | Axis | Score | What exists | What's missing |
 |------|------:|-------------|----------------|
 | 1. Fault isolation | **~85%** | `panic_handler` isolates cell panics ([kernel/src/main.rs](../../kernel/src/main.rs)); trap handler kills faulting cell not kernel ([hal/arch/riscv/src/rv64/trap.rs](../../hal/arch/riscv/src/rv64/trap.rs)); per-cell heap quota ([kernel/src/memory/cell_quota.rs](../../kernel/src/memory/cell_quota.rs)); stack **guard pages active** ([stack.rs](../../kernel/src/task/stack.rs)); load-time VA-overwrite guard + build-time VA-layout CI check; async-pin/grant leak closed as moot (§4.4) | Depends entirely on zero-unsafe-bug in kernel/HAL; no per-cell SATP (by decision) |
-| 2. Fault detection | **~60%** | Audit ring (`CellFault`/`CellExit`); CPU-monopoly watchdog (RT-only, reset-on-syscall); `RecvTimeout` deadline sweep **now checked** in `pick_next` (woken with timeout); RT `RtDeadlineMiss` + `RtCpuOverrun` audit events ([kernel/src/audit.rs](../../kernel/src/audit.rs)) | No app-level heartbeat/liveness ping; no external HW watchdog |
+| 2. Fault detection | **~78%** | Audit ring (`CellFault`/`CellExit`); CPU-monopoly watchdog (RT-only, reset-on-syscall); `RecvTimeout` deadline sweep checked in `pick_next`; **liveness heartbeat** (`Heartbeat=207` → `CellHung` kill→restart, catches silent hangs any priority); RT `RtDeadlineMiss`/`RtCpuOverrun` audit events ([kernel/src/audit.rs](../../kernel/src/audit.rs)) | No external HW watchdog; heartbeat is opt-in (only net adopts it so far) |
 | 3. Fault recovery | **~88%** | Full multi-child supervisor via `NotifyOnExit` (init auto-restarts vfs/net/shell/…); per-service restart **policies** (permanent/transient/temporary) + **time-windowed restart intensity** (crash-storm escalation); exit-reason delivered as recv payload; service-ID registry (clients reconnect across respawn); hotswap + state-stash | App-level liveness heartbeat; cross-node failover (out of scope for single device) |
 | 4. Realtime guarantee | **~45%** | 3-level priority preempt + zero-latency SSIP; RT watchdog; deadline-miss + CPU-overrun **observability** ([kernel/src/task/scheduler.rs](../../kernel/src/task/scheduler.rs)) | EDF / deadline enforcement / CPU-budget — **hardware-data-gated** (QEMU TCG has no cycle-accurate timing); WCET unmeasured |
 | 5. Continuous operation | **~50%** | 5-step hotswap protocol ([kernel/src/cell/hotswap.rs](../../kernel/src/cell/hotswap.rs)); snapshot warm-boot | Partial rollback, message-queue preservation incomplete, manual trigger |
@@ -109,6 +109,15 @@ Ordered by ROI for never-die. Items are independent of the (dropped) SATP decisi
       Remaining verification: a deliberate-overflow test cell to confirm the trap fires (follow-up).
 
 ### 4.2 — Detection (P0)
+- [x] **Liveness heartbeat (silent-hang detection)** — DONE 2026-06-06 (commit b5c47c62). The
+      watchdog only catches RT compute hogs; a cell that deadlocks or wedges in a stuck loop at any
+      priority is "alive but paralyzed" and invisible to it. A cell opts in via `Heartbeat = 207`
+      (Law 1, open syscall, `a0 = interval_ticks`, 0 = disable), asserting it will beat again within
+      the interval; `pick_next` arms `Task.heartbeat_deadline` and terminates any cell that lapses
+      (`CellHung` audit) → the death flows through `exit_task` so the supervisor restarts it. The net
+      service is the reference adopter (beats once per poll iteration). **Live-verified both ways**: a
+      healthy beating net survives boot (0 faults); an injected hang → "missed liveness deadline —
+      terminating (hung)" → supervisor restart, no collateral, 0 panics.
 - [x] **Kernel watchdog** — DONE 2026-06-06 (commit 0c34ff8f). `pick_next` charges a `run_ticks`
       per 10ms tick a task is found Running, reset on voluntary block AND on every syscall entry
       (cells are poll-based, so a syscall = progress). Crossing the 5s budget terminates the cell
