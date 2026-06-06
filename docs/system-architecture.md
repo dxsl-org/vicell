@@ -1,15 +1,15 @@
-# ViOS System Architecture
+# ViCell System Architecture
 
-**Audience**: Developers new to ViOS  
+**Audience**: Developers new to ViCell  
 **Level**: High-level (conceptual + key components)  
 **Version**: 0.2.1-dev (Mycelium Era)  
-**Last Updated**: 2026-06-03 (Phase G complete)
+**Last Updated**: 2026-06-05 (Phase X-3 complete)
 
 ---
 
 ## Core Philosophy
 
-ViOS is **NOT** a traditional Linux-style OS. It uses:
+ViCell is **NOT** a traditional Linux-style OS. It uses:
 
 - **Cellular Architecture**: Software organized as **Cells** (not processes), all sharing one address space
 - **Language-Based Isolation**: Rust's type system (not hardware MMU) provides isolation
@@ -86,6 +86,8 @@ Kernel Space: (virt addr 0x8020_0000+)
 - Each gets ~10ms time slice (configurable)
 - Yield/preempt on timer interrupt
 
+> **Roadmap**: Round-robin 10 ms timeslice is the current baseline. Phase 25 will add three priority levels (RealTime / Normal / Background) to prevent Tier 1 robot-control tasks from being preempted by batch workloads.
+
 **Task Control Block (TCB)**:
 ```rust
 struct Task {
@@ -108,6 +110,8 @@ struct Task {
 ### 4. **IPC System** (`kernel/src/task/ipc.rs`)
 
 10 core syscalls (vs. Linux's 300+):
+
+> **Implementation Note**: The architecture spec (01-core.md) describes inter-cell IPC as direct function calls via vtable (2–3 CPU cycles). The current implementation uses kernel-mediated syscall message passing (~100–1000 cycles per round-trip), equivalent to a lightweight microkernel. Direct vtable IPC is planned for Phase 27 (trusted-cell fast path) once the Metadata Registry is integrated with the linker.
 
 | Syscall | Purpose |
 |---------|---------|
@@ -472,7 +476,7 @@ cells/runtimes/micropython/ — MicroPython 1.24.1 via FFI (✅ REPL verified)
                ↓
 ┌─────────────────────────────────────────────────┐
 │ cells/apps/shell/src/main.rs: main()            │
-│ 15. Print prompt: "viosh> "                     │
+│ 15. Print prompt: "ViCellh> "                     │
 │ 16. Read user input (async)                     │
 │ 17. Parse command (echo, cat, ls, etc.)         │
 │ 18. Send IPC to vfs/config services             │
@@ -576,9 +580,9 @@ Physical RAM: 0x8000_0000–0x8800_0000 (default: 128 MB in QEMU)
 
 ---
 
-## Current Status (2026-06-03)
+## Current Status (2026-06-05)
 
-### ✅ Implemented (Phases 01, 02, 05, 10, 14, 15, 16, 18, 20, C, D, E, F)
+### ✅ Implemented (Phases 01, 02, 05, 10, 14, 15, 16, 18, 20, C, D, E, F, G, H, A, B, X-1, X-2, X-3)
 - **RV64, AArch64, x86_64** HAL with paging (SV39/4K/4K respectively)
 - **Nano kernel** (~8,700 LOC) with round-robin scheduler
 - **48 syscall variants** (IPC, memory, task, FS, GPU, network, state) + **Block I/O capability gate**
@@ -586,31 +590,53 @@ Physical RAM: 0x8000_0000–0x8800_0000 (default: 128 MB in QEMU)
 - Frame allocator (bitmap) and virtual memory
 - ELF loader with PIE relocation support
 - **VFS service** (RamFS read/write, FAT16 write/read/delete via block device)
+  - **10 IPC opcodes** (0x01–0x0A): OP_GET_FILE, OP_LIST_DIR, OP_STAT, OP_WRITE, OP_MKDIR, OP_RMDIR, OP_UNLINK, **OP_READ, OP_RMDIR_RECURSIVE, OP_APPEND**
   - **4-byte OP_WRITE header** (u16 content length, up to 65KB writes per message)
+  - **OP_READ (0x08)** — read file bytes (up to 480, path → bytes)
+  - **OP_APPEND (0x0A)** — seek-to-end append write
+  - **OP_RMDIR_RECURSIVE (0x09)** — recursive directory delete (restricted to /data/ path prefix)
   - **OP_UNLINK** for /data/ flat files and nested paths
   - **/data/ subdirectories** with mkdir -p semantics and full path traversal
   - **OP_MKDIR** for /data/ nested directory creation
 - **FAT16 filesystem** (LBA 0–81919 on VirtIO disk, /data/* paths persistent with subdir support)
 - **Config service** (KV store with ViStateTransfer)
-- **Interactive shell** with pipes, redirection, background jobs, history, aliases, echo built-in
-- **Lua 5.4** runtime (multi-line REPL, VFS I/O FFI, ViStateTransfer) — verified
-- **MicroPython 1.24.1** runtime (REPL, 256KB heap) — verified
+- **Interactive shell** (parser+executor) with:
+  - Pipes, redirection (>, >>), background jobs (&), history, aliases
+  - for/in/do/done, while/do/done, if/then/else/fi loops
+  - case/esac conditional, shell functions (name() {}), **command substitution $(cmd)**
+  - **Function arguments** ($1, $2, ..., $9)
+  - **read built-in** for input
+  - 45+ built-in commands
+- **Lua 5.4** runtime (multi-line REPL, VFS I/O FFI, ViStateTransfer, network bindings) — verified
+- **MicroPython 1.24.1** runtime (REPL, 256KB heap, vnet+DNS+UDP modules) — verified
 - **Keyboard input** (VirtIO, multi-key support, no deadlock)
-- **Network** (smoltcp, DHCP verified, data-path stub)
+- **Network** (smoltcp TCP/UDP/DNS, DHCP verified, full data-path TCP client+server)
+  - **TCP client**: SOCKET_TCP, CONNECT, SEND, RECV, CLOSE
+  - **TCP server**: LISTEN (0x17), ACCEPT (0x18) opcodes
+  - **UDP**: SOCKET_UDP, SENDTO (0x21), RECVFROM (0x22), BIND
+  - **DNS resolver**: static table → IPv4 literal → UDP A-record query
+  - **net-tools binaries** (6 total): ping, curl (HTTP/1.0), wget, nc (multi-conn relay), httpd, mqtt (skeleton)
 - **GPU framebuffer** (opt-in, basic compositor)
 - **HotSwap orchestrator** (5-step live Cell replacement, kernel + shell + config + vfs verified)
 - **Workspace consolidated** with 0 cargo warnings
 - **CI/CD pipeline** with architecture validation (10/10 score)
+- **VirtIO VA→PA mapping fix** (Phase X-1) — resolves multi-sector write issues
 
 ### 🚧 In Progress / Partial
-- **Network opcodes** (SOCKET_STATE 0x19 added; LISTEN/ACCEPT partial; full multi-connection server deferred)
+- **MQTT binary** (skeleton added; implementation deferred)
 - **KASLR** (not implemented)
 
 ### ⏳ Planned (Later phases)
-- Per-Cell SATP (address space isolation)
+- Reliability track: stack guard pages, deadline/watchdog enforcement, supervisor-based
+  cell restart, reboot-on-kernel-panic — see [specs/12-reliability.md](specs/12-reliability.md)
+- Tier 3 hypervisor cell (Stage-2 paging) — hardware isolation for untrusted/legacy code
+- Ed25519 signing + secure-boot loader gate (enforces the Tier 1 "signed cells only" model)
 - Audit logging
-- Ed25519 signing (spec only)
 - Additional architecture ports
+
+> ⚠️ **Per-Cell SATP isolation at Tier 1 is explicitly NOT pursued** (decided 2026-06-05).
+> Hardware isolation belongs to Tier 3 (per-VM Stage-2 paging), not per-cell page tables.
+> See *Key Design Decisions* below and [specs/05-application.md](specs/05-application.md).
 
 ---
 
@@ -620,12 +646,32 @@ Physical RAM: 0x8000_0000–0x8800_0000 (default: 128 MB in QEMU)
 |----------|-----------|
 | Single Address Space | Reduce context-switch overhead, simplify memory management |
 | Language-Based Isolation | Rust's type system enforces isolation better than hardware |
+| **No per-Cell SATP (Tier 1)** | Per-cell page tables would break Tier 1 zero-copy IPC and add `sfence.vma` cost on every switch (ASID broken on most RV silicon). Untrusted code is confined to Tier 2 (WASM) / Tier 3 (Stage-2). Decided 2026-06-05. |
+| Tiered isolation (1/2/3) | Trusted signed-native (LBI) · WASM software sandbox · hypervisor hardware silo — isolation strength scales with untrust, hardware MMU cost paid only at Tier 3 |
 | Round-Robin Scheduler | Simple, fair, predictable for embedded real-time systems |
 | Capability-Based Access | Fine-grained control, no global permissions |
 | Owned Buffers in Async | Deterministic cleanup in SAS (no process teardown) |
 | Nano Kernel (~8,700 LOC) | Keep TCB, minimize trusted code, move features to Cells |
 | Trait-Based HAL | Multi-architecture support without code duplication |
 | No mod.rs | Clearer module boundaries, IDE-friendly |
+
+---
+
+## Architecture Gap Summary
+
+Areas where the current implementation diverges from the specification or modern OS best practices. Tracked for resolution in Phases 24–32.
+
+| Gap | Impact | Target Phase |
+|-----|--------|-------------|
+| IPC is syscall-based, not direct vtable call | 10–100× latency vs. spec | Phase 27 |
+| Round-robin scheduler, no priority levels | RT tasks can starve | Phase 25 |
+| No KASLR | Kernel address predictable | Phase 24 |
+| No per-cell memory quota enforcement | Single cell can OOM system | Phase 26 |
+| Spectre v1/v2 unmitigated in SAS | Critical for untrusted code | Phase 28+ (Tier 3 VM) |
+| Tier 2 WASM runtime absent | No safe third-party code execution | Phase 29 |
+| TLSF allocator not implemented | RT allocation guarantee broken | Phase 25 |
+| No audit ring buffer | Forensics impossible | Phase 26 |
+| Performance baseline unmeasured | Can't validate PDR targets | Phase 24 (immediate) |
 
 ---
 

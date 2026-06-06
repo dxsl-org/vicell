@@ -1,12 +1,12 @@
-# ViOS Security Model
+# ViCell Security Model
 
 **Version:** v0.2.1-dev | **Updated:** 2026-05-29
 
 ## Design Philosophy
 
-ViOS uses a **Cellular Single Address Space (SAS)** model with
+ViCell uses a **Cellular Single Address Space (SAS)** model with
 Language-Based Isolation (LBI) via Rust's type system.  Traditional OS
-security relies on hardware MMU separation between processes; ViOS instead
+security relies on hardware MMU separation between processes; ViCell instead
 relies on:
 
 1. **Rust ownership + borrow checker** — prevents spatial/temporal memory bugs
@@ -56,6 +56,114 @@ relies on:
 | Cell executes privileged instruction (e.g., `wfi`) | Cells run in EL0/Ring3; trap dispatched to kernel | ✅ Mitigated |
 | `#[allow(unsafe_code)]` in a Cell | `cargo-geiger` CI gate fails if any Cell contains `unsafe`; zero-tolerance policy | ✅ Mitigated |
 | Malformed syscall arguments overflow kernel buffers | All syscall arg lengths validated via `validate_user_buf` before dereference | ✅ Mitigated |
+
+## Known Architecture Risks
+
+### Spectre v1/v2 — SAS Worst-Case Scenario
+**Severity: Critical (research/trusted-environment only)**
+
+SAS is the worst-case environment for Spectre attacks. In a traditional OS, Spectre leaks within a single process boundary. In ViCell SAS, a compromised Tier 1 cell can speculatively read any memory in the entire system — including kernel heap, crypto keys, and other cells.
+
+**Current status**: No mitigation. ViCell v1.0 requires all Tier 1 cells to be trusted (signed, first-party code).
+
+**Mitigations planned**:
+- Short-term: Document "trusted cells only" constraint explicitly (done here)
+- Medium-term: Tier 3 VM isolation for untrusted code (hardware page tables per VM)
+- Long-term: CHERIoT RISC-V hardware capabilities — see "CHERI Integration Roadmap" section below
+
+**Do NOT use ViCell to run untrusted third-party code until Tier 3 VM is implemented.**
+
+> **Isolation strategy decision (2026-06-05):** per-Cell **SATP** isolation at Tier 1 is
+> **explicitly NOT pursued**. PMP is M-mode-only (unreachable from ViCell's S-mode without
+> custom firmware) and sPMP is unratified; per-cell SATP would break Tier 1 zero-copy IPC.
+> Hardware isolation is delivered by **Tier 3 Stage-2 paging (per-VM)**, and untrusted code
+> is confined to Tier 2 (WASM) / Tier 3. The Tier 1 "signed cells only" guarantee depends on
+> **Ed25519 signing + a secure-boot loader gate** (currently spec-only — "trusted" is today
+> approximated by the `/bin/` path prefix). See [specs/12-reliability.md](specs/12-reliability.md) §2.
+
+### KASLR Absent
+**Severity: High**
+
+Kernel loads at a fixed virtual address. An attacker with any code execution can immediately locate kernel symbols without brute-forcing.
+
+**Planned**: KASLR via Limine boot randomization — estimated 3 days to implement, deferred to Phase 24.
+
+### No Audit Log
+**Severity: Medium**
+
+Cell actions (IPC sends, file writes, network connects) are not persistently logged. Forensic analysis after an incident is impossible.
+
+**Planned**: 256 KB kernel ring buffer, flushed to `/data/kernel.log` on shutdown (Phase 26).
+
+### Capability Token System — Implementation Gap
+**Severity: Medium**
+
+Spec (01-core.md) describes unforgeable Zero-Sized Type capability tokens. Current implementation uses a `can_block_io` TCB flag — a simpler mechanism that works for current cell count but does not scale to arbitrary capability types.
+
+**Planned**: Full ZST capability token system when Cell count exceeds 20.
+
+## CHERI Integration Roadmap
+
+**CHERIoT** (Capability Hardware Extension RISC-V for IoT) là extension RISC-V cung cấp **hardware-enforced pointer bounds** — kết hợp hoàn hảo với Rust LBI của ViCell.
+
+### Tại sao CHERI quan trọng với ViCell
+
+| Cơ chế | Rust LBI (hiện tại) | CHERI + Rust LBI |
+|--------|---------------------|-----------------|
+| Bounds checking | Compile-time only | Compile-time **+** hardware runtime |
+| `unsafe` blocks | Không được kiểm soát bounds | Hardware trap nếu pointer ra ngoài bounds |
+| Spectre gadgets | Không mitigate | Capability bounds giới hạn speculative access |
+| Pointer forgery | Compiler ngăn trong safe Rust | Hardware ngăn kể cả trong `unsafe` |
+| Use-after-free trong HAL | Phụ thuộc code review | Hardware trap ngay lập tức |
+
+**Kết luận**: Rust LBI + CHERI = defense-in-depth thực sự. Rust bắt lỗi lúc compile; CHERI bắt lỗi còn sót lại lúc runtime — kể cả trong kernel `unsafe` blocks.
+
+### Silicon availability (2026)
+
+| Platform | Status | CHERI Type |
+|----------|--------|-----------|
+| **CHERIoT-IBEX** (lowRISC/Microsoft) | ✅ Production silicon, FPGA | RV32 (embedded) |
+| **Sonata dev board** (lowRISC) | ✅ Có thể mua ngay | CHERIoT-IBEX RV32 |
+| **Morello** (ARM) | ✅ Limited hardware | AArch64 CHERI |
+| **CHERI-RISC-V RV64** (Cambridge) | 🔶 Research, FPGA only | RV64 full CHERI |
+| **Standard RISC-V RV64 với CHERI** | ❌ Chưa có silicon | — |
+
+> **Thực tế**: CHERI cho RV64 (target chính của ViCell) chưa có production silicon. CHERIoT-IBEX là RV32 — phù hợp cho **ViCell-Nano** profile (embedded robots, constrained devices).
+
+### Integration Path với ViCell (Phase 31)
+
+```
+Bước 1: HAL arch mới
+  cells/hal/arch/cheriot32/      # CHERIoT-IBEX RV32 target
+  - Capability registers thay thế VAddr/PAddr
+  - Memory tagging qua hardware capability table
+
+Bước 2: libs/types thay đổi
+  #[cfg(feature = "cheri")]
+  pub type VAddr = CheriCapability;  // hardware capability
+  pub type PAddr = CheriCapability;
+
+Bước 3: Rust toolchain
+  - Dùng CHERIoT-Platform/rust fork (rustc CHERI support)
+  - Target: riscv32cheriot-unknown-unknown
+  - Không cần thay đổi Tier 1 cell code (Rust LBI vẫn hoạt động)
+
+Bước 4: Kernel unsafe blocks
+  - Mỗi unsafe block tự động được hardware bounds-check
+  - SAS attack surface giảm từ "toàn bộ address space"
+    xuống "chỉ các capabilities được cấp phép"
+```
+
+### Prerequisites (Phase 31)
+
+- [ ] Mua Sonata development board (CHERIoT-IBEX, ~$50)
+- [ ] Xác nhận CHERIoT-Platform/rust build cho no_std ViCell target
+- [ ] Thiết kế `feature = "cheri"` flag trong libs/types không breaking existing RV64 code
+- [ ] Benchmark: overhead của CHERI bounds check vs. phần mềm Rust LBI
+
+**Target**: Phase 31 (2026-Q4) cho ViCell-Nano profile trên Sonata board.
+
+---
 
 ## Known Limitations
 
