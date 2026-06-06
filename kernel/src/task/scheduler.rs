@@ -33,6 +33,18 @@ fn dummy_raw_waker() -> RawWaker {
 static DUMMY_VTABLE: RawWakerVTable =
     RawWakerVTable::new(|_| dummy_raw_waker(), |_| {}, |_| {}, |_| {});
 
+/// CPU-monopoly watchdog budget, in 10 ms scheduler ticks. A task may run this
+/// many consecutive ticks WITHOUT voluntarily blocking before it is deemed a
+/// runaway (infinite loop / livelock) and terminated. 500 ticks = 5 s of
+/// uninterrupted CPU — far beyond any cooperative or real-time cell, which block
+/// (Recv/Send/Sleep) every iteration — so legitimate work never trips it. The
+/// budget is kernel-owned; a cell cannot extend its own.
+const WATCHDOG_BUDGET_TICKS: u32 = 500;
+
+/// Sentinel recorded as the "scause" in a `CellFault` audit entry for a watchdog
+/// kill, to distinguish it from a real hardware trap.
+const WATCHDOG_SCAUSE: u32 = 0x0000_DEAD;
+
 /// Priority-aware Scheduler with Central Task Table (Hubris-like).
 ///
 /// Three priority levels (Background=0, Normal=1, RealTime=2) are stored as
@@ -366,14 +378,77 @@ impl Scheduler {
             self.push_ready(id);
         }
 
-        // 3. Decide if current task needs to yield
+        // 3. Decide if the current task yields, and run the CPU-monopoly watchdog.
+        //    A task found Running here either was timer-preempted or yielded without
+        //    blocking — either way it consumed this slice, so charge a run_tick. A
+        //    task that voluntarily blocked set a non-Running state before yielding,
+        //    so we reset its budget. Crossing WATCHDOG_BUDGET_TICKS means it never
+        //    blocked — a runaway/livelock — so we terminate it (kernel survives).
         let current_id = self.current_task_id;
         if let Some(cid) = current_id {
+            enum WdAction {
+                None,
+                Requeue,
+                Kill(u64),
+            }
+            let mut action = WdAction::None;
             if let Some(task) = self.tasks.get_mut(&cid) {
                 if task.state == TaskState::Running {
-                    task.state = TaskState::Ready;
+                    // Only RealTime-priority tasks can livelock the system: they
+                    // always win pop_ready, so a pure-compute RT loop starves
+                    // everyone. Normal/Background compute-heavy cells are fine —
+                    // preemptive round-robin shares the CPU, so they cause no
+                    // starvation and must NOT be killed (that would false-positive
+                    // on legitimate heavy computation, e.g. a benchmark or sensor
+                    // fusion loop). Combined with the syscall-entry reset, this only
+                    // ever fires on an RT cell that runs pure compute (no syscalls)
+                    // past the budget — a genuine RT runaway.
+                    if task.priority >= api::TaskPriority::RealTime as u8 {
+                        task.run_ticks = task.run_ticks.saturating_add(1);
+                        if task.run_ticks > WATCHDOG_BUDGET_TICKS {
+                            action = WdAction::Kill(task.cell_id.0);
+                        } else {
+                            task.state = TaskState::Ready;
+                            action = WdAction::Requeue;
+                        }
+                    } else {
+                        task.state = TaskState::Ready;
+                        action = WdAction::Requeue;
+                    }
+                } else {
+                    // Voluntarily blocked (Recv/Sending/Sleeping/...) — not hogging.
+                    task.run_ticks = 0;
+                }
+            }
+            match action {
+                WdAction::Requeue => {
                     self.push_ready(cid);
                 }
+                WdAction::Kill(cell_raw) => {
+                    log::error!(
+                        "[watchdog] task {} (cell {}) monopolized CPU >{} ticks (~{}s) — terminating",
+                        cid,
+                        cell_raw,
+                        WATCHDOG_BUDGET_TICKS,
+                        WATCHDOG_BUDGET_TICKS / 100
+                    );
+                    crate::audit::log_event(
+                        crate::audit::AuditEvent::CellFault,
+                        &crate::audit::encode_u32x2(cell_raw as u32, WATCHDOG_SCAUSE),
+                    );
+                    // Release resources the runaway owned (these lock their own
+                    // state, not SCHEDULER, so they are safe to call inline here).
+                    crate::fast_ipc::clear_vfs_if_cell(cell_raw as usize);
+                    crate::memory::cell_quota::deregister(CellId(cell_raw));
+                    // exit_task is a method on this already-locked Scheduler — no
+                    // SCHEDULER re-lock. Moves the runaway to zombies + wakes its
+                    // waiters; the pop_ready below then picks another ready task.
+                    self.exit_task(cid, usize::MAX);
+                    // Drop the dead cell's attribution; step 4 overwrites this if a
+                    // next task is picked, else 0 (kernel) is correct for idle.
+                    CURRENT_CELL_ID.store(0, Ordering::Relaxed);
+                }
+                WdAction::None => {}
             }
         }
 

@@ -1366,6 +1366,20 @@ use hal::arch::ViTrapFrame;
 #[no_mangle]
 pub extern "Rust" fn ViCell_syscall_dispatch(frame: &mut ViTrapFrame) {
     let syscall_id = frame.regs[17];
+
+    // Watchdog progress signal: a syscall proves the caller is making progress
+    // (ViCell cells are poll-based — try_recv/yield every loop iteration), so
+    // reset its CPU-monopoly counter. Only a PURE compute loop that makes NO
+    // syscalls climbs the counter to the watchdog budget; busy-polling cells
+    // (net/shell/bench) syscall constantly and must never be killed.
+    if let Some(sched) = super::SCHEDULER.lock().as_mut() {
+        if let Some(cid) = sched.current_task_id {
+            if let Some(t) = sched.tasks.get_mut(&cid) {
+                t.run_ticks = 0;
+            }
+        }
+    }
+
     let a0 = frame.regs[10];
     let a1 = frame.regs[11];
     let a2 = frame.regs[12];

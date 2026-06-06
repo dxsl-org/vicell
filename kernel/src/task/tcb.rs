@@ -142,6 +142,13 @@ pub struct Task {
     /// `api::ViSyscall::allowlist_bit()`.  `u64::MAX` = permit all (default,
     /// used when the Cell ELF does not embed a `__ViCell_syscalls` section).
     pub syscall_allowlist: u64,
+
+    /// Watchdog: consecutive 10 ms scheduler ticks this task has been Running
+    /// WITHOUT voluntarily blocking. Incremented each tick it is found Running in
+    /// `pick_next`, reset to 0 the moment it blocks (Recv/Send/Sleep/etc). A
+    /// runaway (infinite loop, never yields) climbs until it crosses the watchdog
+    /// budget and is terminated — preventing livelock ("alive but paralyzed").
+    pub run_ticks: u32,
 }
 
 impl Task {
@@ -172,6 +179,7 @@ impl Task {
             spawn_cap:    None,
             priority: api::TaskPriority::Normal as u8,
             syscall_allowlist: u64::MAX, // permit-all until ELF section is read
+            run_ticks: 0,
         }
     }
 
