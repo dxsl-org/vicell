@@ -41,6 +41,12 @@ static DUMMY_VTABLE: RawWakerVTable =
 /// budget is kernel-owned; a cell cannot extend its own.
 const WATCHDOG_BUDGET_TICKS: u32 = 500;
 
+/// CPU-monopoly *warning* threshold (80% of the kill budget). An RT cell that crosses
+/// this without yielding gets a one-shot `RtCpuOverrun` audit event — an early signal
+/// that it is trending toward the hard watchdog kill, so an operator/log analysis can
+/// catch a degrading RT loop before it is terminated. Observability only.
+const WATCHDOG_WARN_TICKS: u32 = WATCHDOG_BUDGET_TICKS * 4 / 5;
+
 /// Sentinel recorded as the "scause" in a `CellFault` audit entry for a watchdog
 /// kill, to distinguish it from a real hardware trap.
 const WATCHDOG_SCAUSE: u32 = 0x0000_DEAD;
@@ -447,6 +453,16 @@ impl Scheduler {
                 // return register is regs[10], restored by sret when the task runs.
                 if timed_out {
                     task.trap_frame.regs[10] = 0;
+                    task.deadline_misses = task.deadline_misses.saturating_add(1);
+                    // Observability: an RT cell whose awaited message missed its deadline
+                    // is a missed control-loop cycle — record it (no enforcement). Gated to
+                    // RT priority so the safety-timeout use on Normal cells stays quiet.
+                    if task.priority >= api::TaskPriority::RealTime as u8 {
+                        crate::audit::log_event(
+                            crate::audit::AuditEvent::RtDeadlineMiss,
+                            &crate::audit::encode_u32x2(task.cell_id.0 as u32, task.deadline_misses),
+                        );
+                    }
                 }
                 task.state = TaskState::Ready;
                 waking_tasks.push_back(*id);
@@ -525,6 +541,16 @@ impl Scheduler {
                     // past the budget — a genuine RT runaway.
                     if task.priority >= api::TaskPriority::RealTime as u8 {
                         task.run_ticks = task.run_ticks.saturating_add(1);
+                        // Early-warning (observability): one-shot audit when crossing the
+                        // warn threshold, BEFORE the hard kill — surfaces a degrading RT
+                        // loop while it can still be diagnosed.
+                        if task.run_ticks >= WATCHDOG_WARN_TICKS && !task.rt_overrun_warned {
+                            task.rt_overrun_warned = true;
+                            crate::audit::log_event(
+                                crate::audit::AuditEvent::RtCpuOverrun,
+                                &crate::audit::encode_u32x2(task.cell_id.0 as u32, task.run_ticks),
+                            );
+                        }
                         if task.run_ticks > WATCHDOG_BUDGET_TICKS {
                             action = WdAction::Kill(task.cell_id.0);
                         } else {
@@ -538,6 +564,7 @@ impl Scheduler {
                 } else {
                     // Voluntarily blocked (Recv/Sending/Sleeping/...) — not hogging.
                     task.run_ticks = 0;
+                    task.rt_overrun_warned = false;
                 }
             }
             match action {

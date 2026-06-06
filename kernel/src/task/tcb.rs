@@ -156,6 +156,17 @@ pub struct Task {
     /// runaway (infinite loop, never yields) climbs until it crosses the watchdog
     /// budget and is terminated — preventing livelock ("alive but paralyzed").
     pub run_ticks: u32,
+
+    /// Cumulative count of `RecvTimeout` deadlines this task has missed (the awaited
+    /// message did not arrive in time). For an RT control loop this is its missed-cycle
+    /// count. Observability only — surfaced via the audit ring ([`crate::audit`]); the
+    /// scheduler does not act on it (RT enforcement is hardware-data-gated).
+    pub deadline_misses: u32,
+
+    /// One-shot latch: set when this task has already emitted an `RtCpuOverrun` warning
+    /// for the current non-yielding episode, so the early-warning audit fires once per
+    /// episode (not every tick). Reset to false whenever the task voluntarily blocks.
+    pub rt_overrun_warned: bool,
 }
 
 impl Task {
@@ -189,6 +200,8 @@ impl Task {
             priority: api::TaskPriority::Normal as u8,
             syscall_allowlist: u64::MAX, // permit-all until ELF section is read
             run_ticks: 0,
+            deadline_misses: 0,
+            rt_overrun_warned: false,
         }
     }
 

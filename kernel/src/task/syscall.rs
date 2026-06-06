@@ -1430,6 +1430,7 @@ pub extern "Rust" fn ViCell_syscall_dispatch(frame: &mut ViTrapFrame) {
         if let Some(cid) = sched.current_task_id {
             if let Some(t) = sched.tasks.get_mut(&cid) {
                 t.run_ticks = 0;
+                t.rt_overrun_warned = false; // progress made — re-arm the overrun warning
             }
         }
     }

@@ -39,6 +39,15 @@ pub enum AuditEvent {
     CellFault      = 8,
     CellExit       = 9,
     CellSpawnDenied = 10,
+    /// An RT-priority cell's `RecvTimeout` deadline elapsed before its awaited
+    /// message arrived — a missed control-loop cycle. Payload: `encode_u32x2(cell_id,
+    /// cumulative_miss_count)`. Observability only (no enforcement): makes RT misses
+    /// visible for post-mortem / tuning once real-hardware bench data is available.
+    RtDeadlineMiss = 11,
+    /// An RT-priority cell crossed the CPU-monopoly *warning* threshold (a fraction
+    /// of the watchdog budget) without yielding — an early signal BEFORE the hard
+    /// watchdog kill. Payload: `encode_u32x2(cell_id, run_ticks)`. One-shot per episode.
+    RtCpuOverrun = 12,
 }
 
 struct AuditRing {
