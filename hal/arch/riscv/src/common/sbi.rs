@@ -66,3 +66,20 @@ pub fn set_timer(stime_value: u64) {
     #[cfg(target_arch = "riscv64")]
     sbi_call(SBI_EID_TIMER, SBI_FID_SET_TIMER, stime_value as usize, 0, 0);
 }
+
+// SBI System Reset (SRST) extension — used by the panic handler to reboot a
+// dead kernel instead of freezing (a robot must come back up, not brick).
+const SBI_EID_SRST: usize = 0x53525354;
+const SBI_FID_SYSTEM_RESET: usize = 0;
+/// SRST reset_type: graceful power-off.
+pub const SBI_RESET_SHUTDOWN: usize = 0x0;
+/// SRST reset_type: full re-init (re-runs firmware + kernel from scratch).
+pub const SBI_RESET_COLD_REBOOT: usize = 0x1;
+
+/// Request a system reset via SBI SRST.
+///
+/// On success the machine resets and this never returns; it returns only if the
+/// firmware does not implement SRST, letting the caller fall back to a halt loop.
+pub fn system_reset(reset_type: usize, reset_reason: usize) {
+    sbi_call(SBI_EID_SRST, SBI_FID_SYSTEM_RESET, reset_type, reset_reason, 0);
+}

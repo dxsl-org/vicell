@@ -340,5 +340,11 @@ fn panic(info: &PanicInfo) -> ! {
         }
     }
     let _ = write!(PanicWriter, "{}\n", info);
+
+    // A dead kernel must come back up, not freeze — a frozen robot is unrecoverable
+    // without physical intervention. Request a cold reboot via SBI SRST. If the
+    // firmware lacks SRST, system_reset returns and we fall back to halting.
+    puts("[KERNEL PANIC] rebooting...\n");
+    crate::hal::sbi::system_reset(crate::hal::sbi::SBI_RESET_COLD_REBOOT, 0);
     loop { hal::ARCH.wait_for_interrupt(); }
 }
