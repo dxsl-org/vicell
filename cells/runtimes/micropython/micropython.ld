@@ -3,10 +3,12 @@ ENTRY(_start)
 
 SECTIONS
 {
-    /* MicroPython runtime cell.
-     * VA 0x0E000000 (224 MB) — above compositor (0x0A000000) and lua (0x0C000000).
-     * Leaves 32 MB for BSS / heap before hitting 0x10000000. */
-    . = 0x0E000000;
+    /* MicroPython runtime cell. Must avoid the kernel MMIO identity maps and every
+     * other cell's window (SAS — one shared page table). Old base 0x0E000000 sat
+     * inside the PLIC window (0x0C00_0000-0x1000_0000), silently clobbering
+     * interrupt-controller MMIO. Placed in the empty region above all MMIO
+     * (>=0x1001_0000), below RAM (0x8000_0000), distinct from bench/lua. */
+    . = 0x20000000;
 
     .text : {
         *(.text.boot)

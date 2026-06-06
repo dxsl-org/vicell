@@ -3,12 +3,12 @@ ENTRY(_start)
 
 SECTIONS
 {
-    /* Lua runtime cell.
-     * VA 0x0C000000 (192 MB) — between compositor (0x0A000000) and
-     * micropython (0x0E000000). Without an explicit script the linker placed
-     * Lua at 0x10000, a low address that overlaps other mappings and prevented
-     * the cell from running when spawned. */
-    . = 0x0C000000;
+    /* Lua runtime cell. Must avoid the kernel MMIO identity maps and every other
+     * cell's window (SAS — one shared page table). Old base 0x0C000000 sat inside
+     * the PLIC window (0x0C00_0000-0x1000_0000) AND collided with bench's base —
+     * both silent-corruption hazards. Placed in the empty region above all MMIO
+     * (>=0x1001_0000), below RAM (0x8000_0000), distinct from bench/micropython. */
+    . = 0x1C000000;
 
     .text : {
         *(.text.boot)
