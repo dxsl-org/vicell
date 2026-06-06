@@ -346,7 +346,17 @@ pub fn handle_syscall(caller_id: usize, syscall: Syscall) -> SyscallResult {
             if let Some(sched) = super::SCHEDULER.lock().as_mut() {
                 if let Some(t) = sched.tasks.get_mut(&caller_id) {
                     if !t.pending_deaths.is_empty() {
-                        return Ok(t.pending_deaths.remove(0));
+                        let (dead_tid, reason) = t.pending_deaths.remove(0);
+                        // Deliver the exit reason as the recv payload (NotifyOnExit
+                        // contract) so a supervisor can apply a restart policy.
+                        if buf_len >= core::mem::size_of::<u64>()
+                            && validate_user_buf(buf_ptr, core::mem::size_of::<u64>(), MAX_USER_BUF).is_ok()
+                        {
+                            // SAFETY: buf_ptr is validated as this caller's user buffer;
+                            // the caller is mid-syscall so the write is exclusive in the SAS.
+                            unsafe { core::ptr::write_unaligned(buf_ptr as *mut u64, reason as u64); }
+                        }
+                        return Ok(dead_tid);
                     }
                 }
             }
@@ -355,15 +365,28 @@ pub fn handle_syscall(caller_id: usize, syscall: Syscall) -> SyscallResult {
                 Ok(0) => {
                     // Blocked
                     super::yield_cpu();
-                    // Resume: return who sent the message
-                    if let Some(sched) = super::SCHEDULER.lock().as_ref() {
-                        return Ok(sched
-                            .tasks
-                            .get(&caller_id)
-                            .and_then(|t| t.current_caller)
-                            .unwrap_or(0));
+                    // Resume: return who sent the message (or the dead tid for a death
+                    // notification). If this wake was a death, a reason was stashed by
+                    // exit_task — deliver it as the recv payload HERE, in our own syscall
+                    // context where writing a USER buffer is valid (unlike the trap context).
+                    let mut sender = 0;
+                    let mut death_reason = None;
+                    if let Some(sched) = super::SCHEDULER.lock().as_mut() {
+                        if let Some(t) = sched.tasks.get_mut(&caller_id) {
+                            sender = t.current_caller.unwrap_or(0);
+                            death_reason = t.pending_exit_reason.take();
+                        }
                     }
-                    Ok(0)
+                    if let Some(reason) = death_reason {
+                        if buf_len >= core::mem::size_of::<u64>()
+                            && validate_user_buf(buf_ptr, core::mem::size_of::<u64>(), MAX_USER_BUF).is_ok()
+                        {
+                            // SAFETY: buf_ptr is validated as this caller's user buffer; we
+                            // run in the caller's syscall context, so the store is permitted.
+                            unsafe { core::ptr::write_unaligned(buf_ptr as *mut u64, reason as u64); }
+                        }
+                    }
+                    Ok(sender)
                 }
                 Ok(id) => Ok(id), // Got message instantly
                 Err(_) => Err(SyscallError::InvalidCommand),

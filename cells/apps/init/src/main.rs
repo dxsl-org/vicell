@@ -8,6 +8,26 @@ api::declare_manifest!(block_io = false, network = false, spawn = true);
 
 use ostd::io::println;
 
+/// Per-service restart policy (OTP-style).
+#[derive(Clone, Copy, PartialEq)]
+enum Policy {
+    /// Always restart — critical services that must always be up (vfs, shell, …).
+    Permanent,
+    /// Restart only on ABNORMAL exit (fault / watchdog kill); a clean exit (reason 0)
+    /// is treated as final. Uses the exit reason delivered as the death-notify payload.
+    Transient,
+    /// Never restart — one-shot tasks that are expected to run once and stop.
+    #[allow(dead_code)] // reason: part of the policy ABI; no current service uses it yet
+    Temporary,
+}
+
+/// Restart intensity: at most this many restarts of ONE service within
+/// `RESTART_WINDOW_TICKS`. Exceeding it is a crash storm → escalate (give up on that
+/// service) instead of spin-respawning forever, which would burn CPU and never recover.
+/// Ticks are 10 ms scheduler ticks, so 1000 ≈ 10 s.
+const MAX_RESTARTS_PER_WINDOW: u32 = 5;
+const RESTART_WINDOW_TICKS: u64 = 1000;
+
 /// Kernel spawns init from its embedded ELF.  Init's job is to bring up the
 /// rest of the system by loading cell ELFs from the bootstrap disk table.
 ///
@@ -18,7 +38,7 @@ use ostd::io::println;
 #[no_mangle]
 pub extern "C" fn main() {
     use ostd::syscall::{
-        sys_lookup_service, sys_notify_on_exit, sys_recv, sys_register_service,
+        sys_get_time, sys_lookup_service, sys_notify_on_exit, sys_recv, sys_register_service,
         sys_spawn_from_path, SyscallResult,
     };
     use api::syscall::service;
@@ -48,6 +68,21 @@ pub extern "C" fn main() {
         Some(service::COMPOSITOR),
         None, // shell is not a registered service
     ];
+
+    // Restart policy per service. All current services are Permanent (a robot must keep
+    // them up); the machinery supports Transient (restart only on abnormal exit) and
+    // Temporary (never restart) for future one-shot/optional cells.
+    let policy: [Policy; NSVC] = [
+        Policy::Permanent, // vfs
+        Policy::Permanent, // config
+        Policy::Permanent, // input
+        Policy::Permanent, // net
+        Policy::Permanent, // compositor
+        Policy::Permanent, // shell
+    ];
+    // Per-service restart-intensity state (sliding window).
+    let mut restart_count: [u32; NSVC] = [0; NSVC];
+    let mut window_start: [u64; NSVC] = [0; NSVC];
 
     for i in 0..NSVC {
         match sys_spawn_from_path(paths[i]) {
@@ -97,11 +132,10 @@ pub extern "C" fn main() {
     }
     println("Init: supervising services (auto-restart on crash)...");
 
-    // Death notifications carry the dead tid as the recv "sender"; no payload, so a
-    // tiny throwaway buffer suffices.
+    // Death notifications: sys_recv returns the dead tid; the kernel writes the exit
+    // reason (NotifyOnExit payload) into the first 8 bytes of buf (0 = clean exit,
+    // usize::MAX = fault / watchdog kill). The policy below uses it.
     let mut buf = [0u8; 16];
-    let mut restarts: u32 = 0;
-    const MAX_RESTARTS: u32 = 200;
     loop {
         let dead = match sys_recv(0, &mut buf) {
             SyscallResult::Ok(d) => d,
@@ -110,6 +144,9 @@ pub extern "C" fn main() {
                 continue;
             }
         };
+        let reason = u64::from_le_bytes([
+            buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7],
+        ]);
         // Which supervised service died? (Ignore notifications for unknown tids.)
         let mut which = None;
         for (i, t) in tids.iter().enumerate() {
@@ -122,12 +159,33 @@ pub extern "C" fn main() {
             Some(i) => i,
             None => continue,
         };
-        if restarts >= MAX_RESTARTS {
-            println("Init: restart limit reached — backing off supervision.");
+
+        // 1. Restart policy: decide whether this exit warrants a restart at all.
+        let should_restart = match policy[i] {
+            Policy::Temporary => false,
+            Policy::Transient => reason != 0, // restart only on abnormal exit
+            Policy::Permanent => true,
+        };
+        if !should_restart {
+            println("Init: service exited cleanly — policy says no restart.");
             tids[i] = None;
             continue;
         }
-        restarts += 1;
+
+        // 2. Restart intensity: bound restarts per sliding window; a crash storm escalates
+        //    (give up on this one service) instead of spin-respawning forever.
+        let now = sys_get_time();
+        if now.wrapping_sub(window_start[i]) > RESTART_WINDOW_TICKS {
+            window_start[i] = now;
+            restart_count[i] = 0;
+        }
+        if restart_count[i] >= MAX_RESTARTS_PER_WINDOW {
+            println("Init: restart storm — giving up on this service (escalate).");
+            tids[i] = None;
+            continue;
+        }
+        restart_count[i] += 1;
+
         println("Init: service died — restarting...");
         match sys_spawn_from_path(paths[i]) {
             SyscallResult::Ok(newt) => {

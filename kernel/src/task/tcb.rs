@@ -128,7 +128,18 @@ pub struct Task {
     /// Death-notification queue (NotifyOnExit): tids of watched tasks that died
     /// while this watcher was NOT parked in Recv. Drained (highest-priority) by the
     /// next `Recv` so a supervisor never misses a child death during a respawn.
-    pub pending_deaths: Vec<usize>,
+    /// Each entry is `(dead_tid, exit_reason)` — the reason is delivered as the recv
+    /// payload (the NotifyOnExit contract) so a supervisor can apply a restart policy
+    /// (e.g. transient = restart only on abnormal exit). `exit_reason` is the exit code
+    /// for a clean exit (0) or `usize::MAX` for a fault / watchdog kill.
+    pub pending_deaths: Vec<(usize, usize)>,
+
+    /// Exit reason for a death notification delivered to a watcher that was PARKED in
+    /// `Recv` (set by `exit_task`). It is written into the watcher's recv buffer when its
+    /// `Recv` resumes — in the watcher's own syscall context, where writing a USER buffer
+    /// is valid (SSTATUS.SUM). It must NOT be written from `exit_task`/the trap context,
+    /// where an S-mode store to a USER page faults. `None` = the wake was a real message.
+    pub pending_exit_reason: Option<usize>,
 
     // Async Kernel Support
     pub pending_future: Option<SyscallFuture>,
@@ -193,6 +204,7 @@ impl Task {
             waiters: Vec::new(),
             exit_code: None,
             pending_deaths: Vec::new(),
+            pending_exit_reason: None,
             pending_future: None,
             block_io_cap: None,
             network_cap:  None,

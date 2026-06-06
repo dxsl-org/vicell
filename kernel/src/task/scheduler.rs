@@ -370,11 +370,17 @@ impl Scheduler {
         for w in watchers {
             if let Some(wt) = self.tasks.get_mut(&w) {
                 if matches!(wt.state, TaskState::Recv { .. }) {
+                    // Stash the exit reason for delivery as the recv payload (NotifyOnExit
+                    // contract). The actual buffer write happens when the watcher's Recv
+                    // RESUMES, in the watcher's own syscall context — writing a USER buffer
+                    // from here (the trap/fault context) faults (S-mode store to a U page,
+                    // SSTATUS.SUM not set).
                     wt.current_caller = Some(tid);
+                    wt.pending_exit_reason = Some(exit_reason);
                     wt.state = TaskState::Ready;
                     woken_watchers.push(w);
                 } else {
-                    wt.pending_deaths.push(tid);
+                    wt.pending_deaths.push((tid, exit_reason));
                 }
             }
         }
