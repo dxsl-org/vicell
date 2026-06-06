@@ -3,7 +3,7 @@
 **Project**: ViCell (Jarvis Hybrid OS)  
 **Current Version**: 0.2.1-dev (Mycelium Era)  
 **Current Phase**: Phase 1 - Core Stability (Phase 23 complete) · **Active Stage**: G1 (Robot & Embedded)
-**Last Updated**: 2026-06-06 (Restructured into 2 use-case stages G1/G2 — see "Two Use-Case Stages" overlay)
+**Last Updated**: 2026-06-06 (2 use-case stages overlay + Application Platform Gaps backlog)
 
 ---
 
@@ -100,6 +100,44 @@ End-to-end loop: sensor read → compute → actuator write over GPIO/CAN, with 
 
 **G2 — Server/PC is "done" when:**
 SMP scales across N cores · untrusted `.wasm` runs sandboxed (fuel-metered) · windowed desktop + mouse · hot migration with no dropped connections · x86_64 full bring-up · full utility suite + large storage · throughput benchmarks meet targets.
+
+---
+
+## 🧩 Application Platform Gaps (backlog — brainstorm+plan pending)
+
+> Added 2026-06-06 after a first-app feasibility study ([researcher-260606-1041-first-app-candidates.md](../.agents/reports/researcher-260606-1041-first-app-candidates.md)).
+> **Finding:** ViCell today is a solid kernel + thin userspace; the *application-platform* layer is missing,
+> so candidate apps come out as toys or narrow plumbing. The gaps below are what unlocks **real** apps.
+> Each is a backlog item to be brainstormed + planned individually. Status 📋 = not yet planned.
+
+### A. Hardware I/O `[G1]`
+- **Peripheral bus** (GPIO/I2C/SPI/CAN/PWM/ADC) — 📋 already designed → see "Peripheral Driver Track" + [specs/13-peripherals.md](specs/13-peripherals.md). #1 gap: no app reads sensors / drives actuators without it.
+
+### B. Interaction `[G1 input · G1-opt/G2 display]`
+- **Input delivery to apps** — 📋 see Milestone 2.2; kernel currently keeps key events in a UART buffer and never forwards them to the input service. Blocks any interactive/HMI app.
+- **Display / GUI** — 📋 see Milestone 2.4 (compositor/GPU, HMI feature-gate). Blocks user-facing graphical apps.
+
+### C. Real-world connectivity `[G1 priority · shared]`
+- 🆕 **TLS for the net stack** `[shared, G1-priority]` — 📋 smoltcp runs plaintext → no HTTPS/MQTTS. Every modern cloud API is HTTPS, so apps can't talk to the real internet. Needs a no_std TLS crate (e.g. `embedded-tls`). Decoupled (net cell userspace). Highest leverage to turn telemetry into a real product.
+- 🆕 **RTC / wall-clock time** `[G1]` — 📋 only mtime ticks exist; no real date/time. Blocks log timestamps, TLS cert validation, scheduling. Touches HAL (RTC driver) → may overlap kernel work.
+- 🆕 **Bigger IPC / streaming** `[shared]` — 📋 512-byte IPC buffer (~480 B/write) → data-heavy apps die by chunking. Needs a streaming/bulk-transfer path (touches kernel IPC).
+
+### D. App SDK / ergonomics `[shared]`
+- 🆕 **Name service** `[shared]` — 📋 service endpoint ids are spawn-order constants (vfs=3, net=6…), hard-coded everywhere. Replace with a registry/lookup.
+- 🆕 **High-level cell libraries** `[shared]` — 📋 HTTP/JSON/TLS client helpers so apps don't hand-roll protocol bytes + manual encode/decode.
+- 🆕 **Script module system** `[shared]` — 📋 Lua `require`/`package.path` is a stub; MicroPython multi-module hard → scripts limited to a single file, can't structure large apps or port libraries.
+- 🆕 **Async runtime exposed to apps** `[shared]` — 📋 no app-facing async executor for concurrent I/O.
+
+### E. Ecosystem / distribution `[G2]`
+- **WASM Tier-2 + WASI maturity** — 📋 see Phase 28; the key path to bring real cross-language ecosystems in (currently only 4 custom `vi.*` imports).
+- 🆕 **Package manager / app distribution** `[G2]` — 📋 no install/update mechanism beyond baking into the disk image.
+
+### Minimal unlock sets (by use-case)
+| To write… | Needs (leverage order) |
+|---|---|
+| **Real G1 robot app** | Peripheral I/O → RTC → input delivery (if HMI) |
+| **Real cloud/IoT app** | **TLS** → bigger IPC/streaming → name service |
+| **Rich apps / ecosystem (G2)** | WASM/WASI → module system → SDK libs → display |
 
 ---
 
