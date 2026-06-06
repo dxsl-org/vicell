@@ -36,15 +36,28 @@ pub unsafe fn force_unlock_locks() {
 
 /// Register a new Cell with the given heap quota.
 ///
-/// Call this at spawn, OUTSIDE the allocator.  `BTreeMap::insert` may allocate
-/// (a new tree node), which is safe here because we are NOT inside
-/// `GlobalAlloc::alloc` — no deadlock on `QUOTA_LIMITS`.
+/// Call this at spawn, OUTSIDE the allocator.
+///
+/// Deadlock contract: `BTreeMap::insert` allocates a new tree node via the
+/// global `QuotaAlloc`, whose `alloc` calls `charge(current_cell_id())`.  When
+/// `register` runs inside a cell's syscall (e.g. init calling `SpawnFromPath`),
+/// `current_cell_id()` is that cell (non-zero), so `charge` would try to RE-LOCK
+/// the `QUOTA_LIMITS` Spinlock we already hold here → self-deadlock.  We pin
+/// `CURRENT_CELL_ID` to 0 (kernel = unlimited, charge short-circuits without
+/// locking) across the insert so the node allocation never re-enters `charge`'s
+/// lock.  The node is kernel bookkeeping, so charging it to the kernel is also
+/// semantically correct.
 pub fn register(cell_id: CellId, limit: usize) {
+    use crate::task::scheduler::CURRENT_CELL_ID;
     let id = cell_id.0 as usize;
     if id < MAX_CELLS {
         IN_USE[id].store(0, Ordering::Relaxed);
     }
+    // Pin to kernel context so the insert's node allocation does not re-enter
+    // `charge` (which locks QUOTA_LIMITS) while we hold that lock. Restored after.
+    let prev_cell = CURRENT_CELL_ID.swap(0, Ordering::Relaxed);
     QUOTA_LIMITS.lock().insert(id, limit);
+    CURRENT_CELL_ID.store(prev_cell, Ordering::Relaxed);
 }
 
 /// Deregister a Cell on exit.
