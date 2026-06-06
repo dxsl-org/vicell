@@ -150,12 +150,16 @@ Erlang/OTP-style "let it crash + restart".
       `Scheduler::take_reapable_zombies` (called from `yield_cpu`, dropped outside the SCHEDULER lock
       for lock-order safety) now frees them. Verified: 3 forced shell crash→reap→restart cycles,
       0 kernel panics, no reaper UAF/deadlock.
-- [ ] **Free ELF segment frames on cell death** — still leak (`Stack::drop` only covers stacks).
-      Track each cell's mapped segment frames on its `Task` at load (`load_segments`), free them in
-      the reaper. Then a **`load_segments` overwrite-guard** (reject a cell whose load VA is already
-      mapped) becomes safe — currently it would block respawn because a dead cell's VA mapping
-      persists; respawn works today only via `map_page` silently overwriting (same hazard that the
-      bench-VA collision exploited). Segment reclaim is the prerequisite for that guard.
+- [x] **Free ELF segment frames on cell death** — DONE 2026-06-06 (commit 82fc085a). `load_segments`
+      returns the mapped `(vaddr, frame)` pairs; the Task owns them as `CellSegments`, freed when the
+      zombie is reaped (outside the SCHEDULER lock). Race-safe with same-VA respawn: `CellSegments::drop`
+      only unmaps a VA that still resolves to its own frame (else respawn already re-pointed it).
+      Verified: 3 crash→reclaim→restart cycles, all restarts reach the prompt, 0 panics.
+- [ ] **`load_segments` overwrite-guard** (reject a cell whose load VA is already mapped — would have
+      caught the bench-VA collision loudly; core SAS silent-corruption defense). STILL blocked: reclaim
+      is LAZY (reaper), so a dead cell's VA can persist past a same-VA respawn, which currently works
+      via `map_page` silently overwriting. Needs **eager teardown** (unmap a dying cell's segments at
+      death, before its VA can be reused) before the guard can be enabled without breaking respawn.
 - [ ] **GC for async-pinned buffers** orphaned by a crashed owner (else 24/7 robots leak to OOM).
       Needs owner→pin tracking (the metadata registry that does not yet exist).
 
