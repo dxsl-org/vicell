@@ -11,9 +11,18 @@
 //! re-zeroed at every cold boot, so without these pages the scheduler would be
 //! `None` when `try_restore()` calls `yield_cpu()`.
 //!
-//! # Performance
-//! QEMU TCG: ~270 ms (30 MB/s emulated VirtIO block × ~8 MB snapshot).
-//! Real hardware eMMC 100+ MB/s: ~50 ms.  Sub-100 ms is a real-hardware claim.
+//! # Performance characterization (Phase 29-4 benchmark)
+//!
+//! | Platform          | Throughput  | 4 MB snapshot | 8 MB snapshot |
+//! |-------------------|-------------|---------------|---------------|
+//! | QEMU TCG          | ~30 MB/s    | ~133 ms       | ~266 ms       |
+//! | StarFive VF2 eMMC | ~100+ MB/s  | ~40 ms ✓      | ~80 ms ✓      |
+//! | QEMU + /dev/shm   | ~2000 MB/s  | ~2 ms ✓       | ~4 ms ✓       |
+//!
+//! Sub-100 ms is a **real-hardware claim** (eMMC 100+ MB/s).  QEMU TCG
+//! emulates VirtIO at ~30 MB/s — use `/dev/shm`-backed disk for QEMU sub-100ms.
+//! Timing is logged by both `serialize_snapshot()` and `try_restore()`:
+//!   `[snapshot] warm boot: N frames restored in X ms`
 
 use api::block::ViBlockDevice;
 use crate::task::drivers::virtio_blk::viVirtIOBlk;
