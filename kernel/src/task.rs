@@ -9,7 +9,7 @@ pub mod ipc_test;
 pub mod scheduler;
 pub mod stack;
 pub mod user_hello;
-// pub mod waker; // Removed
+pub mod waker;
 
 #[cfg(test)]
 mod tests;

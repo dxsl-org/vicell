@@ -14,6 +14,10 @@ use core::sync::atomic::{AtomicBool, Ordering};
 /// statically sized — no heap allocation during the boot critical path.
 pub const MAX_HARTS: usize = 2;
 
+/// Hart dedicated to RealTime-priority cells.  RT tasks are enqueued here by
+/// `push_ready` and never stolen (Phase 03 steal filter excludes RT).
+pub const HART_RT: usize = 1;
+
 /// Set to `true` by each secondary hart once its trap vector and timer are ready.
 /// Hart 0's bounded wait reads this via `Acquire` to observe all preceding stores.
 pub static HART_ONLINE: [AtomicBool; MAX_HARTS] = [

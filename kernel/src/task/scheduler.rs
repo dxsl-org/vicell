@@ -104,7 +104,13 @@ impl Scheduler {
         let priority = self.tasks.get(&id)
             .map(|t| t.priority)
             .unwrap_or(api::TaskPriority::Normal as u8);
-        super::hart_local::ready::push_on_current_hart(id, priority);
+        // RT tasks are pinned to the dedicated RT hart and never stolen (Phase 04).
+        let target_hart = if priority >= api::TaskPriority::RealTime as u8 {
+            crate::task::smp::HART_RT
+        } else {
+            super::hart_local::current_hart_id()
+        };
+        super::hart_local::ready::push_on_hart(target_hart, id, priority);
         priority
     }
 
@@ -126,9 +132,20 @@ impl Scheduler {
         } else { 0 };
 
         if new_priority > current_priority {
-            // SAFETY: csrsi on sip.SSIP is permitted from S-mode (RISC-V priv spec §4.1.3).
-            // The interrupt fires after sret restores sstatus.SIE.
-            unsafe { core::arch::asm!("csrsi sip, 0x2") };
+            // RT tasks always land on HART_RT; send a cross-hart IPI if we're on a different hart.
+            let target_hart = if new_priority >= api::TaskPriority::RealTime as u8 {
+                crate::task::smp::HART_RT
+            } else {
+                hart_id
+            };
+            if target_hart == hart_id {
+                // SAFETY: csrsi on sip.SSIP is permitted from S-mode (RISC-V priv spec §4.1.3).
+                // The interrupt fires after sret restores sstatus.SIE.
+                unsafe { core::arch::asm!("csrsi sip, 0x2") };
+            } else {
+                // Cross-hart IPI: SSIP fires on the target hart's next interrupt check.
+                let _ = hal::common::sbi::sbi_send_ipi(1 << target_hart, 0);
+            }
         }
     }
 
@@ -446,6 +463,18 @@ impl Scheduler {
                     // `deadline` is u64 (mtime-domain field); `now` is usize system
                     // ticks. On rv64 usize == u64, so the cast is lossless.
                     if now as u64 >= *d {
+                        should_wake = true;
+                        timed_out = true;
+                    }
+                }
+                TaskState::WaitEvent { mask, deadline } => {
+                    let fired = super::waker::consume_pending(*mask);
+                    if fired != 0 {
+                        // Return fired mask as the syscall result.
+                        task.trap_frame.regs[10] = fired as usize;
+                        should_wake = true;
+                    } else if deadline.map(|d| now as u64 >= d).unwrap_or(false) {
+                        task.trap_frame.regs[10] = 0; // timeout — return 0
                         should_wake = true;
                         timed_out = true;
                     }

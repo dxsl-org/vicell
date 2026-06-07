@@ -494,6 +494,9 @@ pub enum Syscall {
     GrantRegister { size: usize },
     /// 216: GrantUnregister — explicitly release a registered buffer.
     GrantUnregister { reg_id: usize },
+    /// 217: WaitForEvent — block until `mask` bits fire or `deadline` ticks pass.
+    /// `deadline = None` means block indefinitely.
+    WaitForEvent { mask: u32, deadline: Option<u64> },
 }
 
 /// Read the per-Cell syscall allowlist from the TCB.
@@ -566,6 +569,7 @@ fn syscall_to_vi(syscall: &Syscall) -> Option<api::syscall::ViSyscall> {
         Syscall::GetRandom { .. }      => V::GetRandom,
         Syscall::GrantRegister { .. }  => V::GrantRegister,
         Syscall::GrantUnregister { .. }=> V::GrantUnregister,
+        Syscall::WaitForEvent { .. }   => V::WaitForEvent,
         // Always-permitted; allowlist_bit() returns None → filter is a no-op.
         Syscall::Yield
         | Syscall::Exit { .. }
@@ -1923,6 +1927,31 @@ pub fn handle_syscall(caller_id: usize, syscall: Syscall) -> SyscallResult {
             Ok(0)
         }
 
+        Syscall::WaitForEvent { mask, deadline } => {
+            // Lost-wakeup guard: check pending events BEFORE parking.
+            // If the NIC RX IRQ already fired, consume and return immediately.
+            let already = super::waker::consume_pending(mask);
+            if already != 0 {
+                return Ok(already as usize);
+            }
+            // Park: set WaitEvent state so the timer sweep can wake this task.
+            if let Some(sched) = super::SCHEDULER.lock().as_mut() {
+                if let Some(task) = sched.tasks.get_mut(&caller_id) {
+                    task.state = super::tcb::TaskState::WaitEvent { mask, deadline };
+                }
+            }
+            // Yield; wake happens in pick_next's global sweep (hart 0).
+            super::yield_cpu();
+            // After re-schedule: timer sweep wrote the fired mask into trap_frame.regs[10].
+            // Return it so ViCell_syscall_dispatch writes the correct value back.
+            let fired = super::SCHEDULER.lock()
+                .as_ref()
+                .and_then(|s| s.tasks.get(&caller_id))
+                .map(|t| t.trap_frame.regs[10])
+                .unwrap_or(0);
+            Ok(fired)
+        }
+
         Syscall::RequestMmio { base, len } => {
             // Gate: caller's ELF manifest must declare gpio or uart cap.
             let allowed = {
@@ -2053,6 +2082,15 @@ fn map_syscall(syscall_id: usize, a0: usize, a1: usize, a2: usize, a3: usize) ->
         ViSyscall::GetRandom        => Syscall::GetRandom { buf_ptr: a0, len: a1 },
         ViSyscall::GrantRegister    => Syscall::GrantRegister { size: a0 },
         ViSyscall::GrantUnregister  => Syscall::GrantUnregister { reg_id: a0 },
+        ViSyscall::WaitForEvent     => {
+            // ABI: a0 = mask (u32), a1 = timeout_ticks_lo, a2 = timeout_ticks_hi.
+            let mask = a0 as u32;
+            let timeout = (a1 as u64) | ((a2 as u64) << 32);
+            let deadline = if timeout == 0 { None } else {
+                Some((super::system_ticks() as u64).wrapping_add(timeout))
+            };
+            Syscall::WaitForEvent { mask, deadline }
+        }
         _ => match syscall_id {
             3   => Syscall::SetTimer { deadline: a0 },
             100 => Syscall::ServiceLookup { name_ptr: a0, name_len: a1 },

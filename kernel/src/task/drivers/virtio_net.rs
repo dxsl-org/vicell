@@ -111,15 +111,17 @@ pub fn recv_frame(buf: &mut [u8]) -> usize {
     }
 }
 
-/// Handle the VirtIO net IRQ — acknowledges the interrupt and wakes the
-/// net Cell task so it can drain the RX queue via IPC.
+/// Handle the VirtIO net IRQ — acknowledges the interrupt and signals the waker.
+///
+/// The waker sets `NET_RX_PENDING` and pends SSIP so the timer sweep immediately
+/// wakes any net cell parked in `WaitForEvent(NET_RX)` (Phase 04).
 pub fn handle_irq() {
     let mut guard = NET_DEVICE.lock();
     if let Some(SafeVirtIONet(ref mut net)) = *guard {
         net.ack_interrupt();
     }
-    // TODO (Phase 15): send an IPC ping to the net Cell's endpoint so it
-    // wakes and calls recv_frame() to drain the queue.
+    drop(guard);
+    crate::task::waker::signal_net_rx();
 }
 
 /// Return the MAC address of the discovered NIC, or an all-zero address if

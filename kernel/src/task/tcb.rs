@@ -47,6 +47,13 @@ pub enum TaskState {
     },
     /// Polling an async future (e.g. syscall)
     Polling,
+    /// Blocked in `WaitForEvent(mask, timeout)`.  Woken by `waker::signal_net_rx()`
+    /// (or equivalent) when any bit in `mask` fires, or when `deadline` ticks pass.
+    /// `deadline = None` means block indefinitely.
+    WaitEvent {
+        mask: u32,
+        deadline: Option<u64>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]

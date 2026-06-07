@@ -148,6 +148,13 @@ pub enum ViSyscall {
     /// ABI: a0 = reg_id → 0 on success.
     /// Requires GrantCap (allowlist bit 39).
     GrantUnregister = 216,
+    /// Block until one or more bits in `mask` fire, or `timeout_ticks` 10ms ticks elapse.
+    /// `timeout_ticks = 0` means block indefinitely.
+    /// Returns the fired event bits (>0) on wake, or 0 on timeout.
+    /// Bit 0 = NET_RX (NIC frame available). See `api::syscall::events`.
+    /// ABI: a0 = mask (u32), a1 = timeout_ticks (u64 lo, a2 = hi) → fired_mask (usize).
+    /// Allowlist-gated (bit 42). Requires `WaitForEvent` in `declare_syscalls!`.
+    WaitForEvent = 217,
 
     // === Hot-swap (Phase 20) ===
     /// Live-replace a running Cell without message loss.
@@ -315,6 +322,8 @@ impl ViSyscall {
             // is safe because UART MMIO is enforced at dispatch by resource-registry check,
             // not by this bit alone.
             Self::GetRandom     => Some(41),
+            // WaitForEvent: IRQ-driven sleep (net RX waker, Phase 04 SMP).
+            Self::WaitForEvent  => Some(42),
             // Yield, Exit, and ForceExit are always permitted — a Cell must be able
             // to yield the CPU, exit cleanly, and force-terminate unresponsive tasks
             // regardless of its allowlist.  SpawnCap is the authority gate for ForceExit.
@@ -377,6 +386,7 @@ impl From<usize> for ViSyscall {
             214 => ViSyscall::GetRandom,
             215 => ViSyscall::GrantRegister,
             216 => ViSyscall::GrantUnregister,
+            217 => ViSyscall::WaitForEvent,
             300 => ViSyscall::GpuFlush,
             310 => ViSyscall::NetTx,
             311 => ViSyscall::NetRx,
@@ -386,6 +396,12 @@ impl From<usize> for ViSyscall {
             _ => ViSyscall::Unknown,
         }
     }
+}
+
+/// Kernel event bit masks for `WaitForEvent` / `signal_event`.
+pub mod events {
+    /// A NIC RX frame is available for the net cell to drain.
+    pub const NET_RX: u32 = 1 << 0;
 }
 
 /// Well-known service IDs for the kernel Service Registry (`RegisterService` /

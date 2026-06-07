@@ -865,3 +865,23 @@ pub fn sys_get_random(buf: &mut [u8]) -> usize {
     };
     if ret > 0 { ret as usize } else { 0 }
 }
+
+/// Block until one or more bits in `mask` fire, or `timeout_ticks` 10ms ticks elapse.
+///
+/// `timeout_ticks = 0` blocks indefinitely.  Returns the fired event bits (> 0) on
+/// wake, or 0 on timeout.  See `api::syscall::events` for bit definitions.
+///
+/// Requires `WaitForEvent` in the cell's `declare_syscalls!` list.
+pub fn sys_wait_for_event(mask: u32, timeout_ticks: u64) -> u32 {
+    // SAFETY: pure blocking syscall; no raw pointers.
+    let ret = unsafe {
+        syscall(
+            ViSyscall::WaitForEvent,
+            mask as usize,
+            timeout_ticks as usize,
+            (timeout_ticks >> 32) as usize,
+            0,
+        )
+    };
+    ret as u32
+}

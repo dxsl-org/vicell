@@ -18,7 +18,7 @@ api::declare_syscalls![
     Send, Recv, TryRecv, Reply, Log, Heartbeat, LookupService,
     NetTx, NetRx, GetTime,
     StateStash, StateRestore,
-    GetRandom,
+    GetRandom, WaitForEvent,
 ];
 
 mod dhcp;
@@ -33,8 +33,9 @@ use alloc::collections::BTreeMap;
 use core::sync::atomic::{AtomicU16, Ordering};
 use dhcp::{add_dhcp_socket, poll_dhcp, DhcpState};
 use interface::VirtioNetDevice;
+use api::syscall::events::NET_RX;
 use ostd::io::println;
-use ostd::syscall::{sys_get_time, sys_try_recv, SyscallResult};
+use ostd::syscall::{sys_get_time, sys_try_recv, sys_wait_for_event, SyscallResult};
 use poll_driver::POLL_INTERVAL_MS;
 use smoltcp::{
     iface::{Config, Interface, SocketSet, SocketStorage},
@@ -144,7 +145,12 @@ pub fn main() {
                     &local_ip,
                 );
             }
-            _ => { ostd::task::yield_now(); }
+            _ => {
+                // Block until NIC RX fires or the smoltcp maintenance deadline.
+                // timeout = POLL_TICKS in scheduler ticks (10ms each).
+                let timeout_ticks = POLL_TICKS;
+                sys_wait_for_event(NET_RX, timeout_ticks);
+            }
         }
     }
 }
