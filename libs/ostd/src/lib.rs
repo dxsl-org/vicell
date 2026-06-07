@@ -24,6 +24,7 @@ pub use alloc::vec;
 pub type Result<T, E = ViError> = core::result::Result<T, E>;
 
 pub mod fast_ipc;
+pub mod mmio;
 pub mod startup;
 pub mod sync;
 pub mod syscall;
@@ -37,13 +38,16 @@ pub mod io;
 /// Filesystem.
 pub mod fs;
 
-/// Shared readline / REPL state machine (used by Lua, MicroPython, and Shell).
+/// Shared readline / REPL state machine (used by Shell).
 pub mod repl;
 
 pub mod prelude;
 
 /// Executor
 pub mod executor;
+
+/// TLS 1.3 client helpers for app cells.
+pub mod tls;
 
 /// Task spawning.
 pub mod task {

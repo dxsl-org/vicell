@@ -129,6 +129,16 @@ pub enum ViSyscall {
     /// ABI: a0 = sector, a1 = grant_id → async_id (1 = immediately complete) on success.
     /// Requires BlockIoCap (bit 36) — same gate as raw block-I/O opcodes 500/501.
     BlkReadAsync = 212,
+    /// Request exclusive MMIO ownership for a peripheral Driver Cell.
+    /// ABI: a0 = base (physical MMIO address), a1 = len → 0 on success.
+    /// Requires the corresponding manifest flag (GPIO or UART) to be set.
+    /// The kernel checks the Resource Registry allowlist; rejects unknown ranges.
+    RequestMmio = 213,
+    /// Fill caller buffer with VirtIO-RNG entropy (true hardware randomness).
+    /// Required for TLS key generation — mtime-seeded PRNG is cryptographically broken.
+    /// ABI: a0 = buf_ptr, a1 = len (max 64 per call, one VirtIO descriptor) → bytes written.
+    /// Returns 0 if no VirtIO-RNG device is present.
+    GetRandom = 214,
 
     // === Hot-swap (Phase 20) ===
     /// Live-replace a running Cell without message loss.
@@ -147,6 +157,84 @@ pub enum ViSyscall {
 
     // === Process Info ===
     GetProcs = 30,
+}
+
+/// Compact bitset of permitted syscalls, stored as a `u64`.
+///
+/// Used to build the allowlist embedded in the ELF `__ViCell_syscalls` section
+/// via [`declare_syscalls!`].  All methods are `const` so the value can be
+/// computed at compile time.
+///
+/// ```ignore
+/// const MY_ALLOWED: SyscallSet = SyscallSet::EMPTY
+///     .with(ViSyscall::Send)
+///     .with(ViSyscall::Recv)
+///     .with(ViSyscall::Log);
+/// ```
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct SyscallSet(pub u64);
+
+impl SyscallSet {
+    /// Empty set — all syscalls denied (not useful on its own; combine with `with`).
+    pub const EMPTY: Self = Self(0);
+    /// Permit-all sentinel — the default for cells without a `__ViCell_syscalls` section.
+    pub const ALL: Self = Self(u64::MAX);
+
+    /// Return a new `SyscallSet` with `syscall` added.
+    ///
+    /// If `syscall` has no allowlist bit (always-permitted syscalls like `Yield`
+    /// or `Exit`) the set is returned unchanged.
+    pub const fn with(self, syscall: ViSyscall) -> Self {
+        match syscall.allowlist_bit() {
+            Some(bit) => Self(self.0 | (1u64 << bit)),
+            None => self,
+        }
+    }
+
+    /// Raw bit-mask value to embed in `__ViCell_syscalls`.
+    pub const fn bits(self) -> u64 { self.0 }
+
+    /// Returns `true` if `syscall` is permitted by this set.
+    ///
+    /// Always-permitted syscalls (`Yield`, `Exit`, …) return `true` regardless
+    /// of the stored bits.
+    pub const fn permits(self, syscall: ViSyscall) -> bool {
+        match syscall.allowlist_bit() {
+            Some(bit) => (self.0 >> bit) & 1 == 1,
+            None => true,
+        }
+    }
+}
+
+/// Embed a syscall allowlist into the current Cell's ELF binary.
+///
+/// Places a `u64` bitset into the `__ViCell_syscalls` ELF section.  The kernel
+/// reads it at spawn time and enforces it on every syscall — any call whose bit
+/// is not set is rejected with `PermissionDenied` before the handler runs.
+///
+/// Cells that do **not** call this macro default to permit-all (backwards
+/// compatible).  Cells that call it are restricted to exactly the listed
+/// syscalls plus always-permitted ones (`Yield`, `Exit`, `ForceExit`, …).
+///
+/// # Usage
+/// ```ignore
+/// api::declare_syscalls![Send, Recv, TryRecv, Log, Heartbeat, LookupService];
+/// ```
+#[macro_export]
+macro_rules! declare_syscalls {
+    ($($syscall:ident),* $(,)?) => {
+        #[used]
+        #[link_section = "__ViCell_syscalls"]
+        pub static VICELL_SYSCALLS: u64 = const {
+            let mut mask: u64 = 0u64;
+            $(
+                if let Some(bit) = $crate::syscall::ViSyscall::$syscall.allowlist_bit() {
+                    mask |= 1u64 << bit;
+                }
+            )*
+            mask
+        };
+    };
 }
 
 impl ViSyscall {
@@ -208,6 +296,15 @@ impl ViSyscall {
             Self::GrantAlloc | Self::GrantShare | Self::GrantSlice | Self::GrantFree => Some(39),
             // BlkReadAsync reuses BlockIoCap (bit 36) — same authority as raw block I/O.
             Self::BlkReadAsync  => Some(36),
+            // RequestMmio: gated by GPIO (bit 40) or UART (bit 41) manifest flags.
+            // The kernel re-checks the manifest and allowlist at dispatch; here we
+            // assign bit 40 as the generic "peripheral MMIO" allowlist bit.
+            Self::RequestMmio   => Some(40),
+            // GetRandom: any cell that needs entropy (TLS, crypto) declares this.
+            // Bit 41 was previously allocated as a UART MMIO alias; repurposing for entropy
+            // is safe because UART MMIO is enforced at dispatch by resource-registry check,
+            // not by this bit alone.
+            Self::GetRandom     => Some(41),
             // Yield, Exit, and ForceExit are always permitted — a Cell must be able
             // to yield the CPU, exit cleanly, and force-terminate unresponsive tasks
             // regardless of its allowlist.  SpawnCap is the authority gate for ForceExit.
@@ -266,6 +363,8 @@ impl From<usize> for ViSyscall {
             210 => ViSyscall::GrantSlice,
             211 => ViSyscall::GrantFree,
             212 => ViSyscall::BlkReadAsync,
+            213 => ViSyscall::RequestMmio,
+            214 => ViSyscall::GetRandom,
             300 => ViSyscall::GpuFlush,
             310 => ViSyscall::NetTx,
             311 => ViSyscall::NetRx,

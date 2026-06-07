@@ -13,13 +13,23 @@ extern crate alloc;
 // Declares network capability; the kernel grants NetworkCap at spawn.
 api::declare_manifest!(block_io = false, network = true, spawn = false);
 
+// Narrow syscall allowlist -- kernel enforces this at dispatch (Phase 27).
+api::declare_syscalls![
+    Send, Recv, TryRecv, Reply, Log, Heartbeat, LookupService,
+    NetTx, NetRx, GetTime,
+    StateStash, StateRestore,
+    GetRandom,
+];
+
 mod dhcp;
 mod interface;
 mod poll_driver;
 mod socket_state;
 mod socket_table;
+mod tls;
 
 use alloc::boxed::Box;
+use alloc::collections::BTreeMap;
 use core::sync::atomic::{AtomicU16, Ordering};
 use dhcp::{add_dhcp_socket, poll_dhcp, DhcpState};
 use interface::VirtioNetDevice;
@@ -33,20 +43,19 @@ use smoltcp::{
     wire::{EthernetAddress, HardwareAddress, IpAddress, IpCidr, IpEndpoint},
 };
 use socket_state::SocketState;
-use socket_table::SocketTable;
+use socket_table::{SocketTable, MAX_SOCKETS};
+use crate::tls::socket::TlsSocketEntry;
+
+/// Fixed IPC payload size; mirrors api::ipc::IPC_BUF_SIZE.
+const IPC_BUF_SIZE: usize = 512;
 
 /// Fixed MAC address for QEMU VirtIO NIC (locally administered, unicast).
 const MAC: EthernetAddress = EthernetAddress([0x52, 0x54, 0x00, 0x12, 0x34, 0x56]);
-
-use socket_table::MAX_SOCKETS;
 
 /// Number of ticks between forced smoltcp polls (fallback when no IPC arrives).
 const POLL_TICKS: u64 = POLL_INTERVAL_MS * 10_000; // 100ms @ 10 MHz mtime
 
 /// Ephemeral local port counter for outbound TCP connections.
-///
-/// Wraps in the IANA ephemeral range (49152–65534). Single-core kernel makes
-/// Relaxed ordering safe — no concurrent writers exist.
 static NEXT_PORT: AtomicU16 = AtomicU16::new(49152);
 
 fn next_ephemeral_port() -> u16 {
@@ -58,7 +67,6 @@ fn next_ephemeral_port() -> u16 {
 }
 
 fn now_instant() -> Instant {
-    // Convert kernel ticks (10 MHz) to smoltcp Instant (microseconds).
     Instant::from_micros((sys_get_time() / 10) as i64)
 }
 
@@ -66,49 +74,34 @@ fn now_instant() -> Instant {
 pub fn main() {
     println("[net] Network Service v0.1: smoltcp + VirtIO net + DHCP");
 
-    // ── smoltcp setup ────────────────────────────────────────────────────────
     let mut device = VirtioNetDevice::new();
     let cfg = Config::new(HardwareAddress::Ethernet(MAC));
     let mut iface = Interface::new(cfg, &mut device, now_instant());
-    // Initially no IP; DHCP will assign one.
     iface.update_ip_addrs(|addrs| {
         let _ = addrs.push(IpCidr::new(IpAddress::v4(0, 0, 0, 0), 0));
     });
 
-    // Fixed-size socket storage — array init is valid because SocketStorage::EMPTY is const.
     let mut socket_storage = [SocketStorage::EMPTY; MAX_SOCKETS];
     let mut sockets = SocketSet::new(&mut socket_storage[..]);
     let mut table = SocketTable::new();
+    let mut tls_table: BTreeMap<u64, TlsSocketEntry> = BTreeMap::new();
 
-    // Start DHCP.
     let dhcp_handle = add_dhcp_socket(&mut sockets);
     let mut dhcp_state = DhcpState::Pending;
 
-    let mut buf = [0u8; 512];
+    let mut buf = [0u8; IPC_BUF_SIZE];
     let mut last_poll_ticks = sys_get_time();
     let mut local_ip = [0u8; 4];
 
     println("[net] Starting DHCP...");
 
     loop {
-        // ── Liveness heartbeat ────────────────────────────────────────────────
-        // Assert we are still pumping the network loop. If this service ever wedges
-        // (deadlock / stuck driver call) it stops beating and the kernel terminates
-        // it as hung so init restarts it — a silent hang the CPU watchdog can't catch.
-        // 500 ticks (~5 s) is far longer than one poll iteration, so a healthy loop
-        // never trips it.
         ostd::syscall::sys_heartbeat(500);
-
-        // ── Pull inbound frames from the kernel NIC ───────────────────────────
-        // Without this the smoltcp stack never sees DHCP OFFER/ACK and stays
-        // stuck in DISCOVER forever.
         device.pump_rx();
 
-        // ── DHCP until acquired ───────────────────────────────────────────────
         if dhcp_state == DhcpState::Pending {
             dhcp_state =
                 poll_dhcp(dhcp_handle, &mut iface, &mut sockets, &mut device, now_instant());
-            // Cache the leased address octets for GET_LOCAL_IP queries.
             if dhcp_state == DhcpState::Acquired {
                 if let Some(smoltcp::wire::IpCidr::Ipv4(cidr)) =
                     iface.ip_addrs().iter().find(|a| matches!(a, smoltcp::wire::IpCidr::Ipv4(_)))
@@ -117,7 +110,6 @@ pub fn main() {
                     let mut s = alloc::string::String::from("[net] IP address: ");
                     for (i, oct) in local_ip.iter().enumerate() {
                         if i > 0 { s.push('.'); }
-                        // u8 → decimal without std fmt machinery on the hot path.
                         let mut n = *oct as u32;
                         let mut digits = [0u8; 3];
                         let mut di = 3;
@@ -134,36 +126,15 @@ pub fn main() {
             }
         }
 
-        // ── Forced periodic poll ──────────────────────────────────────────────
         let now = sys_get_time();
         if now.wrapping_sub(last_poll_ticks) >= POLL_TICKS {
             iface.poll(now_instant(), &mut device, &mut sockets);
             last_poll_ticks = now;
         }
 
-        // ── Receive one IPC message (non-blocking) ────────────────────────────
-        // Pre-zero the reused buffer so stale bytes from the previous message
-        // cannot bleed into this one. sys_try_recv returns sender_id, not a
-        // byte count, so the true payload length is recovered by scanning for
-        // the last non-zero byte after the receive.
         buf.fill(0);
         match sys_try_recv(0, &mut buf) {
             SyscallResult::Ok(sender) if sender > 0 => {
-                // LIMITATION: zero-scan truncates a payload whose final byte is
-                // 0x00. All current senders (nc/curl/lua vnet) transmit ASCII
-                // text that never ends in NUL. A length-prefixed IPC frame is
-                // the proper long-term fix.
-                //
-                // The scan is followed by opcode-specific minimum-length floors
-                // that protect fixed-format messages from under-counting:
-                // - `.max(9)` — any envelope (9-byte header is mandatory)
-                // - CONNECT (0x12) needs ≥15 (9 + addr:4 + port:2); without the
-                //   floor a port whose high byte is 0 (e.g. :80) causes the
-                //   6-byte payload guard to fire and return a spurious error.
-                // - LISTEN  (0x17) needs ≥11 (9 + port:2) for the same reason.
-                // - RECV    (0x14) needs ≥13 (9 + buf_len:4) so the 4-byte
-                //   buf_len is always present and the default-512 fallback is
-                //   not triggered spuriously.
                 let scan_len = buf
                     .iter()
                     .rposition(|&b| b != 0)
@@ -171,14 +142,16 @@ pub fn main() {
                     .unwrap_or(0)
                     .max(9);
                 let msg_len = match buf[0] {
-                    0x12 => scan_len.max(15), // CONNECT: needs addr:4 + port:2
-                    0x14 => scan_len.max(13), // RECV:    needs buf_len:4
-                    0x16 => scan_len.max(11), // BIND:    needs port:2
-                    0x17 => scan_len.max(11), // LISTEN:  needs port:2
-                    0x21 => scan_len.max(15), // SENDTO:  needs addr:4 + port:2
-                    0x22 => scan_len.max(13), // RECVFROM: needs buf_len:4
-                    0x23 => scan_len.max(13), // JOIN_MULTICAST:  needs group:4
-                    0x24 => scan_len.max(13), // LEAVE_MULTICAST: needs group:4
+                    0x12 => scan_len.max(15),
+                    0x14 => scan_len.max(13),
+                    0x16 => scan_len.max(11),
+                    0x17 => scan_len.max(11),
+                    0x21 => scan_len.max(15),
+                    0x22 => scan_len.max(13),
+                    0x23 => scan_len.max(13),
+                    0x24 => scan_len.max(13),
+                    0x30 => scan_len.max(15),
+                    0x32 => scan_len.max(13),
                     _    => scan_len,
                 };
                 handle_ipc(
@@ -188,17 +161,15 @@ pub fn main() {
                     &mut iface,
                     &mut sockets,
                     &mut table,
+                    &mut tls_table,
                     &local_ip,
                 );
             }
-            _ => {
-                ostd::task::yield_now();
-            }
+            _ => { ostd::task::yield_now(); }
         }
     }
 }
 
-/// Dispatch one IPC message.
 fn handle_ipc(
     buf: &[u8],
     sender: usize,
@@ -206,6 +177,7 @@ fn handle_ipc(
     iface: &mut Interface,
     sockets: &mut SocketSet<'_>,
     table: &mut SocketTable,
+    tls_table: &mut BTreeMap<u64, TlsSocketEntry>,
     local_ip: &[u8; 4],
 ) {
     match decode_message(buf) {
@@ -214,21 +186,14 @@ fn handle_ipc(
             iface.poll(now_instant(), device, sockets);
         }
         NetMessage::CellRequest { opcode, cap, payload } => {
-            // Advance smoltcp before and after the syscall so TCP state
-            // transitions (SYN-SENT → ESTABLISHED) happen promptly.
             iface.poll(now_instant(), device, sockets);
-            handle_socket_syscall(opcode, cap, payload, sender, iface, device, sockets, table, local_ip);
+            handle_socket_syscall(opcode, cap, payload, sender, iface, device, sockets, table, tls_table, local_ip);
             iface.poll(now_instant(), device, sockets);
         }
         NetMessage::Unknown => {}
     }
 }
 
-/// Map a smoltcp TCP state to the 1-byte wire encoding consumers expect.
-///
-/// No wildcard arm: `tcp::State` is exhaustive in smoltcp 0.11 (11 variants,
-/// no `#[non_exhaustive]`). A `_ =>` arm would be unreachable and fail
-/// `clippy -D warnings`.
 fn tcp_state_byte(s: tcp::State) -> u8 {
     match s {
         tcp::State::Closed      => 0x00,
@@ -245,7 +210,7 @@ fn tcp_state_byte(s: tcp::State) -> u8 {
     }
 }
 
-/// Handle socket syscall from a consumer cell.
+#[allow(clippy::too_many_arguments)]
 fn handle_socket_syscall(
     opcode: u8,
     cap: u64,
@@ -255,47 +220,39 @@ fn handle_socket_syscall(
     device: &mut VirtioNetDevice,
     sockets: &mut SocketSet<'_>,
     table: &mut SocketTable,
+    tls_table: &mut BTreeMap<u64, TlsSocketEntry>,
     local_ip: &[u8; 4],
 ) {
     match opcode {
         cell_opcodes::SOCKET_TCP => {
-            // Create a TCP socket and return its CapId.
             let rx_buf = tcp::SocketBuffer::new(alloc::vec![0u8; 4096]);
             let tx_buf = tcp::SocketBuffer::new(alloc::vec![0u8; 4096]);
             let socket = tcp::Socket::new(rx_buf, tx_buf);
             let handle = sockets.add(socket);
             match table.insert(handle) {
-                Ok(cap_id) => {
-                    sys_send(sender, &cap_id.to_le_bytes());
-                }
-                Err(_) => {
-                    sys_send(sender, &[0u8; 8]); // 0 = error
-                }
+                Ok(cap_id) => { sys_send(sender, &cap_id.to_le_bytes()); }
+                Err(_)     => { sys_send(sender, &[0u8; 8]); }
             }
         }
+
         cell_opcodes::CLOSE => {
             if let Some(handle) = table.remove(cap) {
                 sockets.remove(handle);
             }
-            sys_send(sender, &[0u8]); // ok
+            tls_table.remove(&cap);
+            sys_send(sender, &[0u8]);
         }
+
         cell_opcodes::GET_LOCAL_IP => {
             sys_send(sender, local_ip);
         }
+
         cell_opcodes::CONNECT => {
-            // UDP caps must never reach TCP-typed socket accessors (would panic).
             if table.is_udp(cap) { sys_send(sender, &[0x01]); return; }
-            if payload.len() < 6 {
-                sys_send(sender, &[0x01]);
-                return;
-            }
-            // Guard against double-connect.
+            if payload.len() < 6 { sys_send(sender, &[0x01]); return; }
             match table.get_state(cap) {
                 Some(SocketState::Created) => {}
-                Some(_) | None => {
-                    sys_send(sender, &[0x01]); // wrong state or unknown cap
-                    return;
-                }
+                Some(_) | None => { sys_send(sender, &[0x01]); return; }
             }
             let addr = [payload[0], payload[1], payload[2], payload[3]];
             let port = u16::from_le_bytes([payload[4], payload[5]]);
@@ -304,15 +261,12 @@ fn handle_socket_syscall(
                 port,
             );
             let local_port = next_ephemeral_port();
-
             if let Some(handle) = table.get(cap) {
                 let cx = iface.context();
                 let socket = sockets.get_mut::<tcp::Socket>(handle);
                 match socket.connect(cx, remote, local_port) {
                     Ok(()) => {
                         table.set_state(cap, SocketState::Connecting);
-                        // Flush the SYN immediately instead of waiting for the next
-                        // periodic poll — reduces handshake latency by up to 100 ms.
                         iface.poll(now_instant(), device, sockets);
                         sys_send(sender, &[0x00]);
                     }
@@ -322,9 +276,9 @@ fn handle_socket_syscall(
                 sys_send(sender, &[0x01]);
             }
         }
+
         cell_opcodes::SEND => {
             if table.is_udp(cap) { sys_send(sender, &0u32.to_le_bytes()); return; }
-            // Update Connecting → Connected if the handshake has completed.
             if table.get_state(cap) == Some(SocketState::Connecting) {
                 if let Some(handle) = table.get(cap) {
                     let s = sockets.get_mut::<tcp::Socket>(handle);
@@ -333,22 +287,21 @@ fn handle_socket_syscall(
                     }
                 }
             }
-            let data = payload;
             if let Some(handle) = table.get(cap) {
                 let socket = sockets.get_mut::<tcp::Socket>(handle);
                 if socket.can_send() {
-                    let n = socket.send_slice(data).unwrap_or(0);
+                    let n = socket.send_slice(payload).unwrap_or(0);
                     sys_send(sender, &(n as u32).to_le_bytes());
                 } else {
-                    sys_send(sender, &0u32.to_le_bytes()); // not ready yet
+                    sys_send(sender, &0u32.to_le_bytes());
                 }
             } else {
                 sys_send(sender, &0u32.to_le_bytes());
             }
         }
+
         cell_opcodes::RECV => {
             if table.is_udp(cap) { sys_send(sender, &[]); return; }
-            // Update Connecting → Connected if the handshake has completed.
             if table.get_state(cap) == Some(SocketState::Connecting) {
                 if let Some(handle) = table.get(cap) {
                     let s = sockets.get_mut::<tcp::Socket>(handle);
@@ -359,47 +312,37 @@ fn handle_socket_syscall(
             }
             let buf_len = if payload.len() >= 4 {
                 u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4])) as usize
-            } else {
-                512
-            };
+            } else { 512 };
             let buf_len = buf_len.min(4096);
-
             if let Some(handle) = table.get(cap) {
                 let socket = sockets.get_mut::<tcp::Socket>(handle);
                 let mut data = alloc::vec![0u8; buf_len];
                 let n = if socket.can_recv() {
                     socket.recv_slice(&mut data).unwrap_or(0)
-                } else {
-                    0
-                };
-                sys_send(sender, &data[..n]); // 0-byte reply = no data yet
+                } else { 0 };
+                sys_send(sender, &data[..n]);
             } else {
                 sys_send(sender, &[]);
             }
         }
+
         cell_opcodes::SOCKET_STATE => {
-            if table.is_udp(cap) { sys_send(sender, &[0x00]); return; } // no TCP state for UDP
-            // Read-only: must NOT mutate table state.
+            if table.is_udp(cap) { sys_send(sender, &[0x00]); return; }
             let byte = match table.get(cap) {
                 Some(handle) => {
                     let socket = sockets.get_mut::<tcp::Socket>(handle);
                     tcp_state_byte(socket.state())
                 }
-                None => 0x00, // unknown cap == effectively closed
+                None => 0x00,
             };
             sys_send(sender, &[byte]);
         }
+
         cell_opcodes::LISTEN => {
             if table.is_udp(cap) { sys_send(sender, &[0x01]); return; }
-            // [0x17][cap:8][port:2 LE] → [0x00] ok / [0x01] err.
-            // Only a freshly-created socket (smoltcp Closed state) may listen.
-            if payload.len() < 2 {
-                sys_send(sender, &[0x01]);
-                return;
-            }
+            if payload.len() < 2 { sys_send(sender, &[0x01]); return; }
             if table.get_state(cap) != Some(SocketState::Created) {
-                sys_send(sender, &[0x01]);
-                return;
+                sys_send(sender, &[0x01]); return;
             }
             let port = u16::from_le_bytes([payload[0], payload[1]]);
             if let Some(handle) = table.get(cap) {
@@ -416,34 +359,24 @@ fn handle_socket_syscall(
                 sys_send(sender, &[0x01]);
             }
         }
+
         cell_opcodes::ACCEPT => {
             if table.is_udp(cap) { sys_send(sender, &[0xFF_u8; 8]); return; }
-            // [0x18][cap:8] → [stream_cap:8 LE] or [0xFF;8] if not connected yet.
-            // handle_ipc already polled smoltcp before this call,
-            // so socket.state() reflects the current handshake progress.
             if table.get_state(cap) != Some(SocketState::Listening) {
-                sys_send(sender, &[0xFF_u8; 8]);
-                return;
+                sys_send(sender, &[0xFF_u8; 8]); return;
             }
             let handle = match table.get(cap) {
                 Some(h) => h,
                 None => { sys_send(sender, &[0xFF_u8; 8]); return; }
             };
-            // Scope the borrow of sockets so sockets.add() below doesn't conflict.
             {
                 let s = sockets.get_mut::<tcp::Socket>(handle);
                 if s.state() != tcp::State::Established {
-                    sys_send(sender, &[0xFF_u8; 8]);
-                    return;
+                    sys_send(sender, &[0xFF_u8; 8]); return;
                 }
             }
-            // Handshake done — the listener socket IS the connection.
-            // Mint a stream cap pointing at the established handle, then
-            // renew the listener with a fresh socket on the same port.
             let listen_port = match table.get_listen_port(cap) {
                 Some(p) => p,
-                // Invariant: LISTEN always calls set_listen_port; this arm is
-                // unreachable in correct usage but guarded to avoid port-0 bind.
                 None => { sys_send(sender, &[0xFF_u8; 8]); return; }
             };
             match table.insert_with_state(handle, SocketState::Connected) {
@@ -451,8 +384,6 @@ fn handle_socket_syscall(
                     let rx = tcp::SocketBuffer::new(alloc::vec![0u8; 4096]);
                     let tx = tcp::SocketBuffer::new(alloc::vec![0u8; 4096]);
                     let mut new_sock = tcp::Socket::new(rx, tx);
-                    // listen() on a fresh Closed socket only fails on invalid
-                    // state — impossible here; ignore the (unreachable) error.
                     let _ = new_sock.listen(listen_port);
                     let new_handle = sockets.add(new_sock);
                     table.update_handle(cap, new_handle);
@@ -460,12 +391,10 @@ fn handle_socket_syscall(
                     table.set_listen_port(cap, listen_port);
                     sys_send(sender, &stream_cap.to_le_bytes());
                 }
-                Err(_) => {
-                    // Table full — cannot mint stream cap; listener unchanged.
-                    sys_send(sender, &[0xFF_u8; 8]);
-                }
+                Err(_) => { sys_send(sender, &[0xFF_u8; 8]); }
             }
         }
+
         cell_opcodes::SOCKET_UDP => {
             let rx = udp::PacketBuffer::new(
                 alloc::vec![udp::PacketMetadata::EMPTY; 4],
@@ -478,15 +407,14 @@ fn handle_socket_syscall(
             let handle = sockets.add(udp::Socket::new(rx, tx));
             match table.insert(handle) {
                 Ok(cap_id) => {
-                    table.mark_udp(cap_id); // guard TCP-only opcodes from panicking
+                    table.mark_udp(cap_id);
                     sys_send(sender, &cap_id.to_le_bytes());
                 }
                 Err(_) => { sys_send(sender, &[0u8; 8]); }
             }
         }
+
         cell_opcodes::BIND => {
-            // [0x16][cap:8][port:2 LE] → [bound_port:2 LE] ok / [0xFF,0xFF] err.
-            // Port 0 → auto-assign ephemeral; rejects non-Created caps.
             if payload.len() < 2 { sys_send(sender, &[0xFF, 0xFF]); return; }
             if table.get_state(cap) != Some(SocketState::Created) {
                 sys_send(sender, &[0xFF, 0xFF]); return;
@@ -506,8 +434,8 @@ fn handle_socket_syscall(
                 sys_send(sender, &[0xFF, 0xFF]);
             }
         }
+
         cell_opcodes::SENDTO => {
-            // [0x21][cap:8][addr:4][port:2 LE][data:*] → [n:4 LE] bytes queued.
             if payload.len() < 6 { sys_send(sender, &0u32.to_le_bytes()); return; }
             let addr = IpAddress::v4(payload[0], payload[1], payload[2], payload[3]);
             let dst_port = u16::from_le_bytes([payload[4], payload[5]]);
@@ -517,7 +445,6 @@ fn handle_socket_syscall(
                 let socket = sockets.get_mut::<udp::Socket>(handle);
                 match socket.send_slice(data, endpoint) {
                     Ok(()) => {
-                        // Flush the datagram immediately so RECVFROM can observe it.
                         iface.poll(now_instant(), device, sockets);
                         sys_send(sender, &(data.len() as u32).to_le_bytes());
                     }
@@ -527,8 +454,8 @@ fn handle_socket_syscall(
                 sys_send(sender, &0u32.to_le_bytes());
             }
         }
+
         cell_opcodes::RECVFROM => {
-            // [0x22][cap:8][buf_len:4 LE] → [src_addr:4][src_port:2 LE][data] or empty.
             let buf_len = if payload.len() >= 4 {
                 u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4])) as usize
             } else { 512 };
@@ -540,9 +467,6 @@ fn handle_socket_syscall(
                     match socket.recv_slice(&mut data) {
                         Ok((n, meta)) => {
                             let mut reply = alloc::vec![0u8; 6 + n];
-                            // IpAddress::Ipv4 is the only variant (no proto-ipv6 feature).
-                            // Use a let binding rather than if-let to satisfy the
-                            // irrefutable_let_patterns lint.
                             let IpAddress::Ipv4(src_ip) = meta.endpoint.addr;
                             reply[0..4].copy_from_slice(src_ip.as_bytes());
                             reply[4..6].copy_from_slice(&meta.endpoint.port.to_le_bytes());
@@ -552,16 +476,14 @@ fn handle_socket_syscall(
                         Err(_) => { sys_send(sender, &[]); }
                     }
                 } else {
-                    sys_send(sender, &[]); // empty = no datagram yet
+                    sys_send(sender, &[]);
                 }
             } else {
                 sys_send(sender, &[]);
             }
         }
+
         cell_opcodes::JOIN_MULTICAST => {
-            // [0x23][cap:8][group:4] → [0x00] ok / [0x01] err.
-            // Iface-level IGMP join; `cap` is ignored. Requires a leased IPv4
-            // source address (DHCP) for the IGMP membership report to route.
             if payload.len() < 4 { sys_send(sender, &[0x01]); return; }
             let group = IpAddress::v4(payload[0], payload[1], payload[2], payload[3]);
             match iface.join_multicast_group(device, group, now_instant()) {
@@ -569,8 +491,8 @@ fn handle_socket_syscall(
                 Err(_) => sys_send(sender, &[0x01]),
             };
         }
+
         cell_opcodes::LEAVE_MULTICAST => {
-            // [0x24][cap:8][group:4] → [0x00] ok / [0x01] err.
             if payload.len() < 4 { sys_send(sender, &[0x01]); return; }
             let group = IpAddress::v4(payload[0], payload[1], payload[2], payload[3]);
             match iface.leave_multicast_group(device, group, now_instant()) {
@@ -578,8 +500,142 @@ fn handle_socket_syscall(
                 Err(_) => sys_send(sender, &[0x01]),
             };
         }
-        _ => {
-            sys_send(sender, &[]);
+
+        // ── TLS ──────────────────────────────────────────────────────────────
+
+        cell_opcodes::TLS_CONNECT => {
+            // payload: [addr:4][port:2 LE][hostname:*]
+            // Creates TCP socket, connects, then performs TLS 1.3 handshake.
+            // Blocking -- acceptable for single-user G1 robot demo.
+            // Reply: [cap_id:8 LE] on success, [0u8;8] on failure.
+            if payload.len() < 6 { sys_send(sender, &[0u8; 8]); return; }
+            let addr = [payload[0], payload[1], payload[2], payload[3]];
+            let port = u16::from_le_bytes([payload[4], payload[5]]);
+            let hostname = core::str::from_utf8(&payload[6..])
+                .unwrap_or("")
+                .trim_end_matches('\0');
+
+            let rx_buf = tcp::SocketBuffer::new(alloc::vec![0u8; 4096]);
+            let tx_buf = tcp::SocketBuffer::new(alloc::vec![0u8; 4096]);
+            let tcp_sock = tcp::Socket::new(rx_buf, tx_buf);
+            let handle = sockets.add(tcp_sock);
+            let cap_id = match table.insert(handle) {
+                Ok(c) => c,
+                Err(_) => { sockets.remove(handle); sys_send(sender, &[0u8; 8]); return; }
+            };
+
+            let remote = IpEndpoint::new(
+                IpAddress::v4(addr[0], addr[1], addr[2], addr[3]),
+                port,
+            );
+            let local_port = next_ephemeral_port();
+            {
+                let cx = iface.context();
+                let s = sockets.get_mut::<tcp::Socket>(handle);
+                if s.connect(cx, remote, local_port).is_err() {
+                    table.remove(cap_id);
+                    sockets.remove(handle);
+                    sys_send(sender, &[0u8; 8]);
+                    return;
+                }
+            }
+            table.set_state(cap_id, SocketState::Connecting);
+
+            // Spin-wait for TCP ESTABLISHED; pump NIC and heartbeat in the loop.
+            let mut spin: u32 = 0;
+            loop {
+                device.pump_rx();
+                iface.poll(now_instant(), device, sockets);
+                if spin % 200 == 0 { ostd::syscall::sys_heartbeat(500); }
+                let st = sockets.get_mut::<tcp::Socket>(handle).state();
+                match st {
+                    tcp::State::Established => break,
+                    tcp::State::Closed | tcp::State::CloseWait => {
+                        table.remove(cap_id);
+                        sys_send(sender, &[0u8; 8]);
+                        return;
+                    }
+                    _ => {}
+                }
+                spin += 1;
+                if spin > 20_000_000 {
+                    table.remove(cap_id);
+                    sys_send(sender, &[0u8; 8]);
+                    return;
+                }
+                core::hint::spin_loop();
+            }
+            table.set_state(cap_id, SocketState::Connected);
+
+            // SAFETY: iface/device/sockets are valid for the duration of handshake().
+            let sockets_ptr = sockets as *mut SocketSet<'_> as *mut ();
+            unsafe {
+                crate::tls::transport::set_tls_context(
+                    iface  as *mut Interface,
+                    device as *mut VirtioNetDevice,
+                    sockets_ptr,
+                );
+            }
+
+            match unsafe { TlsSocketEntry::handshake(handle, hostname) } {
+                Ok(entry) => {
+                    tls_table.insert(cap_id, entry);
+                    sys_send(sender, &cap_id.to_le_bytes());
+                }
+                Err(_) => {
+                    table.remove(cap_id);
+                    sys_send(sender, &[0u8; 8]);
+                }
+            }
         }
+
+        cell_opcodes::TLS_SEND => {
+            // payload: [data:*]  reply: [bytes_written:4 LE]
+            if let Some(entry) = tls_table.get_mut(&cap) {
+                let sockets_ptr = sockets as *mut SocketSet<'_> as *mut ();
+                let result = unsafe {
+                    entry.send(
+                        payload,
+                        iface  as *mut Interface,
+                        device as *mut VirtioNetDevice,
+                        sockets_ptr,
+                    )
+                };
+                match result {
+                    Ok(n) => { sys_send(sender, &(n as u32).to_le_bytes()); }
+                    Err(_) => { sys_send(sender, &0u32.to_le_bytes()); }
+                }
+            } else {
+                sys_send(sender, &0u32.to_le_bytes());
+            }
+        }
+
+        cell_opcodes::TLS_RECV => {
+            // payload: [buf_len:4 LE]  reply: [data:*] or empty
+            let buf_len = if payload.len() >= 4 {
+                u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4])) as usize
+            } else { 512 };
+            let buf_len = buf_len.min(4096);
+            if let Some(entry) = tls_table.get_mut(&cap) {
+                let mut data = alloc::vec![0u8; buf_len];
+                let sockets_ptr = sockets as *mut SocketSet<'_> as *mut ();
+                let result = unsafe {
+                    entry.recv(
+                        &mut data,
+                        iface  as *mut Interface,
+                        device as *mut VirtioNetDevice,
+                        sockets_ptr,
+                    )
+                };
+                match result {
+                    Ok(n) => { sys_send(sender, &data[..n]); }
+                    Err(_) => { sys_send(sender, &[]); }
+                }
+            } else {
+                sys_send(sender, &[]);
+            }
+        }
+
+        _ => { sys_send(sender, &[]); }
     }
 }

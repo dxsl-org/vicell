@@ -1,6 +1,6 @@
-# ViOS API Reference
+# ViCell API Reference
 
-> Complete API documentation for ViOS kernel interfaces, syscalls, and trait definitions
+> Complete API documentation for ViCell kernel interfaces, syscalls, and trait definitions
 
 ## Table of Contents
 
@@ -18,7 +18,7 @@
 
 ## Overview
 
-ViOS provides a minimal, well-defined API surface for Cells to interact with the kernel and system services. The API is designed with these principles:
+ViCell provides a minimal, well-defined API surface for Cells to interact with the kernel and system services. The API is designed with these principles:
 
 - **Type Safety**: Rust's type system prevents invalid API usage
 - **Zero-Copy**: Ownership-based data transfer for performance
@@ -45,7 +45,7 @@ ViOS provides a minimal, well-defined API surface for Cells to interact with the
 
 ### Syscall Numbers
 
-Syscalls are the only way for Cells to interact with the kernel. ViOS has a minimal set of ~15 syscalls (compared to Linux's 300+).
+Syscalls are the only way for Cells to interact with the kernel. ViCell has a minimal set of ~15 syscalls (compared to Linux's 300+).
 
 **Syscall Enumeration** (`libs/api/src/syscall.rs`):
 
@@ -73,6 +73,13 @@ pub enum ViSyscall {
     Close = 103,    // Close file
     ReadDir = 105,  // Read directory entry
     Write = 109,    // Write to file
+
+    // === Security & Entropy ===
+    /// Fill caller buffer with VirtIO-RNG entropy (true hardware randomness).
+    /// Required for TLS key generation — mtime-seeded PRNG is cryptographically broken.
+    /// ABI: a0 = buf_ptr, a1 = len (max 64 per call) → bytes written.
+    /// Returns 0 if no VirtIO-RNG device is present.
+    GetRandom = 214,
 }
 ```
 
@@ -130,6 +137,45 @@ pub unsafe fn syscall3(syscall_id: usize, arg1: usize, arg2: usize, arg3: usize)
 - `rax`: Syscall number
 - `rdi, rsi, rdx, r10, r8, r9`: Arguments
 - `rax`: Return value
+
+---
+
+## Security Syscalls
+
+### GetRandom (Syscall 214)
+
+**Purpose**: Fetch cryptographically-secure entropy from VirtIO-RNG for key generation.
+
+**Signature** (Rust, `libs/ostd/src/syscall.rs`):
+```rust
+/// Fill buffer with hardware entropy from VirtIO-RNG.
+///
+/// # Arguments
+/// * `buf` - Destination buffer (max 64 bytes per call)
+///
+/// # Returns
+/// * `Ok(bytes_read)` — number of random bytes written (0 if no RNG device)
+/// * `Err(ViError)` — system error
+pub fn sys_get_random(buf: &mut [u8]) -> ViResult<usize>;
+```
+
+**ABI Details**:
+- `a0` = buffer pointer
+- `a1` = buffer length (capped at 64)
+- Return: bytes written (0 = no VirtIO-RNG device)
+
+**Usage Example**:
+```rust
+// Generate TLS session key
+let mut key = [0u8; 32];
+sys_get_random(&mut key)?;  // Fill with hardware entropy
+// Use key for ECDHE or other crypto
+```
+
+**Requirements**:
+- Cell must declare `GetRandom` in syscall allowlist (allowlist bit 41)
+- QEMU must be configured with `-object rng-random,id=rng0 -device virtio-rng-device,rng=rng0`
+- Kernel verifies VirtIO-RNG MMIO presence; returns 0 (silent) if absent
 
 ---
 
@@ -400,6 +446,55 @@ pub trait ViDriver: Send + Sync {
     }
 }
 ```
+
+### TLS API (Phase TLS-01)
+
+**Location**: `cells/services/net/src/main.rs` (IPC), `libs/ostd/src/tls.rs` (convenience functions)
+
+**Purpose**: Establish and manage TLS 1.3 encrypted connections for secure HTTPS and IoT protocols.
+
+**TLS IPC Opcodes** (network service):
+
+| Opcode | Name | Payload | Reply |
+|--------|------|---------|-------|
+| `0x30` | TLS_CONNECT | [addr:4 LE][port:2 LE][hostname:*] | [cap_id:8 LE] or [0;8] |
+| `0x31` | TLS_SEND | [plaintext_data:*] | [bytes_written:4 LE] |
+| `0x32` | TLS_RECV | [max_len:4 LE] | [decrypted_data:*] |
+
+**Convenience Functions** (Rust):
+```rust
+use ostd::tls;
+
+/// Establish TLS 1.3 connection to host:port via SNI.
+/// Returns session capability handle.
+pub fn tls_connect(host: &str, port: u16) -> ViResult<u64>;
+
+/// Send plaintext; receives encrypted bytes back.
+pub fn tls_write(cap_id: u64, data: &[u8]) -> ViResult<usize>;
+
+/// Receive and decrypt data from session.
+pub fn tls_read(cap_id: u64, buf: &mut [u8]) -> ViResult<usize>;
+
+/// Close session and free TLS state.
+pub fn tls_close(cap_id: u64) -> ViResult<()>;
+```
+
+**Requirements**:
+- `GetRandom` (syscall 214) available for ECDHE key derivation
+- VirtIO-RNG device configured in QEMU
+- Embedded CA root certificates (no external PKI infrastructure)
+
+**Example** (HTTPS GET):
+```rust
+let cap = tls::tls_connect("example.com", 443)?;
+let request = b"GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n";
+tls::tls_write(cap, request)?;
+let mut response = [0u8; 4096];
+let bytes_read = tls::tls_read(cap, &mut response)?;
+tls::tls_close(cap)?;
+```
+
+**Status**: Blocking handshake (acceptable for G1 robot/embedded demo); Phase 25+ async TLS planned.
 
 ### Specialized Driver Traits
 
@@ -780,7 +875,7 @@ fn handle_request(request: &[u8]) -> ViResult<Box<[u8]>> {
 
     match command {
         "ping" => Ok(b"pong".to_vec().into_boxed_slice()),
-        "version" => Ok(b"ViOS 0.2.0".to_vec().into_boxed_slice()),
+        "version" => Ok(b"ViCell 0.2.0".to_vec().into_boxed_slice()),
         _ => Err(ViError::NotSupported),
     }
 }
@@ -858,4 +953,4 @@ pub fn open_v2(&self, path: &str, mode: OpenMode) -> ViResult<Box<dyn ViFile>>;
 
 **Last Updated**: 2026-01-07
 **Version**: 0.2.0
-**Maintainer**: ViOS Team
+**Maintainer**: ViCell Team

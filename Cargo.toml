@@ -14,6 +14,7 @@ members = [
     "hal/traits/timer",
     "hal/traits/interrupt",
     "hal/traits/uart",
+    "hal/traits/gpio",
     "hal/traits/display",
     "hal/arch/riscv",
     "hal/arch/arm",
@@ -21,6 +22,7 @@ members = [
     
     # Cells - Drivers
     "cells/drivers/disk",
+    "cells/drivers/gpio",
     "cells/drivers/gpu",
     "cells/drivers/input",
     "cells/drivers/net",
@@ -42,14 +44,15 @@ members = [
     "cells/apps/vfs-test",
     "cells/apps/wasm",
     "cells/apps/hello",
+    "cells/apps/periph-demo",
+    "cells/apps/periph-test",
+    "cells/apps/robot-demo",
     "cells/apps/utils",
     "cells/apps/sys-tools",
     "cells/apps/net-tools",
+    "cells/apps/https-demo",
     "cells/apps/test-isolation",
 
-    # Cells - Runtimes
-    "cells/runtimes/lua",
-    "cells/runtimes/micropython",
 ]
 
 [workspace.package]

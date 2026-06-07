@@ -46,12 +46,15 @@ pub mod cell_opcodes {
     /// Receive one UDP datagram; reply = [src_addr:4][src_port:2 LE][data] or empty.
     pub const RECVFROM: u8      = 0x22;
     /// Join an IPv4 multicast group (group_addr[4]); reply = [0x00] ok / [0x01] err.
-    /// Iface-level (IGMP); the `cap` field is ignored. Bind a UDP socket to the
-    /// group's port to then receive via RECVFROM. Broadcast needs no opcode —
-    /// SENDTO to 255.255.255.255 and RECVFROM on a bound socket already work.
     pub const JOIN_MULTICAST: u8 = 0x23;
     /// Leave a previously-joined IPv4 multicast group (group_addr[4]); reply = [0x00]/[0x01].
     pub const LEAVE_MULTICAST: u8 = 0x24;
+    /// Initiate a TLS 1.3 connection: [addr:4][port:2 LE][hostname:*] → [cap:8 LE] or [0u8;8].
+    pub const TLS_CONNECT: u8 = 0x30;
+    /// Send data over an established TLS connection: [data:*] → [bytes:4 LE].
+    pub const TLS_SEND:    u8 = 0x31;
+    /// Receive data from a TLS connection: [buf_len:4 LE] → [data:*] or empty.
+    pub const TLS_RECV:    u8 = 0x32;
 }
 
 /// Decode a raw IPC payload into either a kernel frame event or a cell request.

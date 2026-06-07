@@ -47,4 +47,6 @@ Write-Host ""
         -netdev user,id=net0 `
         -device virtio-net-device,netdev=net0 `
         -device virtio-keyboard-device `
-        -device virtio-gpu-device
+        -device virtio-gpu-device `
+        -object rng-random,id=rng0 `
+        -device virtio-rng-device,rng=rng0

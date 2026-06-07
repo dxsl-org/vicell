@@ -345,12 +345,18 @@ pub trait ViBlockDevice {
 }
 ```
 
-### Networking (`ViTcpStack`, `ViTcpStream`)
+### Networking (`ViTcpStack`, `ViTcpStream`, TLS)
 ```rust
 pub trait ViTcpStack {
     async fn listen(&self, addr: &str, port: u16) -> ViResult<Box<dyn ViTcpListener>>;
     async fn connect(&self, addr: &str, port: u16) -> ViResult<Box<dyn ViTcpStream>>;
 }
+
+// TLS 1.3 Client (Phase TLS-01)
+// IPC Opcodes in net service:
+// - TLS_CONNECT (0x30): [addr:4 LE][port:2 LE][hostname:*] → [cap_id:8 LE]
+// - TLS_SEND (0x31): [data:*] → [bytes_written:4 LE]
+// - TLS_RECV (0x32): [max_len:4 LE] → [decrypted_data:*]
 ```
 
 ### Drivers (`ViDriver`)

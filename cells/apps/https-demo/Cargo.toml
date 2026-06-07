@@ -1,0 +1,8 @@
+[package]
+name = "app-https-demo"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ostd = { path = "../../../libs/ostd" }
+api  = { path = "../../../libs/api" }
