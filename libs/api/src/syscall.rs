@@ -139,6 +139,15 @@ pub enum ViSyscall {
     /// ABI: a0 = buf_ptr, a1 = len (max 64 per call, one VirtIO descriptor) → bytes written.
     /// Returns 0 if no VirtIO-RNG device is present.
     GetRandom = 214,
+    /// Allocate a persistent, pre-pinned Grant buffer for the cell's lifetime.
+    /// Unlike GrantAlloc, the buffer is not freed until GrantUnregister or cell exit.
+    /// ABI: a0 = size → reg_id (physical base, > 0) on success, 0 on OOM.
+    /// Requires GrantCap (allowlist bit 39).
+    GrantRegister = 215,
+    /// Release a registered buffer allocated via GrantRegister.
+    /// ABI: a0 = reg_id → 0 on success.
+    /// Requires GrantCap (allowlist bit 39).
+    GrantUnregister = 216,
 
     // === Hot-swap (Phase 20) ===
     /// Live-replace a running Cell without message loss.
@@ -293,7 +302,8 @@ impl ViSyscall {
             // Heartbeat is an open syscall (any cell asserts its own liveness).
             Self::Heartbeat     => Some(38),
             // GrantCap (bit 39): cells that need zero-copy large-file I/O via Grant API.
-            Self::GrantAlloc | Self::GrantShare | Self::GrantSlice | Self::GrantFree => Some(39),
+            Self::GrantAlloc | Self::GrantShare | Self::GrantSlice | Self::GrantFree
+            | Self::GrantRegister | Self::GrantUnregister => Some(39),
             // BlkReadAsync reuses BlockIoCap (bit 36) — same authority as raw block I/O.
             Self::BlkReadAsync  => Some(36),
             // RequestMmio: gated by GPIO (bit 40) or UART (bit 41) manifest flags.
@@ -365,6 +375,8 @@ impl From<usize> for ViSyscall {
             212 => ViSyscall::BlkReadAsync,
             213 => ViSyscall::RequestMmio,
             214 => ViSyscall::GetRandom,
+            215 => ViSyscall::GrantRegister,
+            216 => ViSyscall::GrantUnregister,
             300 => ViSyscall::GpuFlush,
             310 => ViSyscall::NetTx,
             311 => ViSyscall::NetRx,

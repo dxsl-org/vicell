@@ -28,6 +28,14 @@ use ostd::prelude::*;
 // Declares block-I/O capability; the kernel grants BlockIoCap at spawn.
 api::declare_manifest!(block_io = true, network = false, spawn = false);
 
+// Narrow syscall allowlist — kernel enforces this at dispatch (Phase 27).
+api::declare_syscalls![
+    Send, Recv, TryRecv, Reply, Log, Heartbeat, LookupService,
+    GrantAlloc, GrantShare, GrantSlice, GrantFree, BlkReadAsync,
+    GrantRegister, GrantUnregister,
+    StateStash, StateRestore,
+];
+
 // Embedded binaries served from /bin/ until VirtIO-FAT integration lands.
 static SHELL_ELF: &[u8] = include_bytes!("../../../../kernel/src/embedded/shell");
 static HELLO_ELF: &[u8] = include_bytes!("../../../../kernel/src/embedded/hello");

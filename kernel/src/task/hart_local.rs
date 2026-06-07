@@ -10,7 +10,10 @@
 //! `current_cell_id` field inside `ViHartLocal`.  Phase 03 adds per-hart
 //! ready queues and the work-stealing scheduler.
 
+pub mod ready;
+
 use crate::task::smp::MAX_HARTS;
+use alloc::collections::{BTreeMap, VecDeque};
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 /// Per-hart local state.
@@ -29,6 +32,12 @@ pub struct ViHartLocal {
     /// Value of `tp` that cells inherit on context switch.  Currently 0 (cells
     /// have no TLS); Phase 05 may give each cell a private tp.
     pub kernel_tp_for_cells: usize,  // offset 24
+    /// Per-hart ready queues keyed by priority (`u8`; higher = higher priority).
+    /// Leaf lock: may be locked while holding SCHEDULER, never the reverse.
+    pub ready: crate::sync::Spinlock<BTreeMap<u8, VecDeque<usize>>>,
+    /// Task ID currently running on this hart.  0 = idle.
+    /// Written by this hart only (in pick_next); read by others for zombie-reap.
+    pub current_task_id: AtomicUsize,
 }
 
 /// Static array of per-hart local state, one entry per supported hart.
@@ -41,6 +50,8 @@ pub static HART_LOCALS: [ViHartLocal; MAX_HARTS] = {
         current_cell_id: AtomicUsize::new(0),
         kernel_gp: 0,
         kernel_tp_for_cells: 0,
+        ready: crate::sync::Spinlock::new(BTreeMap::new()),
+        current_task_id: AtomicUsize::new(0),
     };
     [ZERO; MAX_HARTS]
 };

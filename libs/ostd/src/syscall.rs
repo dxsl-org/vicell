@@ -23,6 +23,7 @@ pub enum SyscallError {
 #[inline(always)]
 unsafe fn syscall(id: ViSyscall, a0: usize, a1: usize, a2: usize, a3: usize) -> isize {
     let mut ret: isize;
+    #[cfg(target_arch = "riscv64")]
     asm!(
         "ecall",
         inlateout("a0") a0 => ret,
@@ -30,6 +31,17 @@ unsafe fn syscall(id: ViSyscall, a0: usize, a1: usize, a2: usize, a3: usize) -> 
         in("a2") a2,
         in("a3") a3,
         in("a7") (id as usize),
+        options(nostack, preserves_flags)
+    );
+    // ViCell ARM64 ABI: x0=syscall_nr, x1=a0, x2=a1, x3=a2, x4=a3; ret in x0.
+    #[cfg(target_arch = "aarch64")]
+    asm!(
+        "svc #0",
+        inlateout("x0") id as usize => ret,
+        in("x1") a0,
+        in("x2") a1,
+        in("x3") a2,
+        in("x4") a3,
         options(nostack, preserves_flags)
     );
     ret
@@ -44,6 +56,7 @@ unsafe fn syscall(id: ViSyscall, a0: usize, a1: usize, a2: usize, a3: usize) -> 
 #[inline(always)]
 unsafe fn syscall_raw(id: usize, a0: usize, a1: usize, a2: usize, a3: usize) -> isize {
     let mut ret: isize;
+    #[cfg(target_arch = "riscv64")]
     asm!(
         "ecall",
         inlateout("a0") a0 => ret,
@@ -51,6 +64,16 @@ unsafe fn syscall_raw(id: usize, a0: usize, a1: usize, a2: usize, a3: usize) -> 
         in("a2") a2,
         in("a3") a3,
         in("a7") id,
+        options(nostack, preserves_flags)
+    );
+    #[cfg(target_arch = "aarch64")]
+    asm!(
+        "svc #0",
+        inlateout("x0") id => ret,
+        in("x1") a0,
+        in("x2") a1,
+        in("x3") a2,
+        in("x4") a3,
         options(nostack, preserves_flags)
     );
     ret
@@ -716,6 +739,20 @@ pub fn sys_get_time() -> u64 {
     if ret >= 0 { ret as u64 } else { 0 }
 }
 
+/// Nanoseconds since Unix epoch from the hardware RTC; 0 if no RTC is present.
+pub fn sys_get_wall_time() -> u64 {
+    // SAFETY: register-only syscall.
+    let ret = unsafe { syscall(ViSyscall::GetTime, 2, 0, 0, 0) };
+    if ret >= 0 { ret as u64 } else { 0 }
+}
+
+/// Seconds since Unix epoch from the hardware RTC; 0 if no RTC is present.
+pub fn sys_get_wall_secs() -> u64 {
+    // SAFETY: register-only syscall.
+    let ret = unsafe { syscall(ViSyscall::GetTime, 3, 0, 0, 0) };
+    if ret >= 0 { ret as u64 } else { 0 }
+}
+
 // ── Zero-Copy Grant API (Storage 2.0, Phase 01) ───────────────────────────────
 
 /// Allocate a contiguous kernel-managed Grant region of up to 16 pages (64 KB).
@@ -765,6 +802,32 @@ pub fn sys_grant_free(grant_id: usize) -> bool {
     ret == 0
 }
 
+/// Allocate a persistent pre-pinned Grant buffer that lives until the cell exits or
+/// calls `sys_grant_unregister`.
+///
+/// Unlike `sys_grant_alloc`, the buffer is not freed by the kernel between requests —
+/// it stays pinned for the cell's lifetime, enabling io_uring-style zero-copy I/O
+/// without per-transfer allocation overhead.
+///
+/// # Returns
+/// `Some(reg_id)` on success; `None` on OOM or size > 16 MiB cap.
+/// `reg_id` is the physical base address (identity-mapped in SAS).
+pub fn sys_grant_register(size: usize) -> Option<usize> {
+    // SAFETY: register-only; kernel allocates memory on our behalf.
+    let ret = unsafe { syscall(ViSyscall::GrantRegister, size, 0, 0, 0) };
+    if (ret as usize) != 0 { Some(ret as usize) } else { None }
+}
+
+/// Release a registered buffer allocated via `sys_grant_register` (owner-only).
+///
+/// # Returns
+/// `true` on success.
+pub fn sys_grant_unregister(reg_id: usize) -> bool {
+    // SAFETY: register-only; kernel cleans up the physical mapping.
+    let ret = unsafe { syscall(ViSyscall::GrantUnregister, reg_id, 0, 0, 0) };
+    ret == 0
+}
+
 /// Synchronous-but-zero-copy sector read into a pre-allocated Grant buffer.
 ///
 /// The grant must be owned by the caller and hold ≥ 512 bytes.
@@ -776,4 +839,29 @@ pub fn sys_blk_read_async(sector: u64, grant_id: usize) -> bool {
     // no additional pointer validation needed.
     let ret = unsafe { syscall(ViSyscall::BlkReadAsync, sector as usize, grant_id, 0, 0) };
     ret == 1
+}
+
+/// Request exclusive MMIO access for `[base, base+len)`.
+///
+/// Returns 0 on success, 1 for PermissionDenied, 2 for AlreadyExists, 3 for InvalidInput.
+/// Driver Cells call this via `ostd::mmio::request_region`.
+pub fn sys_request_mmio(base: usize, len: usize) -> usize {
+    let ret = unsafe { syscall(ViSyscall::RequestMmio, base, len, 0, 0) };
+    ret as usize
+}
+
+/// Fill `buf` with VirtIO-RNG entropy (true hardware randomness).
+///
+/// Required for TLS key generation — mtime-seeded PRNG is cryptographically broken.
+/// Caps each call at 64 bytes (one VirtIO descriptor limit); loop to fill larger buffers.
+/// Returns bytes written (0 if no VirtIO-RNG device is present — do not use for keys).
+///
+/// Requires `GetRandom` in the cell's `declare_syscalls!` list.
+pub fn sys_get_random(buf: &mut [u8]) -> usize {
+    // SAFETY: buf is a valid mutable slice; the kernel validates the pointer and writes
+    // exactly min(len, 64) bytes into it before returning the count.
+    let ret = unsafe {
+        syscall(ViSyscall::GetRandom, buf.as_mut_ptr() as usize, buf.len(), 0, 0)
+    };
+    if ret > 0 { ret as usize } else { 0 }
 }

@@ -67,17 +67,15 @@ pub fn subscribe_death(watched: usize, watcher: usize) {
     DEATH_SUBSCRIBERS.lock().entry(watched).or_default().push(watcher);
 }
 
-/// Priority-aware Scheduler with Central Task Table (Hubris-like).
+/// Central task table (Hubris-like).
 ///
-/// Three priority levels (Background=0, Normal=1, RealTime=2) are stored as
-/// separate `VecDeque` queues keyed by `u8`.  `pop_ready()` always returns
-/// from the highest non-empty level, giving O(1) selection for 3 levels.
+/// Ready queues and current_task_id are now PER-HART in `ViHartLocal::ready`
+/// and `ViHartLocal::current_task_id` (Phase 03).  This struct keeps only the
+/// shared state that requires the global SCHEDULER lock: the task table itself,
+/// the zombie list, and the next-id counter.
 pub struct Scheduler {
     pub tasks: BTreeMap<usize, Box<Task>>,
     pub zombies: Vec<Box<Task>>,
-    /// Per-priority ready queues.  Key = priority `u8`; higher key = higher priority.
-    pub ready_queues: BTreeMap<u8, VecDeque<usize>>,
-    pub current_task_id: Option<usize>,
     pub next_task_id: usize,
 }
 
@@ -92,42 +90,22 @@ impl Scheduler {
         Self {
             tasks: BTreeMap::new(),
             zombies: Vec::new(),
-            ready_queues: BTreeMap::new(),
-            current_task_id: None,
             next_task_id: 1,
         }
     }
 
-    /// Push task `id` onto the ready queue at its priority level.
+    /// Push task `id` onto the CALLING hart's local ready queue.
     ///
     /// Returns the priority level used so callers can optionally call
     /// `pend_preempt_if_needed(priority)` to trigger zero-latency RT preemption.
+    ///
+    /// Call while holding SCHEDULER (lock order: SCHEDULER → per-hart ready).
     pub fn push_ready(&mut self, id: usize) -> u8 {
         let priority = self.tasks.get(&id)
             .map(|t| t.priority)
             .unwrap_or(api::TaskPriority::Normal as u8);
-        self.ready_queues
-            .entry(priority)
-            .or_insert_with(VecDeque::new)
-            .push_back(id);
+        super::hart_local::ready::push_on_current_hart(id, priority);
         priority
-    }
-
-    /// Pop the task with the highest priority from the ready queues.
-    ///
-    /// Ties within the same priority level are broken by FIFO insertion order.
-    pub fn pop_ready(&mut self) -> Option<usize> {
-        for queue in self.ready_queues.values_mut().rev() {
-            if let Some(id) = queue.pop_front() {
-                return Some(id);
-            }
-        }
-        None
-    }
-
-    /// Total number of tasks across all priority ready queues.
-    pub fn ready_count(&self) -> usize {
-        self.ready_queues.values().map(|q| q.len()).sum()
     }
 
     /// Pend an S-mode software interrupt if `new_priority` exceeds the current
@@ -141,10 +119,11 @@ impl Scheduler {
     /// `sstatus.SIE` is restored by hardware.
     #[cfg(target_arch = "riscv64")]
     pub fn pend_preempt_if_needed(&self, new_priority: u8) {
-        let current_priority = self.current_task_id
-            .and_then(|id| self.tasks.get(&id))
-            .map(|t| t.priority)
-            .unwrap_or(0);
+        let hart_id = super::hart_local::current_hart_id();
+        let current_tid = super::hart_local::ready::current_task_id_for(hart_id);
+        let current_priority = if current_tid > 0 {
+            self.tasks.get(&current_tid).map(|t| t.priority).unwrap_or(0)
+        } else { 0 };
 
         if new_priority > current_priority {
             // SAFETY: csrsi on sip.SSIP is permitted from S-mode (RISC-V priv spec §4.1.3).
@@ -338,10 +317,8 @@ impl Scheduler {
         // events to a dead/reused TID. Supervisor re-registers after respawn.
         crate::task::drivers::virtio_input::clear_input_cell_if(tid);
 
-        // Remove from ready queues if present
-        for queue in self.ready_queues.values_mut() {
-            queue.retain(|&id| id != tid);
-        }
+        // Remove from every hart's ready queue if present.
+        super::hart_local::ready::remove_from_all(tid);
 
         // Best-effort IPC cleanup: unblock tasks stuck sending to the dead task,
         // and clear stale current_caller references.  Does not handle multi-hop
@@ -415,14 +392,13 @@ impl Scheduler {
     /// largest per-cell allocation) — without it, zombies accumulate forever and
     /// `Stack::drop` never runs (every cell death leaked its stacks).
     pub fn take_reapable_zombies(&mut self) -> Vec<Box<super::tcb::Task>> {
-        if self.zombies.is_empty() {
-            return Vec::new();
-        }
-        let current = self.current_task_id;
+        if self.zombies.is_empty() { return Vec::new(); }
         let mut keep = Vec::new();
         let mut reap = Vec::new();
         for z in core::mem::take(&mut self.zombies) {
-            if Some(z.id) == current {
+            // A zombie is reapable only if NO hart is currently context-switching
+            // through its saved Context.  Check all harts' current_task_id.
+            if super::hart_local::ready::any_hart_running(z.id) {
                 keep.push(z);
             } else {
                 reap.push(z);
@@ -432,15 +408,24 @@ impl Scheduler {
         reap
     }
 
-    /// Picks the next task to run and returns pointers for context switch.
+    /// Picks the next task to run on `hart_id` and returns pointers for context switch.
+    ///
+    /// Hart 0 also runs the global sweep (timer wakes, heartbeat, async-poll, watchdog).
+    /// Other harts only do the per-hart pick + work stealing.
+    ///
     /// Returns: Option<(current_context_ptr, next_context_ptr)>
     pub fn pick_next(
         &mut self,
+        hart_id: usize,
     ) -> Option<(
         *mut crate::hal::arch::Context,
         *const crate::hal::arch::Context,
     )> {
         let now = crate::task::system_ticks();
+        // Global sweep (timer wakes, heartbeat, async-poll, watchdog) runs on hart 0 only
+        // to prevent double-wake races on multihart setups.
+        if hart_id != 0 { return self.pick_next_local(hart_id, now); }
+        // === GLOBAL SWEEP (hart 0 only) === falls through to pick_next_local below.
 
         // 1. Wake tasks whose deadline elapsed: Sleeping (timer) and RecvTimeout
         //    (a Recv with a deadline). Without the RecvTimeout sweep a cell that
@@ -520,8 +505,11 @@ impl Scheduler {
             crate::resource_registry::release_for(CellId(cell_raw));
             crate::task::syscall::reap_grants_for_task(cell_raw as usize);
             self.exit_task(tid, usize::MAX);
-            if self.current_task_id == Some(tid) {
+            // If this hart was running the hung task, clear its attribution.
+            let hart_id = super::hart_local::current_hart_id();
+            if super::hart_local::ready::current_task_id_for(hart_id) == tid {
                 super::hart_local::set_current_cell_id(0);
+                super::hart_local::ready::set_current_task_id(hart_id, 0);
             }
         }
 
@@ -567,36 +555,34 @@ impl Scheduler {
             self.push_ready(id);
         }
 
+        // After global sweep, fall through to per-hart pick.
+        self.pick_next_local(hart_id, now)
+    }
+
+    /// Per-hart task selection: watchdog on current task, then pop from local queue
+    /// (with work-stealing fallback).  Called by `pick_next` for both hart 0
+    /// (after global sweep) and all other harts.
+    fn pick_next_local(
+        &mut self,
+        hart_id: usize,
+        _now: usize,
+    ) -> Option<(
+        *mut crate::hal::arch::Context,
+        *const crate::hal::arch::Context,
+    )> {
+        use super::hart_local::ready as rl;
+
         // 3. Decide if the current task yields, and run the CPU-monopoly watchdog.
-        //    A task found Running here either was timer-preempted or yielded without
-        //    blocking — either way it consumed this slice, so charge a run_tick. A
-        //    task that voluntarily blocked set a non-Running state before yielding,
-        //    so we reset its budget. Crossing WATCHDOG_BUDGET_TICKS means it never
-        //    blocked — a runaway/livelock — so we terminate it (kernel survives).
-        let current_id = self.current_task_id;
+        let current_id_raw = rl::current_task_id_for(hart_id);
+        let current_id: Option<usize> = if current_id_raw > 0 { Some(current_id_raw) } else { None };
         if let Some(cid) = current_id {
-            enum WdAction {
-                None,
-                Requeue,
-                Kill(u64),
-            }
+            enum WdAction { None, Requeue, Kill(u64) }
             let mut action = WdAction::None;
             if let Some(task) = self.tasks.get_mut(&cid) {
                 if task.state == TaskState::Running {
-                    // Only RealTime-priority tasks can livelock the system: they
-                    // always win pop_ready, so a pure-compute RT loop starves
-                    // everyone. Normal/Background compute-heavy cells are fine —
-                    // preemptive round-robin shares the CPU, so they cause no
-                    // starvation and must NOT be killed (that would false-positive
-                    // on legitimate heavy computation, e.g. a benchmark or sensor
-                    // fusion loop). Combined with the syscall-entry reset, this only
-                    // ever fires on an RT cell that runs pure compute (no syscalls)
-                    // past the budget — a genuine RT runaway.
+                    // Only RealTime-priority tasks can livelock the system.
                     if task.priority >= api::TaskPriority::RealTime as u8 {
                         task.run_ticks = task.run_ticks.saturating_add(1);
-                        // Early-warning (observability): one-shot audit when crossing the
-                        // warn threshold, BEFORE the hard kill — surfaces a degrading RT
-                        // loop while it can still be diagnosed.
                         if task.run_ticks >= WATCHDOG_WARN_TICKS && !task.rt_overrun_warned {
                             task.rt_overrun_warned = true;
                             crate::audit::log_event(
@@ -615,132 +601,95 @@ impl Scheduler {
                         action = WdAction::Requeue;
                     }
                 } else {
-                    // Voluntarily blocked (Recv/Sending/Sleeping/...) — not hogging.
                     task.run_ticks = 0;
                     task.rt_overrun_warned = false;
                 }
             }
             match action {
-                WdAction::Requeue => {
-                    self.push_ready(cid);
-                }
+                WdAction::Requeue => { self.push_ready(cid); }
                 WdAction::Kill(cell_raw) => {
                     log::error!(
                         "[watchdog] task {} (cell {}) monopolized CPU >{} ticks (~{}s) — terminating",
-                        cid,
-                        cell_raw,
-                        WATCHDOG_BUDGET_TICKS,
-                        WATCHDOG_BUDGET_TICKS / 100
+                        cid, cell_raw, WATCHDOG_BUDGET_TICKS, WATCHDOG_BUDGET_TICKS / 100
                     );
                     crate::audit::log_event(
                         crate::audit::AuditEvent::CellFault,
                         &crate::audit::encode_u32x2(cell_raw as u32, WATCHDOG_SCAUSE),
                     );
-                    // Release resources the runaway owned (these lock their own
-                    // state, not SCHEDULER, so they are safe to call inline here).
                     crate::fast_ipc::clear_vfs_if_cell(cell_raw as usize);
                     crate::memory::cell_quota::deregister(CellId(cell_raw));
                     crate::resource_registry::release_for(CellId(cell_raw));
                     crate::task::syscall::reap_grants_for_task(cell_raw as usize);
-                    // exit_task is a method on this already-locked Scheduler — no
-                    // SCHEDULER re-lock. Moves the runaway to zombies + wakes its
-                    // waiters; the pop_ready below then picks another ready task.
                     self.exit_task(cid, usize::MAX);
-                    // Drop the dead cell's attribution; step 4 overwrites this if a
-                    // next task is picked, else 0 (kernel) is correct for idle.
                     super::hart_local::set_current_cell_id(0);
+                    rl::set_current_task_id(hart_id, 0);
                 }
                 WdAction::None => {}
             }
         }
 
-        // 4. Get next task (highest-priority first; FIFO within same level)
-        let next_id = self.pop_ready();
+        // 4. Get next task: local queue first, then work-steal from busiest other hart.
+        let next_id = rl::pick_local(hart_id).or_else(|| {
+            super::hart_local::ready::steal_from_busiest(hart_id);
+            rl::pick_local(hart_id)
+        });
 
         if let Some(nid) = next_id {
             if let Some(next_task) = self.tasks.get_mut(&nid) {
                 next_task.state = TaskState::Running;
-                // Update CURRENT_CELL_ID so QuotaAlloc attributes allocations
-                // to the correct Cell during this task's execution.
                 super::hart_local::set_current_cell_id(next_task.cell_id.0 as usize);
             }
-
             if Some(nid) == current_id {
-                self.current_task_id = Some(nid);
+                rl::set_current_task_id(hart_id, nid);
                 return None; // No switch needed
             }
-
-            // Get a raw pointer to next task's context. The Task lives inside Box<Task>
-            // which is heap-allocated — its address is stable even if BTreeMap rebalances.
-            // We drop the reference immediately (converting to *const) so the immutable
-            // borrow does not alias the subsequent mutable borrow for curr_ctx.
-            // SAFETY: Box<Task> keeps the Task on the heap. Pointer is valid for as long as
-            // the Task remains in self.tasks or self.zombies (it is not removed until after
-            // the context switch returns and the task is explicitly reaped).
-            let next_ctx: *const crate::hal::arch::Context = self
-                .tasks
-                .get(&nid)
-                .map(|t| &t.context as *const _)
+            // SAFETY: Box<Task> pins the Task on the heap; pointer is valid until reap.
+            let next_ctx: *const crate::hal::arch::Context = self.tasks
+                .get(&nid).map(|t| &t.context as *const _)
                 .unwrap_or(core::ptr::null());
-            self.current_task_id = Some(nid);
+            rl::set_current_task_id(hart_id, nid);
 
             if let Some(cid) = current_id {
                 let curr_ctx: *mut crate::hal::arch::Context =
-                    if let Some(t) = self.tasks.get_mut(&cid) {
-                        &mut t.context as *mut _
-                    } else if let Some(t) = self.zombies.iter_mut().find(|t| t.id == cid) {
-                        &mut t.context as *mut _
-                    } else {
-                        core::ptr::null_mut()
-                    };
-
+                    if let Some(t) = self.tasks.get_mut(&cid) { &mut t.context as *mut _ }
+                    else if let Some(t) = self.zombies.iter_mut().find(|t| t.id == cid) { &mut t.context as *mut _ }
+                    else { core::ptr::null_mut() };
                 if !curr_ctx.is_null() && !next_ctx.is_null() {
                     return Some((curr_ctx, next_ctx));
                 }
             } else if !next_ctx.is_null() {
-                // First switch from boot context
-                return Some((core::ptr::null_mut(), next_ctx));
+                return Some((core::ptr::null_mut(), next_ctx)); // first switch from boot context
             }
         } else {
-            // No ready tasks.
-            // If we are currently running a zombie (exiting), we MUST switch to something. (Boot Context)
+            // No ready tasks. If running a zombie, switch to boot context.
             if let Some(cid) = current_id {
-                // Check if current is zombie
-                let is_zombie = self.zombies.iter().any(|t| t.id == cid);
-                if is_zombie {
-                    // unsafe {
-                        let curr_ctx = self
-                            .zombies
-                            .iter_mut()
-                            .find(|t| t.id == cid)
-                            .map(|t| &mut t.context as *mut _);
-                        if let Some(c) = curr_ctx {
-                            // Switch to NULL next (Boot Context)
-                            self.current_task_id = None;
-                            return Some((c, core::ptr::null()));
-                        }
-                    // }
+                if self.zombies.iter().any(|t| t.id == cid) {
+                    let curr_ctx = self.zombies.iter_mut()
+                        .find(|t| t.id == cid)
+                        .map(|t| &mut t.context as *mut _);
+                    if let Some(c) = curr_ctx {
+                        rl::set_current_task_id(hart_id, 0);
+                        return Some((c, core::ptr::null()));
+                    }
                 }
             }
-
-            self.current_task_id = None;
+            rl::set_current_task_id(hart_id, 0);
         }
-
         None
     }
 
     pub fn current_task_mut(&mut self) -> Option<&mut Task> {
-        self.current_task_id
-            .and_then(|id| self.tasks.get_mut(&id).map(|b| &mut **b))
+        let tid = super::hart_local::ready::current_task_id_for(super::hart_local::current_hart_id());
+        if tid > 0 { self.tasks.get_mut(&tid).map(|b| &mut **b) } else { None }
     }
 
     pub fn current_task_ref(&self) -> Option<&Task> {
-        self.current_task_id
-            .and_then(|id| self.tasks.get(&id).map(|b| &**b))
+        let tid = super::hart_local::ready::current_task_id_for(super::hart_local::current_hart_id());
+        if tid > 0 { self.tasks.get(&tid).map(|b| &**b) } else { None }
     }
 
     pub fn has_ready_tasks(&self) -> bool {
-        self.ready_queues.values().any(|q| !q.is_empty())
+        super::hart_local::ready::total_ready_count() > 0
     }
 }
 

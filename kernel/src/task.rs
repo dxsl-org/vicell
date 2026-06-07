@@ -208,8 +208,8 @@ pub fn terminate_current_cell_on_fault(scause: usize, sepc: usize) {
     // holds these, and force-unlocking a free lock is a no-op.
     unsafe { force_unlock_all_kernel_locks(); }
 
-    let task_id = SCHEDULER.lock().as_ref()
-        .and_then(|s| s.current_task_id);
+    let current_tid = hart_local::ready::current_task_id_for(hart_local::current_hart_id());
+    let task_id = if current_tid > 0 { Some(current_tid) } else { None };
 
     if let Some(tid) = task_id {
         if let Some(sched) = SCHEDULER.lock().as_mut() {
@@ -250,8 +250,9 @@ pub fn yield_cpu() {
     };
     drop(reaped);
 
+    let hart_id = hart_local::current_hart_id();
     let switch_info = if let Some(sched) = SCHEDULER.lock().as_mut() {
-        sched.pick_next()
+        sched.pick_next(hart_id)
     } else {
         None
     };
@@ -475,19 +476,11 @@ pub fn spawn_from_file(path: &str) -> core::result::Result<usize, ViError> {
 }
 
 pub fn current_task_id() -> usize {
-    if let Some(sched) = SCHEDULER.lock().as_ref() {
-        sched.current_task_id.unwrap_or(0)
-    } else {
-        0
-    }
+    hart_local::ready::current_task_id_for(hart_local::current_hart_id())
 }
 
 pub fn has_ready_tasks() -> bool {
-    if let Some(sched) = SCHEDULER.lock().as_ref() {
-        sched.has_ready_tasks()
-    } else {
-        false
-    }
+    hart_local::ready::total_ready_count() > 0
 }
 
 // Helper to resolve path relative to CWD
@@ -1045,11 +1038,8 @@ pub fn ipc_map(caller_id: usize, grant_id: usize) -> core::result::Result<usize,
 
 /// Get scheduler statistics
 pub fn scheduler_stats() -> (usize, usize) {
-    if let Some(sched) = SCHEDULER.lock().as_ref() {
-        (sched.tasks.len(), sched.ready_count())
-    } else {
-        (0, 0)
-    }
+    let task_count = if let Some(sched) = SCHEDULER.lock().as_ref() { sched.tasks.len() } else { 0 };
+    (task_count, hart_local::ready::total_ready_count())
 }
 
 pub fn futex_wait(caller_id: usize, addr: VAddr, val: u32) -> core::result::Result<usize, ()> {

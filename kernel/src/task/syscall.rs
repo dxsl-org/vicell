@@ -60,6 +60,161 @@ fn grant_table_lock() -> &'static Spinlock<Option<BTreeMap<usize, PageGrant>>> {
     &PAGE_GRANT_TABLE
 }
 
+/// Maximum pages in a single GrantAlloc or GrantRegister call (16 MiB ceiling).
+/// Acts as a safety cap; cells are further bounded by available physical frames.
+const MAX_GRANT_PAGES: usize = 4096;
+
+// ── Registered Grant Table (GrantRegister / GrantUnregister, syscalls 215/216) ──
+
+/// Persistent kernel-managed Grant buffer for a cell's lifetime.
+///
+/// Unlike `PageGrant`, a `RegGrant` has no `shared_to` field — the owner cell
+/// shares it with peers via the existing `GrantShare` syscall using the `reg_id`
+/// (physical base) as if it were a `grant_id`.
+struct RegGrant {
+    base:  usize,  // physical address of first allocated page
+    size:  usize,  // byte count (multiple of 4096)
+    owner: usize,  // task id — only owner may call GrantUnregister
+}
+
+static REG_GRANT_TABLE: Spinlock<Option<BTreeMap<usize, RegGrant>>> = Spinlock::new(None);
+
+fn reg_grant_table_lock() -> &'static Spinlock<Option<BTreeMap<usize, RegGrant>>> {
+    &REG_GRANT_TABLE
+}
+
+// ── Shared allocation/deallocation helpers ────────────────────────────────────
+
+/// Allocate `n_pages` contiguous physical frames, map them USER RW, and zero them.
+///
+/// Returns the physical base address on success, or `None` on OOM or partial map.
+/// Lock order: FRAME_ALLOCATOR (alloc) → FRAME_ALLOCATOR (map_page) → release →
+///             FRAME_ALLOCATOR (partial-failure dealloc).
+fn alloc_grant_pages(n_pages: usize) -> Option<usize> {
+    use crate::memory::frame::FRAME_ALLOCATOR;
+    use crate::memory::paging::Flags;
+    const PAGE_SIZE: usize = 4096;
+
+    let user_flags = Flags::VALID | Flags::READ | Flags::WRITE
+        | Flags::USER | Flags::ACCESSED | Flags::DIRTY;
+
+    let paddr = {
+        let mut g = FRAME_ALLOCATOR.lock();
+        g.as_mut().and_then(|a| a.allocate_contiguous(n_pages))?
+    };
+
+    let mut mapped = 0usize;
+    {
+        let mut guard = FRAME_ALLOCATOR.lock();
+        if let Some(alloc) = guard.as_mut() {
+            for i in 0..n_pages {
+                let v = paddr + i * PAGE_SIZE;
+                if crate::memory::paging::map_page(alloc, v, v, Flags::from_bits(user_flags)).is_ok() {
+                    mapped += 1;
+                } else {
+                    break;
+                }
+            }
+        }
+    }
+
+    if mapped < n_pages {
+        // Partial map: unmap what succeeded, then free all frames.
+        for i in 0..mapped {
+            let _ = crate::memory::paging::unmap_page(paddr + i * PAGE_SIZE);
+        }
+        #[cfg(target_arch = "riscv64")]
+        // SAFETY: RISC-V ISA requires sfence.vma after modifying PTEs.
+        unsafe { core::arch::asm!("sfence.vma", options(nostack)); }
+        let mut fa = FRAME_ALLOCATOR.lock();
+        if let Some(a) = fa.as_mut() {
+            for k in 0..n_pages { a.deallocate_frame(paddr + k * PAGE_SIZE); }
+        }
+        return None;
+    }
+
+    // Zero every mapped page before handing to user: prevents stale data from a
+    // previously-freed grant leaking to a different cell (info-disclosure under G2).
+    // SAFETY: frames are identity-mapped USER RW; SUM=1 allows S-mode writes.
+    unsafe { core::ptr::write_bytes(paddr as *mut u8, 0, n_pages * PAGE_SIZE); }
+
+    Some(paddr)
+}
+
+/// Unmap and deallocate `n_pages` physical frames starting at `base`.
+///
+/// Lock order: unmap_page (KERNEL_ROOT) → sfence.vma → FRAME_ALLOCATOR.
+/// Must NOT hold FRAME_ALLOCATOR when called.
+fn free_grant_pages(base: usize, n_pages: usize) {
+    use crate::memory::frame::FRAME_ALLOCATOR;
+    const PAGE_SIZE: usize = 4096;
+
+    for i in 0..n_pages {
+        let _ = crate::memory::paging::unmap_page(base + i * PAGE_SIZE);
+    }
+    #[cfg(target_arch = "riscv64")]
+    // SAFETY: RISC-V ISA requires sfence.vma after unmapping PTEs.
+    unsafe { core::arch::asm!("sfence.vma", options(nostack)); }
+    let mut fa = FRAME_ALLOCATOR.lock();
+    if let Some(alloc) = fa.as_mut() {
+        for k in 0..n_pages { alloc.deallocate_frame(base + k * PAGE_SIZE); }
+    }
+}
+
+// ── Grant Reaper ──────────────────────────────────────────────────────────────
+
+/// Reclaim all grant pages owned or held by a dying task.
+///
+/// Called from every task-exit code path (Exit syscall, ForceExit, scheduler watchdog).
+/// Two effects:
+///   1. Owner death  — remove entry, unmap pages, return frames to allocator.
+///   2. Grantee death — clear `shared_to` so the owner's grant becomes unshared.
+///
+/// Lock order: PAGE_GRANT_TABLE collect → unmap (KERNEL_ROOT) → FRAME_ALLOCATOR.
+/// Never holds FRAME_ALLOCATOR when calling free_grant_pages.
+pub(crate) fn reap_grants_for_task(dead_tid: usize) {
+    const PAGE_SIZE: usize = 4096;
+
+    // ── PAGE_GRANT_TABLE pass ─────────────────────────────────────────────────
+    let owned: alloc::vec::Vec<PageGrant> = {
+        let mut tbl = grant_table_lock().lock();
+        let Some(map) = tbl.as_mut() else { return };
+        // Clear grantee references (no removal needed — owner keeps the entry).
+        for grant in map.values_mut() {
+            if grant.shared_to.map_or(false, |(tid, _)| tid == dead_tid) {
+                grant.shared_to = None;
+            }
+        }
+        // Collect and remove owned entries.
+        let owned_keys: alloc::vec::Vec<usize> = map
+            .iter()
+            .filter(|(_, g)| g.owner == dead_tid)
+            .map(|(k, _)| *k)
+            .collect();
+        owned_keys.iter().filter_map(|k| map.remove(k)).collect()
+    }; // PAGE_GRANT_TABLE lock released
+
+    for grant in &owned {
+        free_grant_pages(grant.base, grant.size / PAGE_SIZE);
+    }
+
+    // ── REG_GRANT_TABLE pass ──────────────────────────────────────────────────
+    let reg_owned: alloc::vec::Vec<RegGrant> = {
+        let mut tbl = reg_grant_table_lock().lock();
+        let Some(map) = tbl.as_mut() else { return };
+        let owned_keys: alloc::vec::Vec<usize> = map
+            .iter()
+            .filter(|(_, g)| g.owner == dead_tid)
+            .map(|(k, _)| *k)
+            .collect();
+        owned_keys.iter().filter_map(|k| map.remove(k)).collect()
+    }; // REG_GRANT_TABLE lock released
+
+    for reg in &reg_owned {
+        free_grant_pages(reg.base, reg.size / PAGE_SIZE);
+    }
+}
+
 /// Result of a System Call
 pub type SyscallResult = core::result::Result<usize, SyscallError>;
 
@@ -335,6 +490,10 @@ pub enum Syscall {
     RequestMmio { base: usize, len: usize },
     /// 214: GetRandom — fill a caller buffer with VirtIO-RNG entropy bytes.
     GetRandom { buf_ptr: usize, len: usize },
+    /// 215: GrantRegister — allocate a persistent pre-pinned Grant buffer (lifetime = cell exit).
+    GrantRegister { size: usize },
+    /// 216: GrantUnregister — explicitly release a registered buffer.
+    GrantUnregister { reg_id: usize },
 }
 
 /// Read the per-Cell syscall allowlist from the TCB.
@@ -402,9 +561,11 @@ fn syscall_to_vi(syscall: &Syscall) -> Option<api::syscall::ViSyscall> {
         Syscall::GrantShare { .. }    => V::GrantShare,
         Syscall::GrantSlice { .. }    => V::GrantSlice,
         Syscall::GrantFree { .. }     => V::GrantFree,
-        Syscall::BlkReadAsync { .. }  => V::BlkReadAsync,
-        Syscall::RequestMmio { .. }   => V::RequestMmio,
-        Syscall::GetRandom { .. }     => V::GetRandom,
+        Syscall::BlkReadAsync { .. }    => V::BlkReadAsync,
+        Syscall::RequestMmio { .. }    => V::RequestMmio,
+        Syscall::GetRandom { .. }      => V::GetRandom,
+        Syscall::GrantRegister { .. }  => V::GrantRegister,
+        Syscall::GrantUnregister { .. }=> V::GrantUnregister,
         // Always-permitted; allowlist_bit() returns None → filter is a no-op.
         Syscall::Yield
         | Syscall::Exit { .. }
@@ -827,6 +988,9 @@ pub fn handle_syscall(caller_id: usize, syscall: Syscall) -> SyscallResult {
             crate::memory::cell_quota::deregister(cell_id);
             crate::resource_registry::release_for(cell_id);
 
+            // Free any grant pages this cell owned or held as grantee.
+            reap_grants_for_task(caller_id);
+
             // Clear any fast-IPC handler registered by this cell so a future
             // call_vfs does not jump into the now-freed ELF pages.
             // (fault/watchdog paths already call this; voluntary Exit did not.)
@@ -884,10 +1048,11 @@ pub fn handle_syscall(caller_id: usize, syscall: Syscall) -> SyscallResult {
                 return Err(SyscallError::InvalidCommand);
             }
 
-            // Cap + quota + MMIO cleanup — same as Exit handler (syscall.rs:650-653).
+            // Cap + quota + MMIO cleanup — same as Exit handler.
             crate::cell::cap_registry::CAP_TABLE.lock().revoke_all_for(target_cell_id);
             crate::memory::cell_quota::deregister(target_cell_id);
             crate::resource_registry::release_for(target_cell_id);
+            reap_grants_for_task(tid);
 
             crate::audit::log_event(
                 crate::audit::AuditEvent::CellExit,
@@ -1390,17 +1555,60 @@ pub fn handle_syscall(caller_id: usize, syscall: Syscall) -> SyscallResult {
         }
         
         Syscall::GetTime { op } => {
-            // Read the hardware mtime register via the HAL (time CSR, 10 MHz on QEMU RV64).
-            // system_ticks() is a software counter that is never incremented; using it
-            // caused sys_get_time() to always return 0, making sleep loops infinite.
-            #[cfg(target_arch = "riscv64")]
-            let mtime = hal::common::timer::read_mtime() as usize;
-            #[cfg(not(target_arch = "riscv64"))]
-            let mtime = 0usize;
-            if op == 0 {
-                Ok(mtime)
-            } else {
-                Ok(mtime / 1_000_000) // op=1 → milliseconds
+            match op {
+                // op=0: raw monotonic ticks (arch-specific frequency)
+                0 => {
+                    #[cfg(target_arch = "riscv64")]
+                    let t = hal::common::timer::read_mtime() as usize;
+                    #[cfg(target_arch = "aarch64")]
+                    let t = hal::timer::read_ticks() as usize;
+                    #[cfg(target_arch = "x86_64")]
+                    let t = hal::hpet::now_ns() as usize;
+                    #[cfg(not(any(target_arch = "riscv64", target_arch = "aarch64", target_arch = "x86_64")))]
+                    let t = 0usize;
+                    Ok(t)
+                }
+                // op=1: milliseconds since boot
+                1 => {
+                    // 10 MHz mtime on QEMU RV64 → 10_000 ticks/ms
+                    #[cfg(target_arch = "riscv64")]
+                    let ms = (hal::common::timer::read_mtime() / 10_000) as usize;
+                    // 62.5 MHz CNTPCT on QEMU ARM64 virt → 62_500 ticks/ms
+                    #[cfg(target_arch = "aarch64")]
+                    let ms = (hal::timer::read_ticks() / 62_500) as usize;
+                    // HPET already returns nanoseconds; ÷ 1_000_000 → ms
+                    #[cfg(target_arch = "x86_64")]
+                    let ms = (hal::hpet::now_ns() / 1_000_000) as usize;
+                    #[cfg(not(any(target_arch = "riscv64", target_arch = "aarch64", target_arch = "x86_64")))]
+                    let ms = 0usize;
+                    Ok(ms)
+                }
+                // op=2: nanoseconds since Unix epoch (wall-clock)
+                2 => {
+                    #[cfg(target_arch = "riscv64")]
+                    let ns = hal::common::rtc::now_epoch_ns() as usize;
+                    #[cfg(target_arch = "aarch64")]
+                    let ns = hal::rtc::now_epoch_ns() as usize;
+                    #[cfg(target_arch = "x86_64")]
+                    let ns = hal::rtc::now_epoch_ns() as usize;
+                    #[cfg(not(any(target_arch = "riscv64", target_arch = "aarch64", target_arch = "x86_64")))]
+                    let ns = 0usize;
+                    Ok(ns)
+                }
+                // op=3: seconds since Unix epoch (wall-clock)
+                3 => {
+                    #[cfg(target_arch = "riscv64")]
+                    let s = (hal::common::rtc::now_epoch_ns() / 1_000_000_000) as usize;
+                    #[cfg(target_arch = "aarch64")]
+                    let s = (hal::rtc::now_epoch_ns() / 1_000_000_000) as usize;
+                    #[cfg(target_arch = "x86_64")]
+                    let s = (hal::rtc::now_epoch_ns() / 1_000_000_000) as usize;
+                    #[cfg(not(any(target_arch = "riscv64", target_arch = "aarch64", target_arch = "x86_64")))]
+                    let s = 0usize;
+                    Ok(s)
+                }
+                // Unknown op — return 0 for backward compatibility
+                _ => Ok(0),
             }
         }
         Syscall::GpuFlush { data_ptr, data_len, xy, wh } => {
@@ -1606,60 +1814,15 @@ pub fn handle_syscall(caller_id: usize, syscall: Syscall) -> SyscallResult {
         // ── Zero-Copy Grant Syscalls (Phase 01, Storage 2.0) ─────────────────
 
         Syscall::GrantAlloc { size } => {
-            const MAX_GRANT_PAGES: usize = 16;
             const PAGE_SIZE: usize = 4096;
             if size == 0 || size > MAX_GRANT_PAGES * PAGE_SIZE {
-                return Ok(0); // OOM-style sentinel per F10
+                return Ok(0); // size == 0 or > 16 MiB cap — OOM sentinel per F10
             }
             let n_pages = (size + PAGE_SIZE - 1) / PAGE_SIZE;
-            use crate::memory::frame::FRAME_ALLOCATOR;
-            use crate::memory::paging::Flags;
-            let user_flags = Flags::VALID | Flags::READ | Flags::WRITE
-                | Flags::USER | Flags::ACCESSED | Flags::DIRTY;
-            // Allocate contiguous frames (marks them used in the bitmap immediately).
-            let paddr = {
-                let mut g = FRAME_ALLOCATOR.lock();
-                g.as_mut().and_then(|a| a.allocate_contiguous(n_pages))
+            let paddr = match alloc_grant_pages(n_pages) {
+                Some(p) => p,
+                None    => return Ok(0),
             };
-            let paddr = match paddr { Some(p) => p, None => return Ok(0) };
-            // Map each frame USER RW. Lock order: FRAME_ALLOCATOR → KERNEL_ROOT (via map_page).
-            // Identity map: vaddr == paddr so VirtIO DMA addresses remain correct in SAS.
-            let mut mapped = 0usize;
-            {
-                let mut guard = FRAME_ALLOCATOR.lock();
-                if let Some(alloc) = guard.as_mut() {
-                    for i in 0..n_pages {
-                        let v = paddr + i * PAGE_SIZE;
-                        if crate::memory::paging::map_page(
-                            alloc, v, v, Flags::from_bits(user_flags),
-                        ).is_ok() {
-                            mapped += 1;
-                        } else {
-                            break;
-                        }
-                    }
-                }
-            }
-            if mapped < n_pages {
-                // Partial map: unmap what succeeded, then free all frames.
-                for i in 0..mapped {
-                    let _ = crate::memory::paging::unmap_page(paddr + i * PAGE_SIZE);
-                }
-                // SAFETY: RISC-V ISA requires sfence.vma after modifying PTEs.
-                #[cfg(target_arch = "riscv64")]
-                unsafe { core::arch::asm!("sfence.vma", options(nostack)); }
-                let mut fa = FRAME_ALLOCATOR.lock();
-                if let Some(a) = fa.as_mut() {
-                    for k in 0..n_pages { a.deallocate_frame(paddr + k * PAGE_SIZE); }
-                }
-                return Ok(0);
-            }
-            // Zero every mapped page before handing to user: prevents stale data from a
-            // previously-freed grant leaking to a different cell (info-disclosure under G2).
-            // SAFETY: frames are identity-mapped USER RW, mapped above; SUM=1 allows S-mode writes.
-            unsafe {
-                core::ptr::write_bytes(paddr as *mut u8, 0, n_pages * PAGE_SIZE);
-            }
             // Register in the grant table.
             let mut tbl = grant_table_lock().lock();
             if tbl.is_none() { *tbl = Some(BTreeMap::new()); }
@@ -1715,20 +1878,48 @@ pub fn handle_syscall(caller_id: usize, syscall: Syscall) -> SyscallResult {
                     }
                 })
             };
-            let entry = match entry { Some(e) => e, None => return Err(SyscallError::PermissionDenied) };
-            let n_pages = entry.size / 4096;
-            // Unmap first (acquires KERNEL_ROOT internally — must NOT hold FRAME_ALLOCATOR).
-            for i in 0..n_pages {
-                let _ = crate::memory::paging::unmap_page(entry.base + i * 4096);
+            let entry = match entry {
+                Some(e) => e,
+                None    => return Err(SyscallError::PermissionDenied),
+            };
+            free_grant_pages(entry.base, entry.size / 4096);
+            Ok(0)
+        }
+
+        Syscall::GrantRegister { size } => {
+            const PAGE_SIZE: usize = 4096;
+            if size == 0 || size > MAX_GRANT_PAGES * PAGE_SIZE {
+                return Ok(0); // OOM sentinel per F10
             }
-            // SAFETY: RISC-V ISA requires sfence.vma after unmapping PTEs.
-            #[cfg(target_arch = "riscv64")]
-            unsafe { core::arch::asm!("sfence.vma", options(nostack)); }
-            // Return frames to the allocator.
-            let mut fa = crate::memory::frame::FRAME_ALLOCATOR.lock();
-            if let Some(alloc) = fa.as_mut() {
-                for k in 0..n_pages { alloc.deallocate_frame(entry.base + k * 4096); }
+            let n_pages = (size + PAGE_SIZE - 1) / PAGE_SIZE;
+            let paddr = match alloc_grant_pages(n_pages) {
+                Some(p) => p,
+                None    => return Ok(0),
+            };
+            let mut tbl = reg_grant_table_lock().lock();
+            if tbl.is_none() { *tbl = Some(BTreeMap::new()); }
+            if let Some(map) = tbl.as_mut() {
+                map.insert(paddr, RegGrant { base: paddr, size: n_pages * PAGE_SIZE, owner: caller_id });
             }
+            Ok(paddr) // reg_id == physical base
+        }
+
+        Syscall::GrantUnregister { reg_id } => {
+            let entry = {
+                let mut tbl = reg_grant_table_lock().lock();
+                tbl.as_mut().and_then(|m| {
+                    if m.get(&reg_id).map_or(false, |g| g.owner == caller_id) {
+                        m.remove(&reg_id)
+                    } else {
+                        None
+                    }
+                })
+            };
+            let entry = match entry {
+                Some(e) => e,
+                None    => return Err(SyscallError::PermissionDenied),
+            };
+            free_grant_pages(entry.base, entry.size / 4096);
             Ok(0)
         }
 
@@ -1858,8 +2049,10 @@ fn map_syscall(syscall_id: usize, a0: usize, a1: usize, a2: usize, a3: usize) ->
         ViSyscall::GrantSlice    => Syscall::GrantSlice { grant_id: a0 },
         ViSyscall::GrantFree     => Syscall::GrantFree { grant_id: a0 },
         ViSyscall::BlkReadAsync  => Syscall::BlkReadAsync { sector: a0 as u64, grant_id: a1 },
-        ViSyscall::RequestMmio   => Syscall::RequestMmio { base: a0, len: a1 },
-        ViSyscall::GetRandom     => Syscall::GetRandom { buf_ptr: a0, len: a1 },
+        ViSyscall::RequestMmio      => Syscall::RequestMmio { base: a0, len: a1 },
+        ViSyscall::GetRandom        => Syscall::GetRandom { buf_ptr: a0, len: a1 },
+        ViSyscall::GrantRegister    => Syscall::GrantRegister { size: a0 },
+        ViSyscall::GrantUnregister  => Syscall::GrantUnregister { reg_id: a0 },
         _ => match syscall_id {
             3   => Syscall::SetTimer { deadline: a0 },
             100 => Syscall::ServiceLookup { name_ptr: a0, name_len: a1 },
@@ -1926,11 +2119,15 @@ pub extern "Rust" fn ViCell_syscall_dispatch(frame: &mut ViTrapFrame) {
     // Watchdog progress signal: a syscall proves the caller is making progress
     // (ViCell cells are poll-based — try_recv/yield every loop iteration), so
     // reset its CPU-monopoly counter.
-    if let Some(sched) = super::SCHEDULER.lock().as_mut() {
-        if let Some(cid) = sched.current_task_id {
-            if let Some(t) = sched.tasks.get_mut(&cid) {
-                t.run_ticks = 0;
-                t.rt_overrun_warned = false;
+    {
+        let hart_id = super::hart_local::current_hart_id();
+        let cid = super::hart_local::ready::current_task_id_for(hart_id);
+        if cid > 0 {
+            if let Some(sched) = super::SCHEDULER.lock().as_mut() {
+                if let Some(t) = sched.tasks.get_mut(&cid) {
+                    t.run_ticks = 0;
+                    t.rt_overrun_warned = false;
+                }
             }
         }
     }
@@ -1977,11 +2174,15 @@ pub extern "Rust" fn ViCell_syscall_dispatch(frame: &mut crate::hal::arch::ViTra
     let syscall_id = frame.regs[17] as usize;
 
     // Watchdog: syscall proves the cell is making forward progress.
-    if let Some(sched) = super::SCHEDULER.lock().as_mut() {
-        if let Some(cid) = sched.current_task_id {
-            if let Some(t) = sched.tasks.get_mut(&cid) {
-                t.run_ticks = 0;
-                t.rt_overrun_warned = false;
+    {
+        let hart_id = super::hart_local::current_hart_id();
+        let cid = super::hart_local::ready::current_task_id_for(hart_id);
+        if cid > 0 {
+            if let Some(sched) = super::SCHEDULER.lock().as_mut() {
+                if let Some(t) = sched.tasks.get_mut(&cid) {
+                    t.run_ticks = 0;
+                    t.rt_overrun_warned = false;
+                }
             }
         }
     }

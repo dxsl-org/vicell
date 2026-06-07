@@ -98,33 +98,43 @@ pub fn start_secondaries() {}
 ///
 /// a0 = hart_id (set by OpenSBI per SBI HSM §9.1.1).
 ///
-/// Installs the trap vector on this hart, marks the hart online, then parks
-/// in WFI.  Phase 03 replaces the park loop with the per-hart scheduler round.
+/// Installs the trap vector, enables the timer, runs the per-hart scheduler loop.
 #[no_mangle]
 pub extern "C" fn smp_hart_entry(hart_id: usize) -> ! {
-    // Install the trap vector on this hart (each hart has its own stvec CSR).
-    // `hal::ARCH.init()` sets stvec + enables SSIE — safe to call from any hart.
+    // Install the trap vector (each hart has its own stvec CSR).
+    // `hal::ARCH.init()` sets stvec + enables SSIE.
     #[cfg(target_arch = "riscv64")]
     {
-        use hal::Arch; // bring the Arch trait into scope for `.init()`
+        use hal::Arch;
         hal::ARCH.init();
     }
 
-    // Install per-hart local state so current_cell_id() is correct on this hart.
-    // Phase 02 fills in the real implementation; the call is a no-op until then.
+    // Install per-hart local state (current_cell_id, tp, ready queues).
     #[cfg(target_arch = "riscv64")]
     crate::task::hart_local::install(hart_id);
+
+    // Enable S-mode timer interrupt and arm the first tick on this hart.
+    // Each hart has its own mtimecmp register via SBI; arming here starts
+    // the 10ms preemption slice for this hart.
+    #[cfg(target_arch = "riscv64")]
+    {
+        // SAFETY: csrs on sie is always legal from S-mode (RISC-V priv spec §4.1.3).
+        unsafe { core::arch::asm!("csrs sie, {stie}", stie = in(reg) 0x20usize); }
+        let next = hal::common::timer::read_mtime() + hal::common::timer::TICKS_PER_10MS;
+        hal::common::sbi::set_timer(next);
+    }
 
     // Signal hart 0's bounded wait that we are ready.
     if hart_id < MAX_HARTS {
         HART_ONLINE[hart_id].store(true, Ordering::Release);
     }
 
-    // Phase 03 replaces this with the per-hart scheduler loop.
+    // Per-hart scheduler loop.  The timer ISR (vi_timer_tick) calls yield_cpu()
+    // which runs pick_next for THIS hart (work-stealing from hart 0 if idle).
+    // Between ticks we sit in WFI to save power.  Interrupts are enabled on
+    // entry (ARCH.init() sets sstatus.SIE=1), so WFI fires on the timer ISR.
     loop {
-        // SAFETY: wfi is a privileged S-mode hint that suspends the hart until
-        // the next interrupt.  No state is mutated; resuming after an IPI or
-        // timer is idempotent for a parked hart.
+        // SAFETY: wfi suspends until the next interrupt; state is unchanged.
         #[cfg(any(target_arch = "riscv64", target_arch = "riscv32"))]
         unsafe { core::arch::asm!("wfi", options(nomem, nostack)) };
         core::hint::spin_loop();
