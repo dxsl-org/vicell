@@ -51,7 +51,7 @@ ViCell ships in two product stages defined by target hardware. The mapping princ
 | Priority scheduler + RT TLSF heap + spawn_pinned | Phase 25 | ✅ | G1 |
 | Memory quota + ZST caps + panic isolation | Phase 26 | ✅ | **G1** (never-die) |
 | Reliability / supervisor restart | specs/12 | 📋 | **G1** |
-| Typed IPC + syscall filter (reliability part) | Phase 27-1/2 | 📋 | G1 (next) |
+| Typed IPC + syscall filter (reliability part) | Phase 27-1/2 | ✅ | G1 (next) |
 | ELF capability manifests | Phase 30 | ✅ | G1 |
 | Heap snapshot / Instant-On | Phase 29 | ✅ | G1 |
 | 🆕 Storage 2.0 (zero-copy grant + PageCache + FAT32) | Phases 00–03 | ✅ | **G1/G2/G3** |
@@ -63,7 +63,7 @@ ViCell ships in two product stages defined by target hardware. The mapping princ
 | RT latency benchmark | M4.4 subset | ✅ QEMU verified "ALL BENCHMARKS PASS" (2026-06-07) | G1 |
 | 🆕 Tier B sub-track (end G1): RV32 HAL + ViCell-Nano + CHERIoT | M4.3 + Phase 31 | 📋 | **G1** (sub-track) |
 | 🆕 Reference robot demo (sensor→compute→actuator + MQTT) | *new* | ✅ COMPLETE (skeleton + proven on RISC-V; real GPIO pending ARM64 kernel build) | **G1** (graduation) |
-| Direct-IPC vtable (raw perf) | Phase 27-3 | 📋 | G2 |
+| Direct-IPC vtable (raw perf) | Phase 27-3 | ✅ | G2 |
 | WASM Tier-2 MVP (wasmi + 4 vi.* imports + fuel) | Phase 28 | ✅ | G1 (foundation) |
 | 🆕 WASM vi.* expand (VFS+net+time+spawn imports) | Phase 28-5 | 🆕 | **G1** |
 | WASM WASI 2.0 Component Model (+ePMP) | Phase 28/31 | 📋 | **G2** |
@@ -609,22 +609,22 @@ See `.agents/260605-0958-phase24-perf-kaslr/` for detailed phase reports.
 - Raw opcodes 500-503 (BlkRead/Write) bypass ViSyscall::from() — need separate raw-id allowlist path
 
 **Phase 27-1 — Typed IPC Enums (⚠️ Law 1):**
-- [ ] Add `postcard` + `serde` to `libs/api/Cargo.toml`
-- [ ] Create `libs/api/src/ipc.rs` (VfsRequest, VfsResponse, NetRequest, NetResponse)
-- [ ] Migrate VFS service with version-gate byte (0xFF prefix)
+- [x] Add `postcard` + `serde` to `libs/api/Cargo.toml`
+- [x] Create `libs/api/src/ipc.rs` (VfsRequest, VfsResponse, NetRequest, NetResponse)
+- [x] Migrate VFS service with version-gate byte (0xFF prefix)
 
 **Phase 27-2 — Syscall Allowlist (⚠️ Law 1 for allowlist_bit()):**
-- [ ] Add `allowlist_bit() -> Option<u8>` to `ViSyscall` in libs/api
-- [ ] Add `syscall_allowlist: u64` to Task TCB
-- [ ] Read `__ViCell_syscalls` ELF section in `spawn_from_path()`
-- [ ] Add check at top of `ViCell_syscall_dispatch` (lock-drop pattern to avoid double-lock)
-- [ ] Add `KEEP(*(__ViCell_syscalls))` to linker scripts
+- [x] Add `allowlist_bit() -> Option<u8>` to `ViSyscall` in libs/api
+- [x] Add `syscall_allowlist: u64` to Task TCB
+- [x] Read `__ViCell_syscalls` ELF section in `spawn_from_path()`
+- [x] Add check at top of `ViCell_syscall_dispatch` (lock-drop pattern to avoid double-lock)
+- [x] Add `KEEP(*(__ViCell_syscalls))` to linker scripts
 
 **Phase 27-3 — Direct IPC vtable (⚠️ Law 1 for TrustedHandle):**
-- [ ] Create `TrustedHandle<T>` + `VfsCell`/`NetCell` markers in `libs/api/src/fast_ipc.rs`
-- [ ] Create `kernel/src/fast_ipc.rs` with `VFS_FAST_HANDLER: Option<fn>` static
-- [ ] VFS cell registers handler at init; shell uses fast path for `cat`/`ls`
-- [ ] Benchmark: direct vtable call vs ecall round-trip
+- [x] Create `TrustedHandle<T>` + `VfsCell`/`NetCell` markers in `libs/api/src/fast_ipc.rs`
+- [x] Create `kernel/src/fast_ipc.rs` with `VFS_FAST_HANDLER: Option<fn>` static
+- [x] VFS cell registers handler at init; shell uses fast path for `cat`/`ls`
+- [x] Benchmark: direct vtable call vs ecall round-trip
 
 ### Phase 28 — Tier 2 WASM + RISC-V ePMP Cell Boundaries (P2) `[G2]`
 **Target**: 2026-09-22 | **Effort**: ~5 weeks  

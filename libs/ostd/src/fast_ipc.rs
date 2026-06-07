@@ -79,10 +79,52 @@ pub extern "Rust" fn vi_clear_fast_ipc_vfs_cell(cell_id: usize) {
     clear_vfs_if_cell(cell_id);
 }
 
+/// RAII guard: disables S-mode interrupt enable (SIE) on construction, restores on drop.
+///
+/// Ensures SIE is always restored even if the fast-IPC handler panics (drop glue
+/// runs before the panic handler, so the restore is guaranteed).
+struct SieGuard(bool);
+
+impl SieGuard {
+    /// Disable SIE and return a guard.  Noop on non-riscv64.
+    ///
+    /// # Safety
+    /// Must be called from S-mode.
+    #[inline]
+    unsafe fn disable() -> Self {
+        #[cfg(target_arch = "riscv64")]
+        {
+            let v: usize;
+            // SAFETY: csrrci reads-and-clears sstatus.SIE (bit 1) atomically.
+            core::arch::asm!("csrrci {}, sstatus, 0x2", out(reg) v);
+            Self(v & 0x2 != 0)
+        }
+        #[cfg(not(target_arch = "riscv64"))]
+        Self(false)
+    }
+}
+
+impl Drop for SieGuard {
+    fn drop(&mut self) {
+        if self.0 {
+            // SAFETY: restoring SIE to the state saved in disable(); S-mode only.
+            #[cfg(target_arch = "riscv64")]
+            unsafe { core::arch::asm!("csrsi sstatus, 0x2"); }
+        }
+    }
+}
+
 /// Call the registered VFS handler directly, bypassing the ecall trap.
 ///
 /// Returns the number of bytes written into `out`, or 0 if no handler is
 /// registered (caller should fall back to the `sys_send` / `sys_recv` path).
+///
+/// # Note (PIE limitation)
+/// For non-PIE cells (current default), each cell ELF has its own copy of
+/// `VFS_HANDLER_PTR` (statically linked from `libs/ostd`).  VFS writes to its
+/// copy; client cells read from theirs (null) → always fallback to ecall.
+/// The fast path activates once cells are compiled as PIE and the kernel loader
+/// patches JUMP_SLOT relocations to `kernel::fast_ipc::call_vfs` (G2 work).
 ///
 /// # Safety
 /// The caller must own `out` exclusively for the duration of this call.
@@ -100,27 +142,11 @@ pub unsafe fn call_vfs(
     // SAFETY: ptr was stored by register_vfs from a valid VfsFastHandler.
     let handler: VfsFastHandler = core::mem::transmute(ptr);
 
-    // Disable S-mode interrupts for the handler's duration.
-    // VFS's FAT16 driver holds a spinlock; timer-preemption mid-handler could
-    // switch to another VFS caller and deadlock on the same spinlock.
-    #[cfg(target_arch = "riscv64")]
-    let sie_was_set = {
-        let v: usize;
-        // SAFETY: csrrci reads and clears SIE (bit 1) atomically from S-mode.
-        core::arch::asm!("csrrci {}, sstatus, 0x2", out(reg) v);
-        v & 0x2 != 0
-    };
-    #[cfg(not(target_arch = "riscv64"))]
-    let sie_was_set = false;
+    // Disable S-mode interrupts for the handler's duration. VFS's FAT32 driver
+    // holds a spinlock; timer-preemption mid-handler to another VFS caller would
+    // deadlock on it. SieGuard restores on drop — safe even on handler panic.
+    // SAFETY: called from S-mode; SieGuard::disable is safe here.
+    let _sie = SieGuard::disable();
 
-    let result = handler(req, out);
-
-    // Restore SIE to its prior state.
-    // SAFETY: restoring to the value we saved above; no invariant violated.
-    #[cfg(target_arch = "riscv64")]
-    if sie_was_set {
-        core::arch::asm!("csrsi sstatus, 0x2");
-    }
-
-    result
+    handler(req, out)
 }

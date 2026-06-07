@@ -20,11 +20,14 @@ use core::marker::PhantomData;
 pub struct TrustedHandle<T>(PhantomData<T>);
 
 impl<T> TrustedHandle<T> {
-    /// Create a `TrustedHandle`.  Intended for kernel spawn code only — the
-    /// kernel creates one and stores it alongside the spawned task's capabilities.
-    /// The effective gate is `call_vfs` returning 0 when VFS has not registered:
-    /// holding the token without a live VFS handler is a no-op.
-    pub fn new() -> Self {
+    /// Create a `TrustedHandle`.  `pub(crate)` — only `libs/api` itself can
+    /// construct one directly; external callers use `TrustedHandle::default()`.
+    ///
+    /// In SAS the unforgeability is advisory (all cells share the address space),
+    /// but the restriction documents intent: only kernel-authorized paths should
+    /// hold the token.  `Default` is intentionally left `pub` so callers outside
+    /// this crate can use `TrustedHandle::default()`.
+    pub(crate) fn new() -> Self {
         Self(PhantomData)
     }
 }

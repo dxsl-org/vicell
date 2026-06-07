@@ -57,11 +57,57 @@ pub fn clear_vfs_if_cell(cell_id_raw: usize) {
     }
 }
 
+/// RAII guard that restores the S-mode interrupt-enable bit (SIE) on drop.
+///
+/// Constructed by disabling SIE and recording its prior state.  `Drop` restores
+/// it, so SIE is always restored even if the handler panics (Rust drop glue runs
+/// before the panic handler, giving the guard a chance to clean up).
+struct SieGuard(
+    /// `true` if SIE was set before we disabled it; `false` = was already clear.
+    bool,
+);
+
+impl SieGuard {
+    /// Disable SIE and return a guard that will restore it.
+    ///
+    /// # Safety
+    /// Must be called from S-mode.
+    #[inline]
+    unsafe fn disable() -> Self {
+        #[cfg(target_arch = "riscv64")]
+        {
+            let v: usize;
+            // SAFETY: csrrci reads-and-clears sstatus.SIE (bit 1) atomically.
+            core::arch::asm!("csrrci {}, sstatus, 0x2", out(reg) v);
+            Self(v & 0x2 != 0)
+        }
+        #[cfg(not(target_arch = "riscv64"))]
+        Self(false)
+    }
+}
+
+impl Drop for SieGuard {
+    fn drop(&mut self) {
+        if self.0 {
+            // SAFETY: restoring SIE to the value saved in disable(); S-mode only.
+            #[cfg(target_arch = "riscv64")]
+            unsafe { core::arch::asm!("csrsi sstatus, 0x2"); }
+        }
+    }
+}
+
 /// Call the registered VFS handler directly, bypassing the `ecall` trap. Returns
 /// bytes written into `out`, or 0 if no handler is registered (caller falls back
 /// to the `sys_send`/`sys_recv` path).
 ///
 /// `#[no_mangle]` so a client Cell's undefined `call_vfs` import resolves here.
+///
+/// # Note (PIE limitation)
+/// For non-PIE cells (current default), each cell ELF links `libs/ostd` statically
+/// and gets its own copy of `VFS_HANDLER_PTR` — so `call_vfs` in the shell reads
+/// null and always takes the ecall fallback.  The fast path becomes effective once
+/// cells are compiled as PIE and the loader patches JUMP_SLOT relocations to this
+/// kernel function.  The fallback is always safe.
 ///
 /// # Safety
 /// The caller must own `out` exclusively for the call. `_handle` documents that
@@ -81,27 +127,11 @@ pub unsafe extern "Rust" fn call_vfs(
 
     // Disable S-mode interrupts for the handler's duration. The VFS FAT16 driver
     // holds a spinlock; timer preemption mid-handler to another VFS caller would
-    // deadlock on it. This makes the fast path an atomic critical section w.r.t.
-    // the scheduler.
-    #[cfg(target_arch = "riscv64")]
-    let sie_was_set = {
-        let v: usize;
-        // SAFETY: csrrci reads and clears SIE (bit 1) atomically from S-mode.
-        core::arch::asm!("csrrci {}, sstatus, 0x2", out(reg) v);
-        v & 0x2 != 0
-    };
-    #[cfg(not(target_arch = "riscv64"))]
-    let sie_was_set = false;
+    // deadlock on it. SieGuard restores SIE on drop — safe even on handler panic.
+    // SAFETY: called from S-mode trap handler context.
+    let _sie = SieGuard::disable();
 
-    let result = handler(req, out);
-
-    // SAFETY: restore SIE to its prior state; csrsi sstatus,0x2 sets bit 1.
-    #[cfg(target_arch = "riscv64")]
-    if sie_was_set {
-        core::arch::asm!("csrsi sstatus, 0x2");
-    }
-
-    result
+    handler(req, out)
 }
 
 /// Resolve a kernel-exported symbol name to its runtime address — the loader's
@@ -113,8 +143,8 @@ pub unsafe extern "Rust" fn call_vfs(
 /// permitted in const eval — so resolution is a runtime match.)
 pub fn resolve_export(name: &str) -> Option<usize> {
     match name {
-        "register_vfs" => Some(register_vfs as usize),
-        "call_vfs" => Some(call_vfs as usize),
+        "register_vfs" => Some(register_vfs as *const () as usize),
+        "call_vfs"     => Some(call_vfs     as *const () as usize),
         _ => None,
     }
 }

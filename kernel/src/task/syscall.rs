@@ -331,14 +331,119 @@ pub enum Syscall {
     GrantFree { grant_id: usize },
     /// 212: BlkReadAsync — synchronous-but-zero-copy sector read into a Grant buffer.
     BlkReadAsync { sector: u64, grant_id: usize },
+    /// 213: RequestMmio — claim exclusive MMIO range for a peripheral Driver Cell.
+    RequestMmio { base: usize, len: usize },
+    /// 214: GetRandom — fill a caller buffer with VirtIO-RNG entropy bytes.
+    GetRandom { buf_ptr: usize, len: usize },
+}
+
+/// Read the per-Cell syscall allowlist from the TCB.
+///
+/// Returns `u64::MAX` (permit-all) for unknown tids — safe default during
+/// early boot before the scheduler is initialised.
+fn get_syscall_allowlist(caller_id: usize) -> u64 {
+    super::SCHEDULER
+        .lock()
+        .as_ref()
+        .and_then(|s| s.tasks.get(&caller_id))
+        .map(|t| t.syscall_allowlist)
+        .unwrap_or(u64::MAX)
+}
+
+/// Map a kernel-internal `Syscall` variant to its `ViSyscall` representation
+/// for allowlist bit lookup.
+///
+/// Returns `None` for:
+/// - Raw block-I/O ops (500-503): ZST-gated via `BlockIoCap`, not filtered here.
+/// - Legacy/internal variants (FutexWait, BorrowRead, Lend, …): no bit assigned.
+/// - Always-permitted syscalls (Yield, Exit, …): `allowlist_bit()` returns `None`.
+fn syscall_to_vi(syscall: &Syscall) -> Option<api::syscall::ViSyscall> {
+    use api::syscall::ViSyscall as V;
+    Some(match syscall {
+        Syscall::Send { .. }          => V::Send,
+        Syscall::Recv { .. }          => V::Recv,
+        Syscall::TryRecv { .. }       => V::TryRecv,
+        Syscall::RecvTimeout { .. }   => V::RecvTimeout,
+        Syscall::SendGather { .. }    => V::SendGather,
+        Syscall::RecvScatter { .. }   => V::RecvScatter,
+        Syscall::Reply { .. }         => V::Reply,
+        Syscall::Spawn { .. }         => V::Spawn,
+        Syscall::SpawnFromMem { .. }  => V::SpawnFromMem,
+        Syscall::SpawnFromPath { .. } => V::SpawnFromPath,
+        Syscall::SpawnPinned { .. }   => V::SpawnPinned,
+        Syscall::Wait { .. }          => V::Wait,
+        Syscall::Log { .. }           => V::Log,
+        Syscall::SetTimer { .. }      => V::SetTimer,
+        Syscall::ShmAlloc { .. }      => V::ShmAlloc,
+        Syscall::ShmMap { .. }        => V::ShmMap,
+        Syscall::GetProcs { .. }      => V::GetProcs,
+        Syscall::OpenCap { .. }       => V::OpenCap,
+        Syscall::ReadCap { .. }       => V::ReadCap,
+        Syscall::CloseCap { .. }      => V::CloseCap,
+        Syscall::Open { .. }          => V::Open,
+        Syscall::Read { .. }          => V::Read,
+        Syscall::Write { .. }         => V::Write,
+        Syscall::Close { .. }         => V::Close,
+        Syscall::ReadDir { .. }       => V::ReadDir,
+        Syscall::Seek { .. }          => V::Seek,
+        Syscall::FileOp { .. }        => V::FileOp,
+        Syscall::GetTime { .. }       => V::GetTime,
+        Syscall::GpuFlush { .. }      => V::GpuFlush,
+        Syscall::NetTx { .. }         => V::NetTx,
+        Syscall::NetRx { .. }         => V::NetRx,
+        Syscall::HotSwap { .. }       => V::HotSwap,
+        Syscall::Snapshot             => V::Snapshot,
+        Syscall::StateStash { .. }    => V::StateStash,
+        Syscall::StateRestore { .. }  => V::StateRestore,
+        Syscall::Exec { .. }          => V::Exec,
+        Syscall::LookupService { .. } => V::LookupService,
+        Syscall::Heartbeat { .. }     => V::Heartbeat,
+        Syscall::GrantAlloc { .. }    => V::GrantAlloc,
+        Syscall::GrantShare { .. }    => V::GrantShare,
+        Syscall::GrantSlice { .. }    => V::GrantSlice,
+        Syscall::GrantFree { .. }     => V::GrantFree,
+        Syscall::BlkReadAsync { .. }  => V::BlkReadAsync,
+        Syscall::RequestMmio { .. }   => V::RequestMmio,
+        Syscall::GetRandom { .. }     => V::GetRandom,
+        // Always-permitted; allowlist_bit() returns None → filter is a no-op.
+        Syscall::Yield
+        | Syscall::Exit { .. }
+        | Syscall::ForceExit { .. }
+        | Syscall::NotifyOnExit { .. }
+        | Syscall::RegisterService { .. } => return None,
+        // Raw block-I/O (500-503): ZST BlockIoCap gated at dispatch.
+        Syscall::BlkRead { .. }
+        | Syscall::BlkWrite { .. }
+        | Syscall::BlkFlush
+        | Syscall::Shutdown => return None,
+        // Legacy / internal variants without allowlist bits.
+        _ => return None,
+    })
 }
 
 /// Dispatches a system call to the appropriate handler.
 ///
 /// `caller_id` is the ID of the task invoking the syscall.
 pub fn handle_syscall(caller_id: usize, syscall: Syscall) -> SyscallResult {
-    // Info log reduced to Debug to reduce noise
-    // info!("Syscall (Task {}): Dispatched {:?}", caller_id, syscall);
+    // Syscall allowlist enforcement: reject if this syscall's bit is not set in
+    // the per-Cell bitset loaded from ELF section `__ViCell_syscalls`.
+    // Cells without that section default to u64::MAX (permit-all, backwards compat).
+    if let Some(vi) = syscall_to_vi(&syscall) {
+        if let Some(bit) = vi.allowlist_bit() {
+            let allowed = get_syscall_allowlist(caller_id);
+            if (allowed >> bit) & 1 == 0 {
+                log::warn!(
+                    "[kernel] syscall {:?} denied for tid {} (allowlist={:#018x})",
+                    vi, caller_id, allowed
+                );
+                crate::audit::log_event(
+                    crate::audit::AuditEvent::SyscallDenied,
+                    &crate::audit::encode_u32x2(caller_id as u32, bit as u32),
+                );
+                return Err(SyscallError::PermissionDenied);
+            }
+        }
+    }
 
     match syscall {
         // --- Hubris ABI Implementation ---
@@ -718,8 +823,14 @@ pub fn handle_syscall(caller_id: usize, syscall: Syscall) -> SyscallResult {
             // inherit them.
             crate::cell::cap_registry::CAP_TABLE.lock().revoke_all_for(cell_id);
 
-            // Release the Cell's memory quota entry.
+            // Release the Cell's memory quota entry and any MMIO regions it held.
             crate::memory::cell_quota::deregister(cell_id);
+            crate::resource_registry::release_for(cell_id);
+
+            // Clear any fast-IPC handler registered by this cell so a future
+            // call_vfs does not jump into the now-freed ELF pages.
+            // (fault/watchdog paths already call this; voluntary Exit did not.)
+            crate::fast_ipc::clear_vfs_if_cell(cell_id.0 as usize);
 
             // yield_cpu switches away; this task is never rescheduled.
             super::yield_cpu();
@@ -773,9 +884,10 @@ pub fn handle_syscall(caller_id: usize, syscall: Syscall) -> SyscallResult {
                 return Err(SyscallError::InvalidCommand);
             }
 
-            // Cap + quota cleanup — same as Exit handler (syscall.rs:650-653).
+            // Cap + quota + MMIO cleanup — same as Exit handler (syscall.rs:650-653).
             crate::cell::cap_registry::CAP_TABLE.lock().revoke_all_for(target_cell_id);
             crate::memory::cell_quota::deregister(target_cell_id);
+            crate::resource_registry::release_for(target_cell_id);
 
             crate::audit::log_event(
                 crate::audit::AuditEvent::CellExit,
@@ -1281,7 +1393,10 @@ pub fn handle_syscall(caller_id: usize, syscall: Syscall) -> SyscallResult {
             // Read the hardware mtime register via the HAL (time CSR, 10 MHz on QEMU RV64).
             // system_ticks() is a software counter that is never incremented; using it
             // caused sys_get_time() to always return 0, making sleep loops infinite.
+            #[cfg(target_arch = "riscv64")]
             let mtime = hal::common::timer::read_mtime() as usize;
+            #[cfg(not(target_arch = "riscv64"))]
+            let mtime = 0usize;
             if op == 0 {
                 Ok(mtime)
             } else {
@@ -1388,10 +1503,10 @@ pub fn handle_syscall(caller_id: usize, syscall: Syscall) -> SyscallResult {
             }
         }
         Syscall::Shutdown => {
-            // SAFETY: SBI System Reset (ext 0x53525354, fid 0, type Shutdown) from
-            // S-mode. The ecall traps to OpenSBI (M-mode), which powers off QEMU.
-            // Control never returns, so the unreachable `Ok` value is irrelevant.
+            // RISC-V: SBI System Reset via ecall. ARM64: spin loop (PSCI not yet wired).
+            #[cfg(target_arch = "riscv64")]
             unsafe {
+                // SAFETY: ecall traps to OpenSBI which powers off QEMU; no return.
                 core::arch::asm!(
                     "li a7, 0x53525354",  // SBI_EXT_SRST
                     "li a6, 0",           // fid = SYSTEM_RESET
@@ -1401,6 +1516,8 @@ pub fn handle_syscall(caller_id: usize, syscall: Syscall) -> SyscallResult {
                     options(noreturn)
                 );
             }
+            #[cfg(not(target_arch = "riscv64"))]
+            loop { unsafe { core::arch::asm!("wfi", options(nomem, nostack)); } }
         }
         Syscall::BlkRead { sector, buf_ptr } => {
             if !caller_has_block_io(caller_id) {
@@ -1527,6 +1644,7 @@ pub fn handle_syscall(caller_id: usize, syscall: Syscall) -> SyscallResult {
                     let _ = crate::memory::paging::unmap_page(paddr + i * PAGE_SIZE);
                 }
                 // SAFETY: RISC-V ISA requires sfence.vma after modifying PTEs.
+                #[cfg(target_arch = "riscv64")]
                 unsafe { core::arch::asm!("sfence.vma", options(nostack)); }
                 let mut fa = FRAME_ALLOCATOR.lock();
                 if let Some(a) = fa.as_mut() {
@@ -1602,6 +1720,7 @@ pub fn handle_syscall(caller_id: usize, syscall: Syscall) -> SyscallResult {
                 let _ = crate::memory::paging::unmap_page(entry.base + i * 4096);
             }
             // SAFETY: RISC-V ISA requires sfence.vma after unmapping PTEs.
+            #[cfg(target_arch = "riscv64")]
             unsafe { core::arch::asm!("sfence.vma", options(nostack)); }
             // Return frames to the allocator.
             let mut fa = crate::memory::frame::FRAME_ALLOCATOR.lock();
@@ -1609,6 +1728,37 @@ pub fn handle_syscall(caller_id: usize, syscall: Syscall) -> SyscallResult {
                 for k in 0..n_pages { alloc.deallocate_frame(entry.base + k * 4096); }
             }
             Ok(0)
+        }
+
+        Syscall::RequestMmio { base, len } => {
+            // Gate: caller's ELF manifest must declare gpio or uart cap.
+            let allowed = {
+                let sched = super::SCHEDULER.lock();
+                sched.as_ref()
+                    .and_then(|s| s.tasks.get(&caller_id))
+                    .map(|t| t.mmio_cap)
+                    .unwrap_or(false)
+            };
+            if !allowed {
+                return Err(SyscallError::PermissionDenied);
+            }
+            match crate::resource_registry::request_mmio(types::CellId(caller_id as u64), base, len) {
+                Ok(()) => Ok(0),
+                Err(types::ViError::PermissionDenied) => Ok(1),
+                Err(types::ViError::AlreadyExists)    => Ok(2),
+                Err(_)                                => Ok(3),
+            }
+        }
+
+        Syscall::GetRandom { buf_ptr, len } => {
+            // Cap at 64 bytes per call (one VirtIO-RNG descriptor).
+            let capped = len.min(64);
+            if capped == 0 { return Ok(0); }
+            // SAFETY: SUM is enabled by the caller (ViCell_syscall_dispatch). buf_ptr is
+            // a user-space pointer in the same SAS; we write exactly `capped` bytes.
+            let buf = unsafe { core::slice::from_raw_parts_mut(buf_ptr as *mut u8, capped) };
+            let written = crate::task::drivers::virtio_rng::get_random(buf);
+            Ok(written)
         }
 
         Syscall::BlkReadAsync { sector, grant_id } => {
@@ -1642,9 +1792,10 @@ pub fn handle_syscall(caller_id: usize, syscall: Syscall) -> SyscallResult {
 }
 
 use api::syscall::ViSyscall;
-use hal::arch::ViTrapFrame;
+use crate::hal::arch::ViTrapFrame;
 
 #[no_mangle]
+#[allow(non_snake_case)] // ABI name required by the HAL trap vector — cannot be snake_case
 pub extern "Rust" fn ViCell_syscall_dispatch(frame: &mut ViTrapFrame) {
     let syscall_id = frame.regs[17];
 
@@ -1742,6 +1893,8 @@ pub extern "Rust" fn ViCell_syscall_dispatch(frame: &mut ViTrapFrame) {
         ViSyscall::GrantSlice    => Syscall::GrantSlice { grant_id: a0 },
         ViSyscall::GrantFree     => Syscall::GrantFree { grant_id: a0 },
         ViSyscall::BlkReadAsync  => Syscall::BlkReadAsync { sector: a0 as u64, grant_id: a1 },
+        ViSyscall::RequestMmio   => Syscall::RequestMmio { base: a0, len: a1 },
+        ViSyscall::GetRandom     => Syscall::GetRandom { buf_ptr: a0, len: a1 },
 
         // Handle non-matching/legacy manually
         _ => match syscall_id {

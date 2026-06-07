@@ -1,6 +1,6 @@
 # Phase 03 — Direct IPC vtable
 
-**Status**: 📋 PLANNED  
+**Status**: ✅ DONE (2026-06-07) — infrastructure complete; fast path activates with PIE cells (G2)  
 **Priority**: P2  
 **Effort**: 5 days  
 **Depends on**: Phase 01 (typed messages), Phase 26 (SpawnCap / TrustedHandle concept)
