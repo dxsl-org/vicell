@@ -4,9 +4,6 @@ use virtio_drivers::device::blk::VirtIOBlk;
 use virtio_drivers::transport::mmio::{MmioTransport, VirtIOHeader};
 use virtio_drivers::transport::{DeviceType, Transport};
 
-const VIRTIO0: usize = 0x10001000;
-const VIRTIO_MMIO_INTERVAL: usize = 0x1000;
-const VIRTIO_MAX_DEVICES: usize = 8;
 
 pub struct SafeVirtIOBlk(VirtIOBlk<VirtioHal, MmioTransport>);
 unsafe impl Send for SafeVirtIOBlk {}
@@ -26,41 +23,39 @@ pub unsafe fn force_unlock_locks() {
 }
 
 pub fn init_driver() {
-    log::debug!("VirtIO Block: probing MMIO slots...");
+    use crate::task::drivers::virtio_common::virtio_slots;
+    log::debug!("VirtIO Block: probing DTB-confirmed MMIO slots...");
 
-    for i in 0..VIRTIO_MAX_DEVICES {
-        let addr = VIRTIO0 + i * VIRTIO_MMIO_INTERVAL;
-        // SAFETY: addr is a QEMU virt MMIO slot that is identity-mapped by
-        // init_kernel_paging; the pointer is valid for the VirtIOHeader layout.
-        let header = unsafe { core::ptr::NonNull::new_unchecked(addr as *mut VirtIOHeader) };
-
-        // SAFETY: header points to a valid VirtIO MMIO region (identity-mapped above).
-        // MmioTransport::new reads the magic/version fields to validate the device;
-        // an invalid slot returns Err without memory-safety issues.
+    for slot in virtio_slots() {
+        // SAFETY: slot.base is a DTB-declared VirtIO MMIO address identity-mapped
+        // by init_kernel_paging. MmioTransport::new validates magic/version and
+        // returns Err for any non-VirtIO or unclaimed slot.
+        let header = unsafe { core::ptr::NonNull::new_unchecked(slot.base as *mut VirtIOHeader) };
         match unsafe { MmioTransport::new(header) } {
             Ok(transport) => {
                 if transport.device_type() == DeviceType::Block {
                     match VirtIOBlk::<VirtioHal, MmioTransport>::new(transport) {
                         Ok(blk) => {
-                            let mut locked_dev = BLOCK_DEVICE.lock();
-                            *locked_dev = Some(SafeVirtIOBlk(blk));
-                            // Record which IRQ this slot maps to (QEMU: slot i → IRQ i+1).
-                            *BLOCK_DEVICE_IRQ.lock() = (i as u32) + 1;
-                            log::info!("VirtIO Block: initialized at MMIO slot {}", i);
-                            return; // Only support 1 block device for now
+                            *BLOCK_DEVICE.lock() = Some(SafeVirtIOBlk(blk));
+                            *BLOCK_DEVICE_IRQ.lock() = slot.irq;
+                            log::info!("VirtIO Block: initialized at {:#x} irq={}", slot.base, slot.irq);
+                            return;
                         }
                         Err(e) => {
-                            log::warn!("VirtIO Block: init error at slot {}: {:?}", i, e);
+                            log::warn!("VirtIO Block: init error at {:#x}: {:?}", slot.base, e);
                         }
                     }
                 }
             }
-            Err(_) => {
-                // Ignore invalid devices
-            }
+            Err(_) => {}
         }
     }
-    log::debug!("VirtIO Block: no device found in MMIO range");
+    log::debug!("VirtIO Block: no device found");
+}
+
+/// Returns `true` when a VirtIO block device was successfully probed.
+pub fn is_present() -> bool {
+    BLOCK_DEVICE.lock().is_some()
 }
 
 /// Called from the trap handler when any VirtIO MMIO IRQ fires (IRQs 1-8).
@@ -122,9 +117,15 @@ impl ViBlockDevice for viVirtIOBlk {
         // Defensive: log once if the spin-count suggests a hung device (e.g.,
         // disk image not attached to QEMU command line, or MMIO not mapped).
         // Use the hardware TIME CSR (monotonic, no software ticker needed).
+        #[cfg(target_arch = "riscv64")]
         let t0 = riscv::register::time::read();
+        #[cfg(not(target_arch = "riscv64"))]
+        let t0 = 0usize;
         let result = dev.0.read_blocks(sector as usize, buf);
+        #[cfg(target_arch = "riscv64")]
         let elapsed = riscv::register::time::read().wrapping_sub(t0);
+        #[cfg(not(target_arch = "riscv64"))]
+        let elapsed = 0usize;
         if elapsed > POLL_WARN_TICKS {
             log::warn!(
                 "[virtio-blk] read sector {} took {} ticks — possible hang (no disk image?)",
@@ -144,9 +145,15 @@ impl ViBlockDevice for viVirtIOBlk {
             return Err(ViError::NotFound);
         };
 
+        #[cfg(target_arch = "riscv64")]
         let t0 = riscv::register::time::read();
+        #[cfg(not(target_arch = "riscv64"))]
+        let t0 = 0usize;
         let result = dev.0.write_blocks(sector as usize, buf);
+        #[cfg(target_arch = "riscv64")]
         let elapsed = riscv::register::time::read().wrapping_sub(t0);
+        #[cfg(not(target_arch = "riscv64"))]
+        let elapsed = 0usize;
         if elapsed > POLL_WARN_TICKS {
             log::warn!(
                 "[virtio-blk] write sector {} took {} ticks — possible hang (no disk image?)",

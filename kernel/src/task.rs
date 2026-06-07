@@ -168,6 +168,7 @@ unsafe fn force_unlock_all_kernel_locks() {
     crate::cell::hotswap::force_unlock_locks();
     crate::cell::service_registry::force_unlock_locks();
     crate::task::drivers::virtio_blk::force_unlock_locks();
+    crate::task::drivers::mmc::force_unlock_locks();
     crate::resource_registry::force_unlock_locks();
 }
 

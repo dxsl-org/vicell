@@ -7,6 +7,7 @@ license = "MPL-2.0"
 [dependencies]
 types = { path = "../libs/types" }
 api = { path = "../libs/api" }
+hal-traits-mmc = { path = "../hal/traits/mmc" }
 log = { version = "0.4", default-features = false }
 virtio-drivers = "0.7.0"
 linked_list_allocator = "0.10"
@@ -43,3 +44,5 @@ default = []
 # Real VisionFive2 JH7110 board — adjusts fallback DRAM map to 0x4000_0000.
 # Build: RUSTFLAGS="-C relocation-model=pic" cargo build --release --features board-vf2
 board-vf2 = []
+# Raspberry Pi 4 (BCM2711): enables SDHCI probe at 0xFE340000 (Arasan eMMC2).
+board-rpi4 = []

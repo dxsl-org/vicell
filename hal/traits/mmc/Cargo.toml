@@ -1,0 +1,7 @@
+[package]
+name = "hal-traits-mmc"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+types = { path = "../../../libs/types" }

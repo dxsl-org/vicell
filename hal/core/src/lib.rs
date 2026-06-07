@@ -9,6 +9,7 @@ pub mod traits {
     pub use hal_interrupt::*;
     pub use hal_paging::*;
     pub use hal_timer::*;
+    pub use hal_traits_mmc::*;
     pub use hal_uart::*;
 }
 pub use traits::*; // Khớp với cấu trúc hal/traits của mày
@@ -43,5 +44,5 @@ pub use hal_x86::*;
     feature = "x86_64"
 )))]
 compile_error!(
-    "Mày phải chọn 'riscv64', 'riscv32', 'aarch64', hoặc 'x86_64' thì ViOS mới chạy được!"
+    "Mày phải chọn 'riscv64', 'riscv32', 'aarch64', hoặc 'x86_64' thì ViCell mới chạy được!"
 );

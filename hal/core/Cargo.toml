@@ -13,6 +13,7 @@ hal-interrupt = { path = "../traits/interrupt" }
 hal-paging = { path = "../traits/paging" }
 
 hal-uart = { path = "../traits/uart" }
+hal-traits-mmc = { path = "../traits/mmc" }
 hal-display = { path = "../traits/display" }
 
 hal-riscv = { path = "../arch/riscv", optional = true }

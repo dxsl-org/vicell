@@ -39,8 +39,8 @@ impl EarlyLoader {
     /// Returns `ViError::InvalidInput` if the magic bytes do not match
     /// (disk image was not generated with `gen_disk.ps1`).
     pub fn probe() -> ViResult<()> {
-        use crate::task::drivers::virtio_blk::viVirtIOBlk;
-        use api::block::ViBlockDevice;
+        
+        
 
         // Idempotent: skip if already probed.
         if CELL_TABLE.lock().is_some() {
@@ -49,7 +49,7 @@ impl EarlyLoader {
 
         // ── Read header sector ───────────────────────────────────────────────
         let mut header_buf = [0u8; SECTOR_SIZE];
-        viVirtIOBlk.read_sector(CELL_TABLE_BASE_LBA, &mut header_buf)?;
+        crate::task::drivers::block::read_sector(CELL_TABLE_BASE_LBA, &mut header_buf)?;
 
         // SAFETY: header_buf is SECTOR_SIZE bytes aligned to u8; CellTableHeader
         // is repr(C) and also SECTOR_SIZE bytes.  Transmute is safe here.
@@ -77,7 +77,7 @@ impl EarlyLoader {
         for i in 0..count {
             let entry_lba = CELL_TABLE_BASE_LBA + 1 + i as u64;
             let mut entry_buf = [0u8; SECTOR_SIZE];
-            viVirtIOBlk.read_sector(entry_lba, &mut entry_buf)?;
+            crate::task::drivers::block::read_sector(entry_lba, &mut entry_buf)?;
             // SAFETY: entry_buf is SECTOR_SIZE bytes; CellEntry is repr(C) SECTOR_SIZE.
             let entry: CellEntry = unsafe { core::mem::transmute(entry_buf) };
             entries.push(entry);
@@ -106,8 +106,8 @@ impl EarlyLoader {
     /// # Errors
     /// Returns `ViError::NotFound` if neither the block table nor VIFS1 has the path.
     pub fn read_file(path: &str) -> ViResult<Box<[u8]>> {
-        use crate::task::drivers::virtio_blk::viVirtIOBlk;
-        use api::block::ViBlockDevice;
+        
+        
 
         // Attempt block-device bootstrap table path first.
         let block_result = (|| -> ViResult<Box<[u8]>> {
@@ -128,7 +128,7 @@ impl EarlyLoader {
             for i in 0..sector_count {
                 let lba = data_lba + i as u64;
                 let offset = i * SECTOR_SIZE;
-                viVirtIOBlk.read_sector(lba, &mut buf[offset..offset + SECTOR_SIZE])?;
+                crate::task::drivers::block::read_sector(lba, &mut buf[offset..offset + SECTOR_SIZE])?;
             }
             buf.truncate(size);
             Ok(buf.into_boxed_slice())

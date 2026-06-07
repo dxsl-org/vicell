@@ -24,8 +24,7 @@
 //! Timing is logged by both `serialize_snapshot()` and `try_restore()`:
 //!   `[snapshot] warm boot: N frames restored in X ms`
 
-use api::block::ViBlockDevice;
-use crate::task::drivers::virtio_blk::viVirtIOBlk;
+use crate::task::drivers::block;
 use crate::memory::frame::FRAME_ALLOCATOR;
 
 /// Reserved LBA range for snapshot storage in `disk_v3.img`.
@@ -130,7 +129,7 @@ pub fn serialize_snapshot() -> Result<u32, &'static str> {
                 core::ptr::copy_nonoverlapping(src, buf.as_mut_ptr(), 512);
             }
             hasher.update(&buf);
-            viVirtIOBlk.write_sector(current_lba, &buf)
+            block::write_sector(current_lba, &buf)
                 .map_err(|_| "write_sector failed during snapshot")?;
             current_lba += 1;
         }
@@ -159,7 +158,7 @@ pub fn serialize_snapshot() -> Result<u32, &'static str> {
             core::mem::size_of::<SnapshotHeader>(),
         );
     }
-    viVirtIOBlk.write_sector(SNAPSHOT_BASE_LBA, &header_sector)
+    block::write_sector(SNAPSHOT_BASE_LBA, &header_sector)
         .map_err(|_| "write header sector failed")?;
 
     #[cfg(target_arch = "riscv64")]
@@ -187,7 +186,7 @@ pub fn serialize_snapshot() -> Result<u32, &'static str> {
 pub fn try_restore() -> bool {
     // Read snapshot header.
     let mut header_sector = [0u8; 512];
-    if viVirtIOBlk.read_sector(SNAPSHOT_BASE_LBA, &mut header_sector).is_err() {
+    if block::read_sector(SNAPSHOT_BASE_LBA, &mut header_sector).is_err() {
         log::info!("[snapshot] no block device → cold boot");
         return false;
     }
@@ -233,7 +232,7 @@ pub fn try_restore() -> bool {
         let mut frame_lba = SNAPSHOT_BASE_LBA + 1;
         let mut buf = [0u8; 512];
         for _ in 0..frame_count * 8 {
-            if viVirtIOBlk.read_sector(frame_lba, &mut buf).is_err() {
+            if block::read_sector(frame_lba, &mut buf).is_err() {
                 log::warn!("[snapshot] read error during CRC verify → cold boot");
                 return false;
             }
@@ -262,7 +261,7 @@ pub fn try_restore() -> bool {
         let frame_ptr = pa as *mut u8;
         for sector_offset in 0..8usize {
             let mut buf = [0u8; 512];
-            if viVirtIOBlk.read_sector(frame_lba, &mut buf).is_err() {
+            if block::read_sector(frame_lba, &mut buf).is_err() {
                 log::error!("[snapshot] read failed at frame {} → cold boot", frame_idx);
                 return false;
             }
@@ -323,7 +322,7 @@ pub fn try_restore() -> bool {
 /// the system from repeatedly attempting to load a stale or corrupt snapshot.
 pub fn invalidate_snapshot() {
     let buf = [0u8; 512];
-    let _ = viVirtIOBlk.write_sector(SNAPSHOT_BASE_LBA, &buf);
+    let _ = block::write_sector(SNAPSHOT_BASE_LBA, &buf);
     log::info!("[snapshot] snapshot invalidated");
 }
 

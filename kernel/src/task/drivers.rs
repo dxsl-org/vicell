@@ -20,7 +20,10 @@ pub mod console_drv;
 pub mod fb_console;
 pub mod font;
 pub mod input_map;
+pub mod block;
+pub mod mmc;
 pub mod ramdisk; // RAM Disk workaround for VirtIO hang
+pub mod virtio_common;
 pub mod virtio_blk;
 pub mod virtio_gpu;
 pub mod virtio_input;
@@ -42,6 +45,7 @@ pub fn init() {
     // handler tries to re-acquire a Spinlock held by this thread, it will spin
     // forever.  We re-enable SIE after all drivers are initialised.
     virtio_blk::init_driver(); // VirtIO block — GPU probe hang fixed via mem::forget
+    mmc::init_driver();        // MMC/SD — no-op on QEMU (VirtIO wins); probes SDHCI on real board
     virtio_net::init_driver(); // VirtIO NIC — backs the net service cell
     virtio_gpu::init_driver();
     // VirtIO RNG init deferred: full MMIO probe hangs on RISC-V when probing

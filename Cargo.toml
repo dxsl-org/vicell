@@ -15,6 +15,7 @@ members = [
     "hal/traits/interrupt",
     "hal/traits/uart",
     "hal/traits/gpio",
+    "hal/traits/mmc",
     "hal/traits/display",
     "hal/arch/riscv",
     "hal/arch/arm",
