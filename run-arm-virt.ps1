@@ -3,14 +3,23 @@
 # Prerequisites:
 #   1. Install qemu-system-aarch64 (e.g., via winget or QEMU installer).
 #   2. Build the aarch64 kernel:
+#        $env:RUSTFLAGS = "-C relocation-model=pic"
 #        cargo build --release -p vicell-kernel --target aarch64-unknown-none-softfloat
-#   3. Build the aarch64 disk image with periph-test + robot-demo ELFs embedded.
+#        $env:RUSTFLAGS = $null
+#   3. Build the aarch64 disk image:
+#        .\scripts\format-disk-arm.ps1
 #
 # This script targets the QEMU ARM virt machine which provides:
 #   PL011 UART  at 0x0900_0000  (serial console + periph-test UART loopback)
 #   PL061 GPIO  at 0x0903_0000  (periph-test GPIO + robot-demo sensor/actuator)
 #   GICv2       at 0x0800_0000  (interrupt controller — Phase ARM64)
 #   Generic timer               (periodic timer — Phase ARM64)
+#   VirtIO NIC  SLIRP user-mode networking (DHCP → 10.0.2.15)
+#               MQTT forwarded: host:11883 → guest:1883
+#
+# MQTT broker on host (optional — robot-demo gracefully skips if absent):
+#   mosquitto -p 11883
+#   mosquitto_sub -p 11883 -t 'vios/#' -v
 
 $qemu = "qemu-system-aarch64"
 if (-not (Get-Command $qemu -ErrorAction SilentlyContinue)) {
@@ -39,7 +48,7 @@ if (-not (Test-Path $kernel)) {
 
 if (-not (Test-Path $disk)) {
     Write-Host "Disk image $disk not found."
-    Write-Host "Build it with: python3 scripts/mkfat32_inplace.py --arm-virt"
+    Write-Host "Build it with: .\scripts\format-disk-arm.ps1"
     exit 1
 }
 
@@ -57,6 +66,8 @@ Write-Host ""
     -kernel $kernel `
     -drive if=none,file=$disk,format=raw,id=hd0 `
     -device virtio-blk-device,drive=hd0 `
+    -netdev user,id=net0,hostfwd=tcp::11883-:1883 `
+    -device virtio-net-device,netdev=net0 `
     -object rng-random,id=rng0 `
     -device virtio-rng-device,rng=rng0 `
     -serial stdio `

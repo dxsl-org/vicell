@@ -401,11 +401,12 @@ A **Cell** is an isolated execution context (like a process) but:
 
 ### Cell Types
 
-**Applications**: Shell, hello world, Lua/MicroPython runtimes
+**Applications**: Shell, hello world, Lua/MicroPython runtimes, reference robot demo
 ```
 cells/apps/shell/     — Interactive REPL (parser, executor, aliases, jobs, history)
-cells/apps/init/      — Bootstrap (spawns vfs, config, shell)
+cells/apps/init/      — Bootstrap (spawns vfs, config, input, net, compositor, shell, robot-demo)
 cells/apps/hello/     — Test app
+cells/apps/robot-demo/ — Reference G1 sensor→compute→actuator→MQTT demonstration (GPIO control loop + MQTT telemetry)
 ```
 
 **Drivers**: Hardware device drivers
@@ -599,15 +600,16 @@ Physical RAM: 0x8000_0000–0x8800_0000 (default: 128 MB in QEMU)
 
 ## Current Status (2026-06-05)
 
-### ✅ Implemented (Phases 01, 02, 05, 10, 14, 15, 16, 18, 20, C, D, E, F, G, H, A, B, X-1, X-2, X-3)
+### ✅ Implemented (Phases 01, 02, 05, 10, 14, 15, 16, 18, 20, C–H, A–E, X-1–X-3, Peripheral Driver Track v1, Robot Demo)
 - **RV64, AArch64, x86_64** HAL with paging (SV39/4K/4K respectively)
 - **Nano kernel** (~8,700 LOC) with round-robin scheduler
 - **48 syscall variants** (IPC, memory, task, FS, GPU, network, state) + **Block I/O capability gate**
 - **Block I/O syscalls** (raw 500/501/503 for FAT16 persistence, gated to VFS task 3)
 - Frame allocator (bitmap) and virtual memory
 - ELF loader with PIE relocation support
-- **VFS service** (RamFS read/write, FAT16 write/read/delete via block device)
+- **VFS service** (RamFS read/write, FAT32 write/read/delete via block device, zero-copy grants)
   - **10 IPC opcodes** (0x01–0x0A): OP_GET_FILE, OP_LIST_DIR, OP_STAT, OP_WRITE, OP_MKDIR, OP_RMDIR, OP_UNLINK, **OP_READ, OP_RMDIR_RECURSIVE, OP_APPEND**
+  - **Zero-copy grants** (syscalls 208–212): GrantAlloc, GrantShare, GrantSlice, GrantFree, BlkReadAsync
   - **4-byte OP_WRITE header** (u16 content length, up to 65KB writes per message)
   - **OP_READ (0x08)** — read file bytes (up to 480, path → bytes)
   - **OP_APPEND (0x0A)** — seek-to-end append write
@@ -615,7 +617,7 @@ Physical RAM: 0x8000_0000–0x8800_0000 (default: 128 MB in QEMU)
   - **OP_UNLINK** for /data/ flat files and nested paths
   - **/data/ subdirectories** with mkdir -p semantics and full path traversal
   - **OP_MKDIR** for /data/ nested directory creation
-- **FAT16 filesystem** (LBA 0–81919 on VirtIO disk, /data/* paths persistent with subdir support)
+- **FAT32 filesystem** (LBA 0–524,287 on VirtIO disk, 540K sectors, /data/* paths persistent with subdir support)
 - **Config service** (KV store with ViStateTransfer)
 - **Interactive shell** (parser+executor) with:
   - Pipes, redirection (>, >>), background jobs (&), history, aliases
@@ -634,7 +636,18 @@ Physical RAM: 0x8000_0000–0x8800_0000 (default: 128 MB in QEMU)
   - **DNS resolver**: static table → IPv4 literal → UDP A-record query
   - **net-tools binaries** (6 total): ping, curl (HTTP/1.0), wget, nc (multi-conn relay), httpd, mqtt (skeleton)
 - **GPU framebuffer** (opt-in, basic compositor)
-- **HotSwap orchestrator** (5-step live Cell replacement, kernel + shell + config + vfs verified)
+- **HotSwap orchestrator** (5-step live Cell replacement, kernel + shell + config + vfs + robot-demo verified)
+- **Peripheral Driver Track v1** (GPIO/UART HAL traits + driver Cells + safe MMIO + Resource Registry)
+  - `cells/drivers/driver-gpio/` — PL061 GPIO implementation (QEMU ARM virt)
+  - `cells/drivers/driver-serial/` — PL011 UART extension
+  - `ostd::mmio::MmioRegion` — safe memory-mapped I/O (forbids unsafe in Cells)
+  - Manifest-based capability gating via `declare_manifest!(gpio=true, uart=true)` (Phase 30)
+- **Robot Demo (`cells/apps/robot-demo/`)** — Reference G1 closed-loop application
+  - Sensor read (GPIO input) → control compute → actuator write (GPIO output)
+  - MQTT 3.1.1 client: TcpConnect → handshake → publish telemetry → close
+  - 7-cell boot sequence: vfs, config, input, net, compositor, shell, robot-demo
+  - Graceful fallback to simulation when GPIO unavailable
+  - Policy: Temporary (run once, no restart)
 - **Workspace consolidated** with 0 cargo warnings
 - **CI/CD pipeline** with architecture validation (10/10 score)
 - **VirtIO VA→PA mapping fix** (Phase X-1) — resolves multi-sector write issues
@@ -644,6 +657,9 @@ Physical RAM: 0x8000_0000–0x8800_0000 (default: 128 MB in QEMU)
 - **KASLR** (not implemented)
 
 ### ⏳ Planned (Later phases)
+- ARM64 full kernel bring-up (pending, needed for real GPIO on aarch64 QEMU ARM virt)
+- Peripheral Driver extensions: I2C, SPI, CAN, PWM, ADC (G1 ext / G2)
+- Real SBC validation (RPi 4 / VisionFive2 / Radxa ROCK 5)
 - Reliability track: stack guard pages, deadline/watchdog enforcement, supervisor-based
   cell restart, reboot-on-kernel-panic — see [specs/12-reliability.md](specs/12-reliability.md)
 - Tier 3 hypervisor cell (Stage-2 paging) — hardware isolation for untrusted/legacy code

@@ -6,6 +6,14 @@ extern crate ostd;
 // Declares spawn capability; the kernel grants SpawnCap at spawn.
 api::declare_manifest!(block_io = false, network = false, spawn = true);
 
+// Narrow syscall allowlist — kernel enforces this at dispatch (Phase 27).
+// ForceExit, NotifyOnExit, RegisterService are always-permitted (SpawnCap-gated).
+api::declare_syscalls![
+    Send, Recv, TryRecv, RecvTimeout, Reply, Log, Heartbeat, LookupService,
+    SpawnFromPath, SpawnFromMem, SpawnPinned, Wait, GetTime, SetTimer,
+    HotSwap, StateStash, StateRestore,
+];
+
 use ostd::io::println;
 
 /// Per-service restart policy (OTP-style).
@@ -17,7 +25,6 @@ enum Policy {
     /// is treated as final. Uses the exit reason delivered as the death-notify payload.
     Transient,
     /// Never restart — one-shot tasks that are expected to run once and stop.
-    #[allow(dead_code)] // reason: part of the policy ABI; no current service uses it yet
     Temporary,
 }
 
@@ -46,7 +53,7 @@ pub extern "C" fn main() {
 
     // Supervised services in bring-up order — VFS first (it serves /bin/*).
     // tids[i] is the current live tid of paths[i] (None when down).
-    const NSVC: usize = 6;
+    const NSVC: usize = 7;
     let paths: [&str; NSVC] = [
         "/bin/vfs",
         "/bin/config",
@@ -54,6 +61,7 @@ pub extern "C" fn main() {
         "/bin/net",
         "/bin/compositor",
         "/bin/shell",
+        "/bin/robot-demo", // G1 sensor→actuator→MQTT reference demo
     ];
     let mut tids: [Option<usize>; NSVC] = [None; NSVC];
 
@@ -67,6 +75,7 @@ pub extern "C" fn main() {
         Some(service::NET),
         Some(service::COMPOSITOR),
         None, // shell is not a registered service
+        None, // robot-demo is not a registered service
     ];
 
     // Restart policy per service. All current services are Permanent (a robot must keep
@@ -79,6 +88,7 @@ pub extern "C" fn main() {
         Policy::Permanent, // net
         Policy::Permanent, // compositor
         Policy::Transient, // shell: restart on crash, but a clean `exit` is final
+        Policy::Temporary, // robot-demo: run once then stop
     ];
     // Per-service restart-intensity state (sliding window).
     let mut restart_count: [u32; NSVC] = [0; NSVC];
