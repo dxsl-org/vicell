@@ -30,6 +30,7 @@ use api::posix::_putchar;
 // Internal utilities
 mod cpu_features;
 mod sync;
+pub mod platform;
 
 // Re-export types for convenience
 pub use types::*;
@@ -44,6 +45,12 @@ static INIT_ELF: &[u8] = include_bytes!(concat!(env!("EMBEDDED_OUT_DIR"), "/init
 pub extern "C" fn kmain(hartid: usize, dtb: usize) -> ! {
     let _hartid = hartid;
     cpu_features::detect(dtb);
+    // Parse DTB for MMIO bases before any driver or paging init.
+    #[cfg(target_arch = "riscv64")]
+    crate::platform::init(dtb);
+    // Set runtime PLIC base before hal::ARCH.init() calls plic::init() internally.
+    #[cfg(target_arch = "riscv64")]
+    crate::platform::with(|p| hal::common::plic::set_plic_base(p.plic_base));
     // 0. Initialize UART immediately for early logging
     #[cfg(any(target_arch = "riscv64", target_arch = "riscv32"))]
     task::drivers::uart::init();
@@ -52,7 +59,27 @@ pub extern "C" fn kmain(hartid: usize, dtb: usize) -> ! {
     #[cfg(target_arch = "x86_64")]
     crate::hal::uart_16550::init();
 
+    // Set HHDM base for LAPIC/IOAPIC MMIO access AND for phys_to_virt.
+    // Limine maps RAM at HHDM_BASE+phys (no identity mapping of physical RAM).
+    // This must be called before FrameAllocator::new_from_map.
+    #[cfg(target_arch = "x86_64")]
+    {
+        let hhdm = crate::boot::limine::get_hhdm_offset().unwrap_or(0);
+        crate::hal::apic::set_hhdm_base(hhdm);
+        crate::memory::frame::set_phys_offset(hhdm as usize);
+    }
+
     // 1. Initialize HAL (Architecture specific) - Early Trap Setup
+    // x86_64: LAPIC is deferred until after paging sets up the MMIO mapping
+    // (LAPIC phys 0xFEE00000 isn't in Limine's HHDM for MMIO regions).
+    #[cfg(target_arch = "x86_64")]
+    {
+        crate::hal::gdt::init();
+        crate::hal::idt::init();
+        crate::hal::syscall::init();
+        // apic::init_lapic() deferred — needs MMIO mapped via custom PML4
+    }
+    #[cfg(not(target_arch = "x86_64"))]
     hal::ARCH.init();
 
     // Define puts helper — arch-specific character output.
@@ -136,12 +163,14 @@ pub extern "C" fn kmain(hartid: usize, dtb: usize) -> ! {
     log_info("Frame allocator initialized");
 
     // 3. Paging (Virtual Memory) Setup
-    log_info("Initializing paging...");
-    #[cfg(not(target_arch = "riscv32"))]
+    // x86_64 bring-up: Limine's PML4 already maps RAM via HHDM and the kernel
+    // at 0xFFFFFFFF80000000. We skip building + activating our own page tables
+    // until the full x86_64 port (Phase 09). init_kernel_paging uses physical
+    // addresses as virtual pointers, which would fault under Limine's paging.
+    #[cfg(not(any(target_arch = "riscv32", target_arch = "x86_64")))]
     {
-        // Get a mutable reference to the global frame allocator for paging initialization.
+        log_info("Initializing paging...");
         let mut locked_frame_allocator = memory::frame::FRAME_ALLOCATOR.lock();
-        puts("TRACE: Calling init_kernel_paging\n");
         let root_table_phys = memory::paging::init_kernel_paging(
             locked_frame_allocator
                 .as_mut()
@@ -149,26 +178,16 @@ pub extern "C" fn kmain(hartid: usize, dtb: usize) -> ! {
             mmap_entries,
         )
         .expect("Failed to initialize paging");
-        puts("TRACE: init_kernel_paging returned\n");
         drop(locked_frame_allocator);
         log_info("Paging initialized");
-
-        // Activate paging — skip on x86_64 bring-up: Limine's PML4 covers all
-        // identity-mapped RAM and MMIO; activating our PML4 would require re-mapping
-        // the kernel at 0xFFFFFFFF80000000 (deferred to full x86_64 port).
-        #[cfg(not(target_arch = "x86_64"))]
-        {
-            log_info("Activating paging...");
-            unsafe { memory::paging::activate_paging(root_table_phys); }
-            puts("TRACE: Paging activated (satp set)\n");
-            log_info("Paging activated");
-        }
-        #[cfg(target_arch = "x86_64")]
-        {
-            log_info("Paging: table built, keeping Limine PML4 (x86_64 bring-up)");
-            // HPET at 0xFED0_0000 is accessible via Limine's identity map.
-            crate::hal::init_timers();
-        }
+        log_info("Activating paging...");
+        unsafe { memory::paging::activate_paging(root_table_phys); }
+        log_info("Paging activated");
+    }
+    #[cfg(target_arch = "x86_64")]
+    {
+        log_info("Paging: using Limine PML4 (x86_64 bring-up, own tables deferred)");
+        // init_timers() needs HPET+LAPIC MMIO mapped via our own PML4 — deferred to Phase 09.
     }
     // RV32 Nano: bare physical addressing (SATP=0); no page tables needed.
     #[cfg(target_arch = "riscv32")]
@@ -178,70 +197,41 @@ pub extern "C" fn kmain(hartid: usize, dtb: usize) -> ! {
     }
 
     // 4. Heap Allocator (Global) - MUST be after paging but before any allocations
-    puts("TRACE: Allocating heap frames\n");
-    // Allocate 16 MB for the kernel heap.
-    // Rationale: kernel_fs.img is ~4 MB so the heap needs to be > 4 MB.
-    // 16 MB gives plenty of room for the RAM-disk copy + all kernel data structures
-    // (BTreeMaps for tasks, capabilities, page table frames, etc.).
-    // 32 MB = 8 192 frames of 4 KB each.  Sized to hold simultaneously:
-    //   - the embedded RAM disk copy (kernel_fs.img, ~4 MB)
-    //   - the VirtIO GPU framebuffer (1280×800×4 ≈ 4 MB)
-    //   - cell ELFs loaded via SpawnFromPath + kernel structures
-    // 128 MB QEMU instances have ample room for a 32 MB heap.
+    // 32 MiB = 8192 frames. Sized to hold:
+    //   - embedded RAM disk copy (~4 MiB), VirtIO GPU framebuffer (~4 MiB), cell ELFs + kernel structures
     const HEAP_FRAMES: usize = 8_192;
     let heap_start = {
         let mut allocator_guard = memory::frame::FRAME_ALLOCATOR.lock();
-        let allocator = allocator_guard
-            .as_mut()
-            .expect("Frame allocator not initialized");
+        let allocator = allocator_guard.as_mut().expect("Frame allocator not initialized");
         let start = allocator.allocate_frame().expect("OOM: Heap start");
         for _ in 1..HEAP_FRAMES {
             allocator.allocate_frame().expect("OOM: Heap continuation");
         }
         start
     };
-    puts("TRACE: frames allocated, calling init_heap\n");
-    let heap_size = HEAP_FRAMES * 4096; // 32 MB — matches frames above
-    unsafe {
-        memory::heap::init_heap(heap_start, heap_size);
-    }
-    puts("TRACE: init_heap done\n");
+    let heap_size = HEAP_FRAMES * 4096;
+    // On x86_64, phys_to_virt adds HHDM offset (Limine maps RAM at HHDM+phys).
+    // On RISC-V, phys_to_virt returns phys unchanged (identity-mapped before paging).
+    let heap_virt = memory::frame::phys_to_virt(heap_start);
+    unsafe { memory::heap::init_heap(heap_virt, heap_size); }
     log_info("Heap initialized");
 
-    // Initialize RT TLSF pool for RealTime cell stack allocation.
     memory::rt_heap::init();
     log_info("RT heap initialized");
 
-    // Test Heap
-    puts("TRACE: Testing Vec\n");
-    let mut vec = alloc::vec::Vec::new();
-    vec.push(1);
-    vec.push(2);
-    vec.push(3);
-    puts("TRACE: Vec test passed\n");
-    // log::info!("Heap test passed: vec = {:?}", vec);
-    log_info("Heap test passed");
-
     // 5. Hardware Abstraction Layer (HAL) Initialization
-    // Already initialized at step 1 for trap handling.
-    // Initialize PLIC for external interrupts.
-    puts("TRACE: init PLIC\n");
+    // GDT/IDT/SYSCALL already done at step 1. Initialize PLIC for RISC-V external IRQs.
     #[cfg(target_arch = "riscv64")]
     crate::hal::common::plic::init();
-    puts("TRACE: PLIC done\n");
-
     log_info("HAL initialized (PLIC enabled)");
 
     // 6. Logger & Drivers & FS
-    puts("TRACE: init drivers::uart\n");
     task::drivers::uart::init(); // registers log backend on all arches
     #[cfg(target_arch = "riscv64")]
-    task::drivers::uart::init_input(); // Initialize RX buffer
-    puts("TRACE: init drivers\n");
+    task::drivers::uart::init_input();
     // RV32 Nano / x86_64 bring-up: skip VirtIO probing (PCIe transport not yet ported).
     #[cfg(any(target_arch = "riscv64", target_arch = "aarch64"))]
     task::drivers::init();
-    puts("TRACE: drivers done\n");
 
     // Attempt warm boot from snapshot before any cell initialization.
     // RV32 Nano / x86_64 skip: no VirtIO block in bring-up.
@@ -274,6 +264,12 @@ pub extern "C" fn kmain(hartid: usize, dtb: usize) -> ! {
     log_info("Initializing scheduler...");
     task::init();
     log_info("Scheduler initialized");
+
+    // 7b. Bring secondary harts online (riscv64 only; no-op on other arches).
+    // Must run AFTER task::init() so the heap and scheduler are live before
+    // any secondary hart starts running kernel code.
+    #[cfg(target_arch = "riscv64")]
+    task::smp::start_secondaries();
 
     // 8. Spawn Embedded Init
     // RV32 Nano / x86_64 bring-up: no init binary — boot to idle loop.
@@ -365,9 +361,7 @@ pub extern "C" fn kmain(hartid: usize, dtb: usize) -> ! {
 /// True kernel panics (cell_id == 0) halt as before.
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-    let cell_id = task::scheduler::CURRENT_CELL_ID.load(
-        core::sync::atomic::Ordering::Relaxed
-    );
+    let cell_id = task::hart_local::current_cell_id();
 
     if cell_id != 0 {
         // Cell OOM/panic — kill the Cell, kernel survives.
@@ -375,6 +369,9 @@ fn panic(info: &PanicInfo) -> ! {
         task::terminate_current_cell_on_fault(0, 0);
         // terminate_current_cell_on_fault calls yield_cpu() which switches away.
         // In abort mode we never return here, but placate the compiler:
+        #[cfg(target_arch = "x86_64")]
+        loop { unsafe { core::arch::asm!("cli; hlt", options(nomem, nostack)); } }
+        #[cfg(not(target_arch = "x86_64"))]
         loop { unsafe { core::arch::asm!("wfi"); } }
     }
 

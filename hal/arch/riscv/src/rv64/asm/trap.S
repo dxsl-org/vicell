@@ -47,8 +47,18 @@ __trap_entry:
     sd x1,   1*8(sp)    # ra
     # x2 (sp) saved below after we calculate user sp
     sd x3,   3*8(sp)    # gp
-    sd x4,   4*8(sp)    # tp
-    sd x5,   5*8(sp)    # t0
+    sd x4,   4*8(sp)    # tp  (cell's tp saved here; kernel tp restored below)
+    sd x5,   5*8(sp)    # t0  (save early so t0 is free for the tp restore below)
+
+    # === Phase 02: restore kernel tp from per-hart slot ===
+    # HART_LOCAL_TP_ADDR holds &HART_LOCALS[hart_id] (set by hart_local::install).
+    # Before install() it is 0 — current_cell_id() null-guards that case safely.
+    # `lla` generates auipc+addi (PC-relative) — correct for PIE at any load bias.
+    .option push
+    .option norelax
+    lla  t0, HART_LOCAL_TP_ADDR   # t0 = &HART_LOCAL_TP_ADDR (a static usize)
+    .option pop
+    ld   tp, 0(t0)                # tp = *HART_LOCAL_TP_ADDR = &HART_LOCALS[hart_id]
     sd x6,   6*8(sp)    # t1
     sd x7,   7*8(sp)    # t2
     sd x8,   8*8(sp)    # s0/fp

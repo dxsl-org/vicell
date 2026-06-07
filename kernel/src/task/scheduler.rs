@@ -2,18 +2,16 @@ use super::tcb::{FileHandle, SyscallFuture, Task, TaskState};
 use alloc::boxed::Box;
 use alloc::collections::{BTreeMap, VecDeque};
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicUsize, Ordering};
 use core::task::{Context, Poll};
 use log::info;
 use types::*;
 
-/// Cell ID currently executing on this hart.  0 = kernel itself (no quota limit).
-/// Updated on every context switch so `QuotaAlloc` can attribute allocations correctly.
-pub static CURRENT_CELL_ID: AtomicUsize = AtomicUsize::new(0);
-
 /// Read the currently-executing cell ID (0 = kernel).
+///
+/// Delegates to `hart_local` which reads the per-hart `current_cell_id` field
+/// via the `tp` CSR — O(1), no lock.  Safe to call from the allocator hot path.
 pub fn current_cell_id() -> usize {
-    CURRENT_CELL_ID.load(Ordering::Relaxed)
+    super::hart_local::current_cell_id()
 }
 
 // Dummy Waker
@@ -520,9 +518,10 @@ impl Scheduler {
             crate::fast_ipc::clear_vfs_if_cell(cell_raw as usize);
             crate::memory::cell_quota::deregister(CellId(cell_raw));
             crate::resource_registry::release_for(CellId(cell_raw));
+            crate::task::syscall::reap_grants_for_task(cell_raw as usize);
             self.exit_task(tid, usize::MAX);
             if self.current_task_id == Some(tid) {
-                CURRENT_CELL_ID.store(0, Ordering::Relaxed);
+                super::hart_local::set_current_cell_id(0);
             }
         }
 
@@ -642,13 +641,14 @@ impl Scheduler {
                     crate::fast_ipc::clear_vfs_if_cell(cell_raw as usize);
                     crate::memory::cell_quota::deregister(CellId(cell_raw));
                     crate::resource_registry::release_for(CellId(cell_raw));
+                    crate::task::syscall::reap_grants_for_task(cell_raw as usize);
                     // exit_task is a method on this already-locked Scheduler — no
                     // SCHEDULER re-lock. Moves the runaway to zombies + wakes its
                     // waiters; the pop_ready below then picks another ready task.
                     self.exit_task(cid, usize::MAX);
                     // Drop the dead cell's attribution; step 4 overwrites this if a
                     // next task is picked, else 0 (kernel) is correct for idle.
-                    CURRENT_CELL_ID.store(0, Ordering::Relaxed);
+                    super::hart_local::set_current_cell_id(0);
                 }
                 WdAction::None => {}
             }
@@ -662,7 +662,7 @@ impl Scheduler {
                 next_task.state = TaskState::Running;
                 // Update CURRENT_CELL_ID so QuotaAlloc attributes allocations
                 // to the correct Cell during this task's execution.
-                CURRENT_CELL_ID.store(next_task.cell_id.0 as usize, Ordering::Relaxed);
+                super::hart_local::set_current_cell_id(next_task.cell_id.0 as usize);
             }
 
             if Some(nid) == current_id {

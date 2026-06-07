@@ -56,3 +56,27 @@ pub fn get_gp_tp() -> (usize, usize) {
     }
     (gp, tp)
 }
+
+/// Read the current value of the `tp` (thread-pointer) register.
+///
+/// # Safety
+/// Reading tp is always safe from S-mode; no side effects.
+#[cfg(target_arch = "riscv64")]
+pub unsafe fn read_tp() -> usize {
+    let tp: usize;
+    core::arch::asm!("mv {0}, tp", out(reg) tp, options(nomem, nostack, preserves_flags));
+    tp
+}
+
+/// Write a new value to the `tp` (thread-pointer) register.
+///
+/// # Safety
+/// Caller must ensure `val` is either 0 or a pointer to a valid `ViHartLocal`.
+/// Should only be called from boot context or `hart_local::install()` with
+/// interrupts disabled so no trap fires with a half-written tp.
+#[cfg(target_arch = "riscv64")]
+pub unsafe fn write_tp(val: usize) {
+    // SAFETY: writing tp from S-mode is always permitted; caller ensures value
+    // is a valid ViHartLocal pointer.
+    core::arch::asm!("mv tp, {0}", in(reg) val, options(nomem, nostack, preserves_flags));
+}

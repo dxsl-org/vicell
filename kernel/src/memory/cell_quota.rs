@@ -48,16 +48,17 @@ pub unsafe fn force_unlock_locks() {
 /// lock.  The node is kernel bookkeeping, so charging it to the kernel is also
 /// semantically correct.
 pub fn register(cell_id: CellId, limit: usize) {
-    use crate::task::scheduler::CURRENT_CELL_ID;
     let id = cell_id.0 as usize;
     if id < MAX_CELLS {
         IN_USE[id].store(0, Ordering::Relaxed);
     }
-    // Pin to kernel context so the insert's node allocation does not re-enter
-    // `charge` (which locks QUOTA_LIMITS) while we hold that lock. Restored after.
-    let prev_cell = CURRENT_CELL_ID.swap(0, Ordering::Relaxed);
+    // Pin to kernel context (0) so the BTreeMap::insert's node allocation does
+    // not re-enter `charge` (which locks QUOTA_LIMITS) while we hold that lock.
+    // Deadlock contract: see module doc.
+    let prev_cell = crate::task::hart_local::current_cell_id();
+    crate::task::hart_local::set_current_cell_id(0);
     QUOTA_LIMITS.lock().insert(id, limit);
-    CURRENT_CELL_ID.store(prev_cell, Ordering::Relaxed);
+    crate::task::hart_local::set_current_cell_id(prev_cell);
 }
 
 /// Deregister a Cell on exit.

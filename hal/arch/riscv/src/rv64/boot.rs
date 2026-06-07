@@ -3,6 +3,30 @@
 /// This module handles the transition from bootloader to Rust code
 use core::arch::global_asm;
 
+// Secondary-hart entry point.
+// Hart 0's `_start` runs self-relocation + BSS clear and MUST NOT be re-entered.
+// Secondary harts start here — bare entry, no relocation, no BSS clear.
+// a0 = hart_id (set by OpenSBI HSM per SBI spec §9.1.1)
+// a1 = opaque = kernel stack top (our convention, passed in sbi_hart_start)
+global_asm!(
+    r#"
+    .section .text
+    .global _secondary_entry
+    .align 2
+_secondary_entry:
+    .option push
+    .option norelax
+    lla gp, __global_pointer$   # restore GP (PC-relative, GOT-independent)
+    .option pop
+    mv  sp, a1          # kernel stack = stack_top from SBI opaque
+    mv  tp, zero        # Phase 01 placeholder; Phase 02 sets real HartLocal ptr
+    call smp_hart_entry # fn(hart_id: usize) -> !   (a0 = hart_id from SBI)
+.secondary_halt:
+    wfi
+    j .secondary_halt
+    "#
+);
+
 // Assembly boot code
 global_asm!(
     r#"

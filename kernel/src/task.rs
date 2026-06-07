@@ -1,4 +1,6 @@
 pub mod cap;
+pub mod hart_local;
+pub mod smp;
 pub mod syscall;
 pub mod tcb;
 pub use tcb::Task;
@@ -78,6 +80,10 @@ pub fn tick() {
 }
 
 pub fn init() {
+    // Install hart-local state for hart 0 BEFORE the scheduler or timer start,
+    // so current_cell_id() works correctly once interrupts are enabled.
+    hart_local::install(0);
+
     info!("Process: Initializing Scheduler...");
     let mut sched_guard = SCHEDULER.lock();
 
@@ -185,7 +191,7 @@ unsafe fn force_unlock_all_kernel_locks() {
 /// (e.g. mid-syscall OOM during a scheduler/allocator insert) cannot deadlock
 /// the kernel after we resume the next task.
 pub fn terminate_current_cell_on_fault(scause: usize, sepc: usize) {
-    let cell_id_raw = scheduler::CURRENT_CELL_ID.load(core::sync::atomic::Ordering::Relaxed);
+    let cell_id_raw = hart_local::current_cell_id();
     log::error!(
         "[fault] Cell {} terminated: scause={:#x} sepc={:#x}",
         cell_id_raw, scause, sepc
@@ -222,7 +228,7 @@ pub fn terminate_current_cell_on_fault(scause: usize, sepc: usize) {
 
     // Reset cell ID to 0 (kernel context) so subsequent allocations are not
     // charged to the now-dead Cell.
-    scheduler::CURRENT_CELL_ID.store(0, core::sync::atomic::Ordering::Relaxed);
+    hart_local::set_current_cell_id(0);
 
     // Switch to the next ready task.  Does not return to the faulting Cell.
     yield_cpu();
