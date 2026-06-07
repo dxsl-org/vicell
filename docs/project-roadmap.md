@@ -72,6 +72,7 @@ ViCell ships in two product stages defined by target hardware. The mapping princ
 | 🆕 Tier 3b Linux VM — crosvm fork + vicell_hv/ port | Phase 31 | 📋 | **G2** |
 | SMP multi-core scheduler + work-stealing | Phase 32 | 📋 | **G2** |
 | Compositor + GPU desktop (full) + mouse | M2.4 + M2.2 full | 📋 | G2 |
+| 🆕 **ViUI toolkit** (custom, MIT, no_std, Elm/iced-compatible API) | new | ✅ P01–P07 done (P03/fontdue deferred) 2026-06-07 | **G2** |
 | Hot migration / zero-downtime | M4.1 | 📋 | G2 |
 | 🆕 x86_64 full bring-up | ext. M1.3 | 📋 | **G2** |
 | VFS scale (FAT32/ext4, large disks) | M2.1 ext. | 📋 | G2 |

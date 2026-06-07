@@ -4,6 +4,24 @@
 
 ---
 
+## [2026-06-07] ViUI Toolkit — P01–P07 Complete (P03 deferred)
+
+### Summary
+Implemented `libs/viui` — ViCell's native no_std UI toolkit with Elm/iced-compatible API and direct pixel rendering (no GPU/tessellation required). All 6 phases done (P03 GlyphAtlas deferred — fontdue 0.9 is not no_std compatible); bitmap 8×8 font used for G1. Compiles cleanly for `riscv64gc-unknown-none-elf` with zero warnings.
+
+### Changes
+- **P01 — Core Engine**: `ViWidget` trait, `WidgetId` (FNV-1a hash), `Length`/`Constraints`/`LayoutNode`, `WidgetStateStore`/`FocusManager`, `ViApp` trait, `PaintCx`/`EventCx`
+- **P02 — FramebufferCanvas**: `ViCanvas` trait + `FramebufferCanvas<'fb>` software rasterizer — `fill_rect` (alpha blend), `draw_line` (Bresenham), `draw_text` (bitmap 8×8 FONT8X8 MSB-first), `draw_image`, 16-entry clip stack
+- **P03 — GlyphAtlas**: ⏸ Deferred — fontdue 0.9 requires `std::collections::HashMap`, incompatible with `riscv64gc-unknown-none-elf`; bitmap 8×8 sufficient for G1
+- **P04 — Widget Set**: `Label`, `Button` (hovered/pressed/just_clicked state), `Checkbox`, `TextEdit` (char-indexed cursor, UTF-8 safe), `ScrollArea`, `Image`, `Column`, `Row`, `Space`
+- **P05 — Theming**: `ViTheme` trait, `DarkTheme`/`LightTheme`/`KioskTheme` (with `Color::YELLOW/CYAN/MAGENTA`); `PaintCx` now carries `&'a dyn ViTheme`
+- **P06 — Elm Facade**: `Element<Msg>`, `ErasedWidget<Msg>`, free-function builders (`text`, `button`, `column`, `row`, `checkbox`, `scrollable`, `image`), `column![]`/`row![]` macros, `run_app<App: ViApp>()` (full ViSurface + Elm loop)
+- **P07 — Window Chrome**: `WindowChrome` (28px titlebar, 3 buttons, drag), `decode_input_event` / `translate_input` (64-byte IPC → viui::Event), `ManagedWindow`, `WindowManager`
+- **`libs/ostd/src/font.rs`** — `FONT8X8` made `pub` for direct viui access
+- **`libs/viui/Cargo.toml`** — added `api` dep for `api::display::PixelFormat`
+
+---
+
 ## [2026-06-07] Peripheral I/O — Bit-bang I2C, SHT3x Sensor Demo, SiFive GPIO — Complete
 
 ### Summary

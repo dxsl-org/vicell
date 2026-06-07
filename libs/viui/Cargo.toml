@@ -1,0 +1,18 @@
+[package]
+name = "viui"
+version = "0.2.0"
+edition = "2021"
+license = "MIT"
+description = "ViCell native no_std UI toolkit — Elm architecture, direct pixel rendering"
+
+[lib]
+
+[dependencies]
+ostd = { path = "../ostd" }
+api  = { path = "../api" }
+# P03 adds fontdue to ostd (not viui) — accessed via ostd::font_atlas
+# P05 adds nothing new — theme is pure viui types
+# P06/P07 add nothing new — run_app + window chrome are viui-internal
+
+[features]
+default = []
