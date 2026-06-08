@@ -210,8 +210,27 @@ impl<'fb> ViCanvas for FramebufferCanvas<'fb> {
                 }
             }
         } else {
+            // Alpha blend inline — coords are pre-clipped so put_pixel bounds checks are
+            // redundant. Precompute channels once; compute row_off once per row.
+            let sa  = color.a() as u32;
+            let inv = 255 - sa;
+            let cb  = color.b() as u32;
+            let cg  = color.g() as u32;
+            let cr  = color.r() as u32;
             for y in y0..y1 {
-                for x in x0..x1 { self.put_pixel(x, y, color); }
+                let row_off = y as usize * self.stride as usize;
+                for x in x0..x1 {
+                    let off = row_off + x as usize * 4;
+                    if off + 3 >= self.pixels.len() { continue; }
+                    let db = self.pixels[off    ] as u32;
+                    let dg = self.pixels[off + 1] as u32;
+                    let dr = self.pixels[off + 2] as u32;
+                    let out: u32 = ((cb * sa + db * inv) / 255)
+                                 | (((cg * sa + dg * inv) / 255) << 8)
+                                 | (((cr * sa + dr * inv) / 255) << 16)
+                                 | (0xFF << 24);
+                    self.pixels[off..off + 4].copy_from_slice(&out.to_le_bytes());
+                }
             }
         }
     }
@@ -348,17 +367,35 @@ impl<'fb> ViCanvas for FramebufferCanvas<'fb> {
             let sy = (dy_off + dy) as usize;
             let dst_y = dst_y0 + dy;
             if dst_y < 0 || dst_y as u32 >= self.height { continue; }
+            let dst_row_off = dst_y as usize * self.stride as usize;
             for dx in 0..(dst_x1 - dst_x0) {
                 let sx = (dx_off + dx) as usize;
                 let src_off = sy * src_stride as usize + sx * 4;
                 if src_off + 3 >= pixels.len() { continue; }
-                let src = Color::bgra(
-                    pixels[src_off],
-                    pixels[src_off + 1],
-                    pixels[src_off + 2],
-                    pixels[src_off + 3],
-                );
-                self.put_pixel(dst_x0 + dx, dst_y, src);
+                let dst_off = dst_row_off + (dst_x0 + dx) as usize * 4;
+                if dst_off + 3 >= self.pixels.len() { continue; }
+                let sa = pixels[src_off + 3];
+                if sa == 0 { continue; }
+                if sa == 255 {
+                    // Opaque source: direct 4-byte copy, zero blend arithmetic.
+                    self.pixels[dst_off..dst_off + 4]
+                        .copy_from_slice(&pixels[src_off..src_off + 4]);
+                } else {
+                    // Partial alpha: inline blend over destination.
+                    let sa32 = sa as u32;
+                    let inv  = 255 - sa32;
+                    let sb = pixels[src_off    ] as u32;
+                    let sg = pixels[src_off + 1] as u32;
+                    let sr = pixels[src_off + 2] as u32;
+                    let db = self.pixels[dst_off    ] as u32;
+                    let dg = self.pixels[dst_off + 1] as u32;
+                    let dr = self.pixels[dst_off + 2] as u32;
+                    let out: u32 = ((sb * sa32 + db * inv) / 255)
+                                 | (((sg * sa32 + dg * inv) / 255) << 8)
+                                 | (((sr * sa32 + dr * inv) / 255) << 16)
+                                 | (0xFF << 24);
+                    self.pixels[dst_off..dst_off + 4].copy_from_slice(&out.to_le_bytes());
+                }
             }
         }
     }
