@@ -1,266 +1,193 @@
-# ViOS (Jarvis Hybrid OS)
+# ViCell
 
-[![CI](https://github.com/vi-group/ViCell/actions/workflows/ci.yml/badge.svg)](https://github.com/vi-group/ViCell/actions/workflows/ci.yml)
+[![CI](https://github.com/dxsl-org/vicell/actions/workflows/ci.yml/badge.svg)](https://github.com/dxsl-org/vicell/actions/workflows/ci.yml)
 
-A next-generation operating system designed for the Edge-to-Cloud era, combining innovations from **Theseus** (Live Evolution), **Asterinas** (FrameKernel Safety), and **Tock** (Embedded Efficiency).
+A next-generation OS for the Edge-to-Cloud era. Software is organized as **Cells** (not processes) sharing one address space, isolated by the Rust type system rather than hardware MMU.
 
-**Key Innovation**: Cellular Single Address Space (SAS) using Language-Based Isolation (LBI) via Rust's type system. Software is organized as **Cells** (not processes) sharing one address space, isolated by the Rust compiler rather than hardware MMU.
-
-**Status**: v0.2.0 (Mycelium Era) — Phase 1 Core Stability in progress
+**Architecture**: Cellular Single Address Space (SAS) + Language-Based Isolation (LBI).  
+**Status**: v0.2.1-dev (Mycelium Era) · Active Stage: **G1 — Robot & Embedded**
 
 ---
 
 ## Quick Start
 
-### Prerequisites
-- Rust nightly (2024+): `rustup install nightly`
-- QEMU with RISC-V support: `qemu-system-riscv64`
-- Linux/macOS/WSL2 (Windows support via bash)
+**Prerequisites**: Rust nightly · `qemu-system-riscv64` · PowerShell or WSL2
 
-### Build & Run
+```powershell
+git clone https://github.com/dxsl-org/vicell.git
+cd vicell
 
-```bash
-# Clone repository
-git clone https://github.com/vi-group/vios.git
-cd vios
-
-# Build kernel for RV64
+# Build kernel (RV64, -pie, RUSTFLAGS handled by build.rs)
 cargo build --release
 
-# Generate disk image
-./gen_disk.ps1  # or run.sh on Linux
-
-# Run in QEMU (non-graphical)
-./run.ps1       # Ctrl+A X to exit
-# or: qemu-system-riscv64 -machine virt -cpu rv64 -smp 1 -m 128M \
-#     -nographic -kernel target/riscv64gc-unknown-none-elf/release/vios-kernel \
-#     -drive file=disk_v3.img,format=raw,id=hd0 \
-#     -device virtio-blk-device,drive=hd0
+# Generate FAT32 disk image and boot
+./gen_disk.ps1
+./run.ps1        # Ctrl+A X to exit QEMU
 ```
 
-### First Commands
 ```
-viosh> echo "Hello ViOS"
-Hello ViOS
-
-viosh> ls /bin
+ViCell> echo hello
 hello
-cat
-ls
-pwd
+ViCell> ls /bin
+shell  vfs  net  input  compositor  hello  utils ...
+ViCell> date
+2026-06-08 00:00:00 UTC
+ViCell> cat /proc/version
+ViCell v0.2.1-dev (Mycelium Era) riscv64
+```
 
-viosh> cat /etc/version
-v0.2.0 Mycelium Era
+ARM64 target:
+
+```powershell
+./run-arm-virt.ps1
 ```
 
 ---
 
-## Documentation
+## What Works Today
 
-**New to ViOS?** Start here:
-
-| Document | Purpose |
-|----------|---------|
-| [system-architecture.md](./docs/system-architecture.md) | High-level design for developers |
-| [codebase-summary.md](./docs/codebase-summary.md) | File structure & metrics |
-| [code-standards.md](./docs/code-standards.md) | Coding rules & conventions (8 Laws) |
-| [project-overview-pdr.md](./docs/project-overview-pdr.md) | PDR + detailed requirements |
-| [project-roadmap.md](./docs/project-roadmap.md) | Phase progress & milestones |
-
-**Deep Dives:**
-
-| Document | Level | Topic |
-|----------|-------|-------|
-| [getting-started.md](./docs/getting-started.md) | Beginner | Setup, build, first contribution |
-| [api-reference.md](./docs/api-reference.md) | Reference | Full trait & syscall reference |
-| [patterns.md](./docs/patterns.md) | Intermediate | Common code patterns |
-| [security-model.md](./docs/security-model.md) | Advanced | STRIDE model & known limitations |
-| [faq.md](./docs/faq.md) | All levels | Architecture questions answered |
-
-**Design Specifications** (read before coding):
-
-| Doc | Topic |
-|-----|-------|
-| [specs/00-context.md](./docs/specs/00-context.md) | Prime directive & overview |
-| [specs/01-core.md](./docs/specs/01-core.md) | Cellular philosophy & linker |
-| [specs/02-memory.md](./docs/specs/02-memory.md) | SAS, HHDM, memory registry |
-| [specs/03-runtime.md](./docs/specs/03-runtime.md) | Async safety & owned buffers |
-| [specs/04-hardware.md](./docs/specs/04-hardware.md) | Multi-arch HAL (RV, ARM, x86) |
-| [specs/05-application.md](./docs/specs/05-application.md) | Native/WASM/VM applications |
-| [specs/06-graphics.md](./docs/specs/06-graphics.md) | Graphics & compositor |
-| [specs/07-networking.md](./docs/specs/07-networking.md) | Network stack |
-| [specs/08-power.md](./docs/specs/08-power.md) | Power management |
-| [specs/09-vfs.md](./docs/specs/09-vfs.md) | Filesystem (VFS) |
-| [specs/10-testing.md](./docs/specs/10-testing.md) | Testing strategy |
-| [specs/11-shell.md](./docs/specs/11-shell.md) | Shell design |
+| Subsystem | Status | Notes |
+|-----------|--------|-------|
+| **Kernel** | ✅ | Priority scheduler · RT TLSF heap · round-robin · spawn_pinned |
+| **SMP** | ✅ | Phase 32 — hart boot (SBI HSM) · per-hart `ViHartLocal` via `tp` · cross-hart IPI · `WaitForEvent(217)` |
+| **Memory** | ✅ | SAS · HHDM · frame allocator · cell quota · Storage 2.0 grant pages (64KB→16MB) |
+| **ELF Loader** | ✅ | PIE + `R_RISCV_RELATIVE` · loaded from FAT32 `/bin/` |
+| **VFS** | ✅ | RamFS + FAT32 · mkdir/rmdir/unlink/stat/readdir · 8-scenario e2e suite |
+| **Shell** | ✅ | Pipes · redirects · tab completion · echo/cat/ls/pwd/cd/kill/ps |
+| **Network** | ✅ | TCP/UDP/DNS/DHCP/MQTT (Phases A–E) · TLS 1.3 HTTPS demo |
+| **Peripheral I/O** | ✅ | GPIO (PL061 · SiFive) · UART (PL011) · I2C bit-bang · SHT3x sensor demo |
+| **IPC** | ✅ | Zero-copy owned buffers · typed IPC · syscall filter · large-buffer grant pages |
+| **Reliability** | ✅ | Supervisor restart · guard pages · RT watchdog · `NotifyOnExit(204)` · zombie reaper |
+| **RT Latency** | ✅ | All benchmarks pass on QEMU TCG · mtime-based · jitter in-cell |
+| **RTC** | ✅ | Goldfish RTC (RV64/ARM64) · CMOS (x86_64) · `date` command |
+| **WASM** | ✅ | Tier-2: wasmi + `vi.*` imports + fuel metering |
+| **ViUI v2** | ✅ | Reactive Signal Tree · Dual-Layer DSL · GPU command buffer · embedded/robot readiness (P01–P10) |
+| **Heap Snapshot** | ✅ | Instant-On: snapshot → restore |
+| **RV32 Nano** | ✅ | QEMU S-mode boot verified · OpenSBI · SATP=0 |
+| **AArch64** | ✅ boot | Boots to scheduler on QEMU virt |
+| **x86_64** | ✅ boot | Boots to scheduler on QEMU q35 |
+| Compositor | 📋 | Full GPU desktop — G2 |
+| ARM64 full bring-up | 📋 | Beyond ring-3 smoke |
+| WASM vi.* expand | 📋 | VFS+net+time+spawn imports |
+| Hot migration | 📋 | Zero-downtime Cell live update — G2 |
 
 ---
 
-## Project Structure
+## Architecture
 
 ```
-vios/
-├── kernel/             Nano kernel (~8,700 LOC)
-├── hal/                Hardware Abstraction Layer
-│   ├── core/           Facade
-│   ├── traits/         Pure trait definitions
-│   └── arch/           riscv (IMPL), arm/x86 (STUB)
-├── libs/               Public API (Stable ABI)
-│   ├── types/          VAddr, PAddr, ViError, etc.
-│   ├── api/            Kernel-Cell boundary traits
-│   └── ostd/           Cells' standard library
-├── cells/              User-space software
-│   ├── apps/           Applications (init, shell, hello, utils)
-│   ├── drivers/        Hardware drivers (disk, gpu, input, net, serial, wasm)
-│   ├── services/       System services (vfs, config, compositor, etc.)
-│   └── runtimes/       VMs (Lua 5.4, MicroPython 1.24.1)
-├── docs/               Design specs & developer guides
-└── tests/              Architecture validation suite
+ViCell/
+├── kernel/             Nano-kernel: scheduler · loader · memory · IPC · syscalls
+├── hal/
+│   ├── traits/         ViArch · ViTimer · ViUart · ViGpio · ViI2c · ViMmc · ViDisplay
+│   └── arch/           riscv/  arm/  x86/
+├── libs/
+│   ├── types/          VAddr · PAddr · ViError · ViResult
+│   ├── api/            Kernel–Cell ABI (stable, Law 1 protected)
+│   ├── ostd/           Cell std: alloc · mmio · font_atlas · sync
+│   ├── viui/           ViUI v2: Signal tree · DSL · GPU renderer · widgets
+│   └── viui-macros/    vi_design! proc macro
+├── cells/
+│   ├── apps/           init · shell · hello · utils · bench · viui-demo
+│   │                   robot-demo · periph-demo · wasm · https-demo
+│   ├── drivers/        disk · gpu · gpio · gpio-sifive · i2c-gpio · input · net · serial · wasm
+│   └── services/       vfs · net · input · compositor · config · power
+├── tools/
+│   ├── vi-compiler/    .vi DSL → Rust codegen
+│   └── viui-build/     build-time widget tree builder
+└── docs/               Design specs (00–12) + developer guides
 ```
 
----
+**Two product stages (overlay on technical phases):**
 
-## Key Features
-
-✅ **RISC-V 64-bit (RV64)** HAL with SV39 paging, PLIC, SBI  
-✅ **Nano-kernel** (~12,600 LOC) with round-robin scheduler  
-✅ **Capability-based IPC** (zero-copy owned-buffer passing)  
-✅ **ELF loader** — external cells loaded from `/bin/` via PIE + R_RISCV_RELATIVE  
-✅ **VFS** — RamFS + FAT32 IPC (mkdir/rmdir/unlink/stat/readdir)  
-✅ **Interactive shell** with echo, cat, ls, pwd, cd  
-✅ **Lua 5.4 + MicroPython 1.24.1** runtime bindings  
-✅ **VirtIO block** — hang fixed; keyboard deadlock fixed  
-✅ **AArch64 + x86_64 HALs** — boot to Ring-3 smoke in QEMU  
-✅ **RV32 + AArch32** HAL trait implementations  
-✅ **Security infrastructure** — STRIDE model, fuzzing, capability audit  
-🚧 **FAT32 on VirtIO** — FatFsAdapter (in progress)  
-🚧 **Input / network / compositor services** (in progress)
-
----
-
-## The 8 Coding Laws
-
-All developers must follow these non-negotiable rules:
-
-1. **Interface is Sacred** — Changes to `libs/api/` require 2x confirmation
-2. **Owned Buffers for Async** — Never `&mut [u8]` across async boundaries
-3. **Multi-Architecture Awareness** — Use `VAddr`/`PAddr`, never hardcode pointer sizes
-4. **Unsafe Management** — Cells: forbid unsafe; Kernel: document all unsafe with `// SAFETY:`
-5. **Modern Module Structure** — Use `foo.rs` + `foo/` folder, never `mod.rs`
-6. **ViOS Naming Convention** — `Vi` prefix for traits/types, snake_case for modules
-7. **Trait Objects for Polymorphism** — Dynamic dispatch at system boundaries
-8. **RAII - Implement Drop** — All resources must clean up explicitly
-
-See [CLAUDE.md](./CLAUDE.md) for quick reference.
+- **G1 — Robot & Embedded**: never-die · bounded RT · fault isolation · fast boot · peripheral I/O · small footprint. Target: ARM64/RV64 SBC + RV32 MCU sub-track.
+- **G2 — Server & Specialized PC**: multi-core throughput · full desktop · untrusted code · hot migration · x86_64. Target: x86_64 + multi-core RV64/ARM64 servers.
 
 ---
 
 ## Build Targets
 
-| Target | Status | HAL | Notes |
-|--------|--------|-----|-------|
-| `riscv64gc-unknown-none-elf` | ✅ WORKING | RV64 SV39 | Primary target |
-| `aarch64-unknown-none` | 🚧 STUB | Arm64 | Implementation in progress |
-| `x86_64-unknown-none` | 🚧 STUB | x86_64 | Implementation planned |
+| Target | Status | Notes |
+|--------|--------|-------|
+| `riscv64gc-unknown-none-elf` | ✅ Primary | Full boot · all services |
+| `aarch64-unknown-none` | ✅ Boots | Scheduler reached; full bring-up G1 next |
+| `x86_64-unknown-none` | ✅ Boots | Scheduler reached; full bring-up G2 |
+| `riscv32imc-unknown-none-elf` | ✅ Boot | ViCell-Nano · QEMU S-mode verified |
+
+Build kernel with `RUSTFLAGS=-Crelocation-model=pic` (handled automatically). Cells stay non-PIC — do **not** put this in `.cargo/config.toml` globally.
 
 ---
 
-## Architecture Highlights
+## The 8 Coding Laws
 
-- **Single Address Space**: No process boundaries, reduced context-switch overhead
-- **Language-Based Isolation**: Rust compiler enforces Cell isolation
-- **Capability Objects**: Fine-grained access control via syscalls
-- **Async/Await**: Native async runtime for I/O-bound operations
-- **Multi-Architecture**: Feature flags for RV32/RV64, ARM32/ARM64, x86_64
+1. **Interface is Sacred** — `libs/api/` changes require 2× user confirmation
+2. **Owned Buffers for Async** — `async fn f(data: Box<[u8]>) -> Box<[u8]>`, never `&mut [u8]`
+3. **Multi-Architecture** — use `VAddr`/`PAddr`; never hardcode pointer sizes
+4. **Unsafe Management** — Cells: `#![forbid(unsafe_code)]`; Kernel: document every `unsafe` with `// SAFETY:`
+5. **Modern Module Style** — `foo.rs` + `foo/` directory; `mod.rs` is forbidden
+6. **ViCell Naming** — `Vi` prefix for public traits/types (`ViDriver`, `ViResult`); snake_case for files
+7. **Trait Objects for Polymorphism** — `Arc<dyn ViDriver + Send + Sync>` at system boundaries
+8. **RAII — Implement Drop** — all resources clean up explicitly; no process-based cleanup in SAS
+
+Full rules: [CLAUDE.md](./CLAUDE.md) · [code-standards.md](./docs/code-standards.md)
 
 ---
 
-## Current Phase (v0.2.0 — Mycelium Era)
+## Documentation
 
-**Phase 1: Core Stability** (April—June 2026)
+| Document | Purpose |
+|----------|---------|
+| [system-architecture.md](./docs/system-architecture.md) | High-level design |
+| [code-standards.md](./docs/code-standards.md) | Coding rules & 8 Laws |
+| [patterns.md](./docs/patterns.md) | Common Rust patterns (global state, IPC, RAII) |
+| [api-reference.md](./docs/api-reference.md) | Syscall table · trait reference |
+| [project-roadmap.md](./docs/project-roadmap.md) | Phase progress & milestones |
+| [getting-started.md](./docs/getting-started.md) | Setup guide |
+| [security-model.md](./docs/security-model.md) | STRIDE model · known limitations |
+| [hardware-dev-guide.md](./docs/hardware-dev-guide.md) | Real board workflow |
+| [faq.md](./docs/faq.md) | Architecture Q&A |
 
-Priority fixes:
-1. ✅ Architecture validation (10/10 score)
-2. 🚧 VirtIO block device hang (blocking disk access)
-3. 🚧 Keyboard input deadlock (single-key limitation)
-4. 📋 Multi-architecture HAL (RV64 done, ARM/x86 next)
-5. 📋 External ELF loading (load `/bin/*` binaries from disk)
+**Design Specifications** (read before coding in a subsystem):
 
-See [project-roadmap.md](./docs/project-roadmap.md) for detailed milestones.
+| Spec | Topic |
+|------|-------|
+| [00-context.md](./docs/specs/00-context.md) | Prime directive |
+| [01-core.md](./docs/specs/01-core.md) | Cellular philosophy · linker |
+| [02-memory.md](./docs/specs/02-memory.md) | SAS · HHDM · registry |
+| [03-runtime.md](./docs/specs/03-runtime.md) | Async safety · owned buffers |
+| [04-hardware.md](./docs/specs/04-hardware.md) | Multi-arch HAL |
+| [05-application.md](./docs/specs/05-application.md) | Native · WASM · VM tiers |
+| [06-graphics.md](./docs/specs/06-graphics.md) | ViUI · compositor · GPU |
+| [07-networking.md](./docs/specs/07-networking.md) | Network stack |
+| [09-vfs.md](./docs/specs/09-vfs.md) | VFS · filesystem |
+| [11-shell.md](./docs/specs/11-shell.md) | Shell design |
+| [12-reliability.md](./docs/specs/12-reliability.md) | Never-die · supervisor |
 
 ---
 
 ## Contributing
 
-ViOS is open-source (see [LICENSE](./LICENSE) when available).
-
-**Before coding:**
-1. Read [CLAUDE.md](./CLAUDE.md) — auto-loaded guidelines
-2. Read relevant spec in `docs/specs/0X-*.md`
-3. Read [code-standards.md](./docs/code-standards.md) — coding rules
-4. Create a branch: `git checkout -b feature/my-feature`
-
-**Development workflow:**
 ```bash
-# Check code
-cargo check
-
-# Format
-cargo fmt --all
-
-# Lint
-cargo clippy -- -D warnings
-
-# Build
-cargo build --release
-
-# Run tests
-cargo test --all --release
+cargo check               # type check
+cargo fmt --all           # format
+cargo clippy -- -D warnings   # lint
+cargo build --release     # build
+cargo test --all          # run tests
 ```
 
-**Submit PR:**
-- Title: `feat(scope): description` or `fix(scope): description`
-- Reference related issues: `Fixes #123`
-- Ensure CI passes (lint, build, tests)
-
----
-
-## Community
-
-| Resource | Purpose |
-|----------|---------|
-| [GitHub Discussions](../../discussions) | Questions, ideas, show-and-tell |
-| [GitHub Issues](../../issues) | Bug reports and feature requests |
-| [`good-first-issue`](../../issues?q=label%3Agood-first-issue) | Curated starting points for new contributors |
-
-**New contributor?**
-
-1. Run `./scripts/dev-setup.sh` (Linux/macOS) or `.\scripts\dev-setup.ps1` (Windows)
-2. Read [docs/getting-started.md](docs/getting-started.md) — setup guide + common errors
-3. Read [CONTRIBUTING.md](CONTRIBUTING.md) — step-by-step first PR walkthrough
-4. Browse [docs/faq.md](docs/faq.md) — architecture questions answered
-5. Check [docs/project-roadmap.md](docs/project-roadmap.md) — where the project is headed
-6. Review [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) — community standards
-
-We aim to respond to PRs and new issues within **3 business days**.
-
----
-
-## License
-
-ViOS is designed to be open-source under a permissive license (MIT or Apache 2.0, details TBD).
+**Before coding**: read [CLAUDE.md](./CLAUDE.md) and the relevant spec in `docs/specs/`.  
+**Commit format**: `type(scope): description` — e.g. `feat(vfs): add readdir support`
 
 ---
 
 ## Acknowledgments
 
-ViOS builds on insights from:
-- **Theseus** (UC Santa Cruz) — Live evolution, capability-based security
+ViCell draws ideas from:
+- **Theseus** (UC Santa Cruz) — live evolution, single address space
 - **Asterinas** — FrameKernel safety abstractions
-- **Tock** (Google) — Embedded OS efficiency, hardware abstraction
+- **Tock** (Google) — embedded OS efficiency, hardware isolation traits
+- **Redox OS** — Rust microkernel IPC patterns
 
 ---
 
-**Version**: 0.2.1 (Mycelium Era)  
-**Last Updated**: 2026-05-29  
-**Maintained by**: ViOS Team
+**Version**: 0.2.1-dev (Mycelium Era) · **Last Updated**: 2026-06-08 · **Maintained by**: lungmat8
