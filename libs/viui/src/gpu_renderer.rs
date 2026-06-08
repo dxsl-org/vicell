@@ -24,11 +24,12 @@ pub struct GpuRenderer<E: CommandExecutor> {
     executor: E,
     width:    u32,
     height:   u32,
+    buf:      GpuCommandBuffer,
 }
 
 impl<E: CommandExecutor> GpuRenderer<E> {
     pub fn new(executor: E, width: u32, height: u32) -> Self {
-        Self { executor, width, height }
+        Self { executor, width, height, buf: GpuCommandBuffer::new() }
     }
 
     /// Unwrap the executor (e.g. to reclaim the inner `ViSurface`).
@@ -37,12 +38,13 @@ impl<E: CommandExecutor> GpuRenderer<E> {
 
 impl<E: CommandExecutor> ViRenderer for GpuRenderer<E> {
     fn render(&mut self, damage: Option<Rect>, draw: &mut dyn FnMut(&mut dyn ViCanvas)) {
-        let mut buf = GpuCommandBuffer::new();
+        self.buf.clear();
         {
-            let mut canvas = GpuCanvas::new(&mut buf, self.width, self.height);
+            let mut canvas = GpuCanvas::new(&mut self.buf, self.width, self.height);
             draw(&mut canvas);
         }
-        self.executor.execute(&buf, damage);
+        // NLL field split: &self.buf (immutable) + &mut self.executor separate fields
+        self.executor.execute(&self.buf, damage);
     }
 
     fn size(&self) -> (u32, u32) { (self.width, self.height) }

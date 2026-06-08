@@ -42,6 +42,14 @@ pub enum Event {
     MouseRelease { pos: Point, button: MouseButton },
     Scroll      { pos: Point, delta_y: f32 },
 
+    // Touch — same BottomUp routing as mouse. `finger_id` disambiguates contacts.
+    /// First contact of a new touch (maps to MousePress for non-touch widgets).
+    TouchBegin   { pos: Point, finger_id: u32 },
+    /// Contact moved while touching (maps to MouseMove for non-touch widgets).
+    TouchMove    { pos: Point, finger_id: u32 },
+    /// Contact lifted (maps to MouseRelease for non-touch widgets).
+    TouchEnd     { pos: Point, finger_id: u32 },
+
     // Direct — dispatched only to the focused widget
     KeyPress   { key: KeyCode, modifiers: Modifiers },
     KeyRelease { key: KeyCode },
@@ -59,14 +67,17 @@ impl Event {
             Self::MouseMove { pos }
             | Self::MousePress { pos, .. }
             | Self::MouseRelease { pos, .. }
-            | Self::Scroll { pos, .. } => Some(*pos),
+            | Self::Scroll { pos, .. }
+            | Self::TouchBegin { pos, .. }
+            | Self::TouchMove  { pos, .. }
+            | Self::TouchEnd   { pos, .. } => Some(*pos),
             _ => None,
         }
     }
 
     /// True if this event should be dispatched globally (not just to the hit-target).
     pub fn is_global_release(&self) -> bool {
-        matches!(self, Self::MouseRelease { .. })
+        matches!(self, Self::MouseRelease { .. } | Self::TouchEnd { .. })
     }
 }
 

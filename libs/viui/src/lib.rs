@@ -34,12 +34,14 @@
 
 extern crate alloc;
 
+pub mod animation;
 pub mod app_runner;
 pub mod canvas;
 pub mod dirty;
 pub mod elm;
 pub mod executor;
 pub mod event;
+pub mod font_context;
 pub mod gpu_canvas;
 pub mod gpu_cmd;
 pub mod gpu_renderer;
@@ -47,6 +49,7 @@ pub mod layout;
 pub mod node;
 pub mod node_widgets;
 pub mod prelude;
+pub mod render_ctx;
 pub mod renderer;
 pub mod response;
 pub mod signal;
