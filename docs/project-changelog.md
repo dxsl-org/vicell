@@ -4,6 +4,56 @@
 
 ---
 
+## [2026-06-08] ViUI v2 P05 — Build Integration (viui-build Crate + viui-demo Cell)
+
+### Summary
+Completed end-to-end build integration for ViUI v2 DSL → Rust code pipeline. Shipped `tools/viui-build/` (standalone Cargo build-helper crate wrapping vi-compiler) and `cells/apps/viui-demo/` (demonstration Cell using the pipeline). Build dependency separated from main workspace via `exclude` list, enabling independent versioning and CI for the compiler toolchain.
+
+### Changes
+- **`tools/viui-build/`** — NEW standalone crate
+  - `src/lib.rs`: `pub fn compile(glob_pattern: &str) -> Result<(), Box<dyn Error>>`
+  - Wraps vi-compiler CLI; auto-generates Rust from `.vi` files at build time
+  - Designed for `build.rs` integration (typical usage: `viui_build::compile("src/**/*.vi")`)
+  - Returns paths of generated `.rs` files for `include!()` macro
+
+- **`cells/apps/viui-demo/`** — NEW demo Cell
+  - `build.rs`: calls `viui_build::compile("src/**/*.vi")` to trigger code generation
+  - `src/main.rs`: includes generated `counter.rs` via `include!(concat!(env!("OUT_DIR"), "/counter.rs"))`
+  - `src/counter.vi`: simple counter app in `.vi` DSL (from P04 test suite)
+  - Demonstrates full pipeline: DSL → compile → generated Rust → binary Cell
+
+- **Workspace `Cargo.toml`**:
+  - Added `exclude = ["tools/vi-compiler", "tools/viui-build"]` to separate compiler toolchain
+  - Allows independent compiler releases without syncing main workspace versions
+  - CI can target `--exclude=vi-compiler,viui-build` for stability, or test them separately
+
+### Architecture
+- **Separation of Concerns**: vi-compiler (primary build tool, std, parser+codegen) vs viui-build (integration layer, std, minimal wrapper)
+- **Build-Time Code Generation**: `build.rs` → viui_build::compile → $OUT_DIR/counter.rs → include!()
+- **No Runtime Dependency**: Generated code is pure Rust; viui-build is dev-only
+- **Hot-Reload Path**: future phase will add `viui-build --watch` for development workflow
+
+### Files Created
+- `tools/viui-build/Cargo.toml` — standalone crate manifest
+- `tools/viui-build/src/lib.rs` — compile function
+- `cells/apps/viui-demo/Cargo.toml` — demo app manifest
+- `cells/apps/viui-demo/build.rs` — build integration script
+- `cells/apps/viui-demo/src/main.rs` — Cell entry point with include!()
+- `cells/apps/viui-demo/src/counter.vi` — demo DSL file
+
+### Files Modified
+- `Cargo.toml` (workspace root) — added exclude list for tool crates
+
+### Impact
+- First real-world ViUI v2 cell delivered; build pipeline validated end-to-end
+- Developers can now write `.vi` DSL and get compiled binaries directly (no manual compiler invocation)
+- Unblocks P06+ (additional demo apps, user guidelines, ecosystem examples)
+- Establishes pattern for shipping Rust tools alongside kernel/cells
+
+**Status**: Complete. Demo builds cleanly; counter.vi → counter.rs → viui-demo binary verified.
+
+---
+
 ## [2026-06-08] ViUI v2 Architecture — Design Chốt
 
 ### Summary

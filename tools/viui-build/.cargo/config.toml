@@ -1,0 +1,3 @@
+# Override the workspace-level riscv64 default — viui-build runs on the dev host.
+[build]
+target = "x86_64-pc-windows-msvc"

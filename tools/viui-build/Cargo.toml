@@ -1,0 +1,17 @@
+# Standalone crate — NOT part of the ViCell embedded workspace.
+# Used as [build-dependencies] — always compiled for the HOST target by Cargo.
+# Build: cargo check --manifest-path tools/viui-build/Cargo.toml
+[workspace]
+
+[package]
+name        = "viui-build"
+version     = "0.1.0"
+edition     = "2021"
+description = "Cargo build helper — compile .vi DSL files to Rust at build time"
+
+[lib]
+name = "viui_build"
+path = "src/lib.rs"
+
+[dependencies]
+vi-compiler = { path = "../vi-compiler" }

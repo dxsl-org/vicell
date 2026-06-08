@@ -509,13 +509,15 @@ Contrast with ViUI v1 (Elm): every button click → rebuild all 20 widgets → l
 ### Crate Layout
 
 ```
-viui-compiler/  (std, build tool)     — .vi parser, Slint expr evaluator, codegen
-viui-build/     (std, build-dep)      — build.rs integration + hot-reload watcher
-viui-macros/    (proc_macro)          — vi_design!{} for inline prototype use
-viui-core/      (no_std + alloc)      — Signal<T>, LayoutNode, DirtyRect, ViRenderer trait
-viui-widgets/   (no_std + alloc)      — typed widget structs (Layer 2 API)
-viui/           (no_std, umbrella)    — re-exports all above
+tools/vi-compiler/  (std, build tool)     — .vi parser, Slint expr evaluator, codegen
+tools/viui-build/   (std, build-dep) ✅   — build.rs integration wrapper (P05 complete)
+viui-macros/        (proc_macro)          — vi_design!{} for inline prototype use
+viui-core/          (no_std + alloc)      — Signal<T>, LayoutNode, DirtyRect, ViRenderer trait
+viui-widgets/       (no_std + alloc)      — typed widget structs (Layer 2 API)
+viui/               (no_std, umbrella)    — re-exports all above
 ```
+
+**P05 Build Integration** (2026-06-08): `tools/viui-build/` wraps vi-compiler; cells use `build.rs` → `viui_build::compile(glob)` → `include!()` generated Rust. Demo Cell (`cells/apps/viui-demo/`) validated end-to-end. Workspace `exclude` separates compiler from kernel/cells for independent versioning.
 
 Design brief: [.agents/brainstorms/260608-viui-nextgen-architecture.md](.agents/brainstorms/260608-viui-nextgen-architecture.md)
 
