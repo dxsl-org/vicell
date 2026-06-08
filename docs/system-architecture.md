@@ -432,6 +432,95 @@ cells/runtimes/lua/       — Lua 5.4 via FFI (✅ REPL verified)
 cells/runtimes/micropython/ — MicroPython 1.24.1 via FFI (✅ REPL verified)
 ```
 
+**UI Library** (`libs/viui/`): no_std UI toolkit for GUI app Cells
+```
+libs/viui/             — ViUI toolkit (no_std + alloc, MIT)
+  v1 (done):           Elm model, FramebufferCanvas, GlyphAtlas — foundation
+  v2 (G2 planned):     Reactive Signal Tree + Dual-Layer DSL (see below)
+```
+
+---
+
+## ViUI Architecture (G2 Target)
+
+ViUI v2 targets the constraints of ViCell's no_std Cell environment while matching the ergonomics of modern native UI toolkits.
+
+### Dual-Layer Design
+
+```
+┌────────────────────────────────────────────────────────┐
+│  Layer 1 — .vi DSL  (Slint-compatible syntax)          │
+│                                                        │
+│  component Counter {                                   │
+│      in-out property <int> count: 0;                   │
+│      VerticalLayout {                                  │
+│          Text { text: "Count: \{count}"; }             │
+│          Button { text: "+1"; clicked => {count+=1;} } │
+│      }                                                 │
+│  }                                                     │
+│                                                        │
+│  vi-compiler (build.rs) → generates Layer 2 Rust code  │
+│  Hot-reload: watcher daemon, no recompile needed       │
+└────────────────────────────────────────────────────────┘
+                         ↓ compiles to
+┌────────────────────────────────────────────────────────┐
+│  Layer 2 — Rust Signal API  (also direct public API)   │
+│                                                        │
+│  #[vi_component]                                       │
+│  struct Counter { count: Signal<i32> }                 │
+│                                                        │
+│  impl ViComponent for Counter {                        │
+│      fn view(&self) -> impl ViNode {                   │
+│          vstack!(                                      │
+│              label!(text: self.count                   │
+│                  .map(|n| format!("Count: {n}"))),     │
+│              button!(text: "Increment",                │
+│                  on_click: || self.count               │
+│                      .update(|n| n+1)),                │
+│          )                                             │
+│      }                                                 │
+│  }                                                     │
+└────────────────────────────────────────────────────────┘
+```
+
+**Key properties**:
+- Layer 1 uses Slint expression language → zero migration cost from Slint
+- Layer 2 uses Rust expressions → familiar to Rust devs, no DSL required
+- Signal<T> reactive engine: only affected widgets repaint → no full-screen repaints
+- ViRenderer trait: FramebufferCanvas (CPU, no GPU needed) or GPU backend (G2+)
+- no_std + alloc throughout; no std dependency in runtime crates
+
+### Reactive Update Model
+
+```
+Signal<count>.set(42)
+    ↓
+Notify subscriber widgets (only label in this example)
+    ↓
+Mark label's dirty_rect
+    ↓
+Repaint only label region (~80×16 px)
+    ↓  
+surf.damage_rect(dirty)    ← NOT damage_all()
+```
+
+Contrast with ViUI v1 (Elm): every button click → rebuild all 20 widgets → layout all → repaint 307,200 px.
+
+### Crate Layout
+
+```
+viui-compiler/  (std, build tool)     — .vi parser, Slint expr evaluator, codegen
+viui-build/     (std, build-dep)      — build.rs integration + hot-reload watcher
+viui-macros/    (proc_macro)          — vi_design!{} for inline prototype use
+viui-core/      (no_std + alloc)      — Signal<T>, LayoutNode, DirtyRect, ViRenderer trait
+viui-widgets/   (no_std + alloc)      — typed widget structs (Layer 2 API)
+viui/           (no_std, umbrella)    — re-exports all above
+```
+
+Design brief: [.agents/brainstorms/260608-viui-nextgen-architecture.md](.agents/brainstorms/260608-viui-nextgen-architecture.md)
+
+---
+
 ### Cell Lifecycle
 
 ```
@@ -657,6 +746,12 @@ Physical RAM: 0x8000_0000–0x8800_0000 (default: 128 MB in QEMU)
 - **KASLR** (not implemented)
 
 ### ⏳ Planned (Later phases)
+- **ViUI v2 — Reactive Signal Tree + Dual-Layer DSL** `[G2]`:
+  - Layer 1: `.vi` files with 99% Slint-compatible syntax; vi-compiler (build.rs) generates Layer 2 Rust code; hot-reload via watcher daemon
+  - Layer 2: typed `Signal<T>`-based Rust API — what the compiler generates, also a direct public API for Rust devs; no `Box<dyn>` per update, near-zero allocation per state change
+  - Reactive engine: `Signal<T>` notifies only affected widgets → repaint only dirty rects
+  - `ViRenderer` trait: software rasterizer (CPU default, G1) swappable with GPU backend (G2+)
+  - Design brief: [.agents/brainstorms/260608-viui-nextgen-architecture.md](.agents/brainstorms/260608-viui-nextgen-architecture.md)
 - ARM64 full kernel bring-up (pending, needed for real GPIO on aarch64 QEMU ARM virt)
 - Peripheral Driver extensions: I2C, SPI, CAN, PWM, ADC (G1 ext / G2)
 - Real SBC validation (RPi 4 / VisionFive2 / Radxa ROCK 5)

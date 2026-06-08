@@ -4,6 +4,25 @@
 
 ---
 
+## [2026-06-08] ViUI v2 Architecture — Design Chốt
+
+### Summary
+Phân tích ViUI v1 (Elm model) và chốt kiến trúc mới cho ViUI v2 (G2). Vấn đề căn bản của v1: full tree rebuild + full repaint mỗi update → O(n) allocation và O(pixels) work kể cả khi 1 pixel thay đổi. ViUI v2 giải quyết bằng Reactive Signal Tree + Dual-Layer DSL.
+
+### Quyết định kiến trúc
+- **Rendering model**: Reactive Signal Tree — `Signal<T>` notify trực tiếp widget subscriber, chỉ repaint dirty rect
+- **Layer 1 DSL**: `.vi` files, 99% Slint-compatible syntax + Slint expression language; vi-compiler (build.rs) → hot-reload
+- **Layer 2 Rust API**: Typed `Signal<T>`-based structs — output của compiler, cũng là direct API cho Rust devs
+- **Compiler strategy**: Hybrid — build.rs (primary, hot-reload) + `vi_design!` proc_macro (secondary, inline prototype)
+- **GPU**: Optional — `ViRenderer` trait swap CPU ↔ GPU backend
+- **Pháp lý**: Syntax không thể bị bản quyền (EU ECJ SAS v. WPL 2012); viết engine từ số 0 = không liên quan GPLv3; dùng `.vi` extension (không `.slint`)
+
+### Artifacts
+- Design brief: `.agents/brainstorms/260608-viui-nextgen-architecture.md`
+- Docs updated: `system-architecture.md` (ViUI Architecture section), `project-roadmap.md` (ViUI v1/v2 entries)
+
+---
+
 ## [2026-06-07] ViUI Toolkit — P01–P07 Complete (P03 deferred)
 
 ### Summary
