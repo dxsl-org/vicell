@@ -22,6 +22,15 @@ component Hello {
 
 api::declare_syscalls![Log];
 
+// ── Path 3: GpuRenderer<CpuExecutor> type-level proof ────────────────────────
+// Prove GpuRenderer<CpuExecutor> satisfies ViRenderer at compile time.
+// Cannot call render() here — no real ViSurface in a demo cell.
+// Type-level proof is sufficient for P07 architecture validation.
+fn _assert_gpu_renderer_api() {
+    fn _check<T: viui::renderer::ViRenderer>() {}
+    _check::<viui::GpuRenderer<viui::CpuExecutor>>();
+}
+
 #[no_mangle]
 pub fn main() {
     // build.rs generated component
@@ -33,5 +42,6 @@ pub fn main() {
     let (_hello_state, _hello_ui) = Hello::build();
     ostd::io::println("[viui-demo] Hello (vi_design!) OK");
 
+    ostd::io::println("[viui-demo] GpuRenderer<CpuExecutor>: ViRenderer OK");
     ostd::syscall::sys_exit(0);
 }

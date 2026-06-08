@@ -38,7 +38,11 @@ pub mod app_runner;
 pub mod canvas;
 pub mod dirty;
 pub mod elm;
+pub mod executor;
 pub mod event;
+pub mod gpu_canvas;
+pub mod gpu_cmd;
+pub mod gpu_renderer;
 pub mod layout;
 pub mod node;
 pub mod node_widgets;
@@ -51,6 +55,10 @@ pub mod theme;
 pub mod widget;
 pub mod widgets;
 pub mod window;
+
+// ─── GPU renderer convenience re-exports ─────────────────────────────────────
+pub use executor::{CommandExecutor, CpuExecutor};
+pub use gpu_renderer::GpuRenderer;
 
 // ─── ViUI v2 macros ───────────────────────────────────────────────────────────
 //

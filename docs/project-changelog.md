@@ -4,6 +4,32 @@
 
 ---
 
+## [2026-06-08] ViUI v2 P07 — GPU Command Buffer Renderer
+
+### Summary
+Completed Phase 07: implemented command-list-based rendering pipeline enabling damage-rect optimization and future hardware GPU execution. Added `GpuRenderer<E: CommandExecutor>` — a second `ViRenderer` implementation alongside `FramebufferRenderer`. CPU playback via `CpuExecutor` produces identical output to framebuffer path while enabling skipped repaints outside dirty rectangles.
+
+### Changes
+- **`libs/viui/src/gpu_cmd.rs`** — NEW — `GpuCmd` enum (FillRect/DrawLine/DrawText/DrawImage) + `GpuCommandBuffer` recorder
+- **`libs/viui/src/gpu_canvas.rs`** — NEW — `GpuCanvas<'buf>` implements `ViCanvas` trait; records to buffer instead of rasterizing
+- **`libs/viui/src/executor.rs`** — NEW — `CommandExecutor` trait + `CpuExecutor` struct for command playback with damage filtering
+- **`libs/viui/src/gpu_renderer.rs`** — NEW — `GpuRenderer<E>` generic struct implementing `ViRenderer` trait
+- **`libs/viui/src/lib.rs`** — MODIFIED — pub mod + pub use exports for 4 new modules
+- **`cells/apps/viui-demo/src/main.rs`** — MODIFIED — added `_assert_gpu_renderer_api()` compile-time trait proof
+
+### Architecture
+`GpuRenderer<E>` records paint calls to `GpuCommandBuffer`, then executes them via `CommandExecutor` trait. `CpuExecutor` replays commands through `FramebufferCanvas`, skipping commands outside `damage_rect` for optimization. Architecture is open: G2 can implement `CommandExecutor` for hardware 2D engines (Mali DE, VirtIO virgl) without changing app code.
+
+### Impact
+- **Foundation for GPU acceleration**: command list abstraction is hardware-agnostic
+- **Damage-rect optimization ready**: CPU path skips repaints outside dirty region
+- **ViRenderer polymorphism validated**: both `FramebufferRenderer` and `GpuRenderer<CpuExecutor>` available at runtime
+- **ViUI v2 feature-complete**: all 7 phases shipped; ready for G2 production apps
+
+**Status**: Complete. All cargo check/clippy targets pass. `GpuRenderer<CpuExecutor>: ViRenderer` proven at compile time.
+
+---
+
 ## [2026-06-08] ViUI v2 P06 — Proc Macro + Module Wrapping (viui-macros + Codegen Redesign)
 
 ### Summary

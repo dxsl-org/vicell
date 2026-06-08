@@ -73,7 +73,7 @@ ViCell ships in two product stages defined by target hardware. The mapping princ
 | SMP multi-core scheduler + work-stealing | Phase 32 | 📋 | **G2** |
 | Compositor + GPU desktop (full) + mouse | M2.4 + M2.2 full | 📋 | G2 |
 | 🆕 **ViUI v1** (Elm model, FramebufferCanvas, GlyphAtlas, P01–P07) | new | ✅ Done 2026-06-08 — foundation only, design superseded | **G2 prep** |
-| 🆕 **ViUI v2** (Reactive Signal Tree + Dual-Layer DSL) | new | ✅ P01–P06 COMPLETE (design + codegen + viui-build + viui-macros + demo) | **G2** |
+| 🆕 **ViUI v2** (Reactive Signal Tree + Dual-Layer DSL) | new | ✅ P01–P07 COMPLETE (design + codegen + viui-build + viui-macros + GPU command buffer renderer) | **G2** |
 | Hot migration / zero-downtime | M4.1 | 📋 | G2 |
 | 🆕 x86_64 full bring-up | ext. M1.3 | 📋 | **G2** |
 | VFS scale (FAT32/ext4, large disks) | M2.1 ext. | 📋 | G2 |
