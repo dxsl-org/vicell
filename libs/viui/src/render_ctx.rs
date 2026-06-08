@@ -1,31 +1,34 @@
 // SPDX-License-Identifier: MIT
-//! `RenderCtx` — combined canvas + font context for `ViNode::paint()`.
+//! `RenderCtx` — combined canvas + font context + theme for `ViNode::paint()`.
 //!
-//! Bundles a mutable canvas reference with the frame's `FontContext` so
-//! every widget has access to both drawing primitives and scalable glyphs
-//! through a single argument.
+//! Bundles a mutable canvas reference with the frame's `FontContext` and
+//! active `ViTheme` so every widget has access to drawing primitives, scalable
+//! glyphs, and design tokens through a single argument.
 //!
 //! # Why a struct instead of two arguments?
 //!
 //! `ViNode::paint()` is an object-safe trait method. Rust requires object-safe
 //! methods to have no more than one unsized parameter (the receiver). Passing
 //! two `&mut dyn …` arguments is fine syntactically but introducing `RenderCtx`
-//! is cleaner, extensible (add `theme`, `locale`, etc. later), and avoids
-//! ambiguity at call sites.
+//! is cleaner, extensible, and avoids ambiguity at call sites.
 
 use crate::canvas::{Color, TextStyle, ViCanvas};
 use crate::font_context::FontContext;
 use crate::layout::Point;
+use crate::theme::ViTheme;
 
-/// Combined draw surface + font state for one paint pass.
+/// Combined draw surface + font state + active theme for one paint pass.
 ///
 /// Passed by mutable reference through the entire widget tree during paint.
-/// Containers forward `cx` directly to children — no intermediate clone.
+/// Containers forward `cx` directly to children — no intermediate clone or reborrow.
 pub struct RenderCtx<'a> {
     /// The pixel drawing surface for this frame.
     pub canvas: &'a mut dyn ViCanvas,
     /// Scalable glyph state. `atlas` may be `None` (bitmap fallback).
     pub font:   &'a mut FontContext,
+    /// Active design token set. Widgets read colors and spacing from here
+    /// rather than hardcoding values.
+    pub theme:  &'a dyn ViTheme,
 }
 
 impl<'a> RenderCtx<'a> {
@@ -78,6 +81,6 @@ impl<'a> RenderCtx<'a> {
     /// widgets when the parent still needs access afterward (split borrow).
     #[inline]
     pub fn reborrow(&mut self) -> RenderCtx<'_> {
-        RenderCtx { canvas: self.canvas, font: self.font }
+        RenderCtx { canvas: self.canvas, font: self.font, theme: self.theme }
     }
 }

@@ -21,13 +21,85 @@ use crate::eval::{eval_binding, eval_callback, eval_property, AugOp, InterpolPar
 
 // ─── Element → Widget mapping ────────────────────────────────────────────────
 
-/// Maps a `.vi` element name to (Rust type, import path segment).
+/// Maps a `.vi` element name to `(Rust type, import path segment)`.
+///
+/// Returns `None` for unknown elements — callers should emit `compile_error!`.
 fn map_element(name: &str) -> Option<(&'static str, &'static str)> {
     match name {
-        "VerticalLayout" | "VBox"   => Some(("Column", "column")),
-        "HorizontalLayout" | "HBox" => Some(("Row",    "row")),
-        "Text" | "Label"            => Some(("Label",  "label")),
-        "Button"                    => Some(("Button", "button")),
+        // Layout
+        "VerticalLayout" | "VBox" | "Column" => Some(("Column",      "column")),
+        "HorizontalLayout" | "HBox" | "Row"  => Some(("Row",         "row")),
+        // Text
+        "Text" | "Label"                     => Some(("Label",       "label")),
+        // Interactive
+        "Button"                             => Some(("Button",      "button")),
+        "Slider"                             => Some(("Slider",      "slider")),
+        "CheckBox" | "Checkbox"              => Some(("CheckBox",    "checkbox")),
+        // Display
+        "ProgressBar" | "Progress"           => Some(("ProgressBar", "progress_bar")),
+        "Image"                              => Some(("Image",       "image")),
+        // Input
+        "TextInput" | "TextEdit"             => Some(("TextEdit",    "text_edit")),
+        // Container
+        "TouchArea"                          => Some(("TouchArea",   "touch_area")),
+        "ListView" | "List"                  => Some(("ListView",    "list_view")),
+        "ScrollArea" | "ScrollView"          => Some(("ScrollArea",  "scroll_area")),
+        _ => None,
+    }
+}
+
+/// Describes how a widget's Rust constructor is called.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum CtorStyle {
+    /// `Container::new(children_vec)` — layout containers (Column, Row).
+    Container,
+    /// `Widget::new(child_box)` — single-child containers (TouchArea, ScrollArea).
+    ChildBox,
+    /// `Widget::new(signal)` — first property binding becomes the constructor arg.
+    ///
+    /// Used by Label, ProgressBar, Slider, CheckBox, TextEdit.
+    SignalFirst,
+    /// `Button::new(label_str, callback)` — special: string label + closure.
+    SignalCallback,
+    /// `ListView::new(items_signal)` — `Signal<Vec<String>>` constructor.
+    ItemsSignal,
+    /// `Widget::new()` — no mandatory constructor argument (Image placeholder, etc.).
+    NoArg,
+}
+
+/// Returns the constructor style for a Rust widget type produced by `map_element`.
+fn widget_ctor_style(rust_type: &str) -> CtorStyle {
+    match rust_type {
+        "Column" | "Row"             => CtorStyle::Container,
+        "TouchArea" | "ScrollArea"   => CtorStyle::ChildBox,
+        "Label"                      => CtorStyle::SignalFirst,
+        "Button"                     => CtorStyle::SignalCallback,
+        "ProgressBar" | "Slider"     => CtorStyle::SignalFirst,
+        // CheckBox::new(checked: Signal<bool>) — confirmed from source
+        "CheckBox"                   => CtorStyle::SignalFirst,
+        // TextEdit::new(text: Signal<String>) — confirmed from source
+        "TextEdit"                   => CtorStyle::SignalFirst,
+        "ListView"                   => CtorStyle::ItemsSignal,
+        // Image::new(data, width, height) — too complex; emit empty placeholder
+        _                            => CtorStyle::NoArg,
+    }
+}
+
+/// Emit a builder-method chain call for a known widget property.
+///
+/// Returns `Some(".method(expr)")` for known properties that map to a builder
+/// method, `None` for properties consumed by the constructor or unknown ones.
+/// Unknown properties are silently skipped (a future P10 pass will warn).
+fn emit_builder_call(prop: &str, expr: &str) -> Option<String> {
+    match prop {
+        // These are consumed by the constructor — not builder calls.
+        "text" | "value" | "items" | "checked" => None,
+        // Known builder methods.
+        "color"       => Some(format!(".color({})", expr)),
+        "item_height" => Some(format!(".item_height({}f32)", expr)),
+        // padding / spacing handled by layout containers directly.
+        "padding" | "spacing" => None,
+        // Unknown property — silently skip (no builder method known).
         _ => None,
     }
 }
@@ -125,6 +197,14 @@ impl CodeGen {
             out.push_str("    use viui::node_widgets::button::Button;\n");
             out.push_str("    use viui::node_widgets::column::Column;\n");
             out.push_str("    use viui::node_widgets::row::Row;\n");
+            out.push_str("    use viui::node_widgets::progress_bar::ProgressBar;\n");
+            out.push_str("    use viui::node_widgets::slider::Slider;\n");
+            out.push_str("    use viui::node_widgets::checkbox::CheckBox;\n");
+            out.push_str("    use viui::node_widgets::list_view::ListView;\n");
+            out.push_str("    use viui::node_widgets::text_edit::TextEdit;\n");
+            out.push_str("    use viui::node_widgets::touch_area::TouchArea;\n");
+            out.push_str("    use viui::node_widgets::scroll_area::ScrollArea;\n");
+            out.push_str("    use viui::node_widgets::image::Image;\n");
             out.push_str("    use viui::canvas::Color;\n\n");
 
             // Indent each line of component source by 4 spaces.
@@ -337,8 +417,9 @@ impl CodeGen {
         let mut subs:  Vec<String> = Vec::new();
 
         match elem.name.as_str() {
-            "VerticalLayout" | "VBox" | "HorizontalLayout" | "HBox" => {
-                let is_vertical = matches!(elem.name.as_str(), "VerticalLayout" | "VBox");
+            "VerticalLayout" | "VBox" | "Column" | "HorizontalLayout" | "HBox" | "Row" => {
+                let is_vertical = matches!(elem.name.as_str(),
+                    "VerticalLayout" | "VBox" | "Column");
                 let container_ty = if is_vertical { "Column" } else { "Row" };
 
                 let mut child_vars: Vec<String> = Vec::new();
@@ -454,11 +535,123 @@ impl CodeGen {
                 (stmts, subs, var)
             }
 
-            unknown => {
-                let var = format!("_unsupported_{}", unknown.to_lowercase());
+            // ── ProgressBar / Slider / CheckBox / TextEdit ───────────────────
+            // All use SignalFirst: Widget::new(signal) where the signal comes
+            // from the first relevant binding ("value", "checked", "text").
+            "ProgressBar" | "Progress"
+            | "Slider"
+            | "CheckBox" | "Checkbox"
+            | "TextInput" | "TextEdit" => {
+                let (rust_ty, _) = map_element(elem.name.as_str())
+                    .expect("map_element covers these arms");
+                let var = st.next_widget(rust_ty);
+
+                // Determine which binding name is the signal-first argument.
+                let signal_prop = match rust_ty {
+                    "CheckBox"  => "checked",
+                    "TextEdit"  => "text",
+                    _           => "value",   // ProgressBar, Slider
+                };
+
+                let sig_var = find_signal_binding(
+                    &elem.bindings, signal_prop, rust_ty, &mut stmts, st,
+                );
+
+                // Remaining bindings become builder calls.
+                let mut init = format!("{}::new({})", rust_ty, sig_var);
+                for b in &elem.bindings {
+                    if b.property == signal_prop { continue; }
+                    let expr_str = match &b.value {
+                        Expr::Raw(r) => r.text.clone(),
+                    };
+                    if let Some(chain) = emit_builder_call(&b.property, &expr_str) {
+                        init.push_str(&chain);
+                    }
+                }
+
+                stmts.push(format!("        let {} = {};", var, init));
+                stmts.push(String::new());
+                (stmts, subs, var)
+            }
+
+            // ── ListView / List ───────────────────────────────────────────────
+            // ListView::new(items: Signal<Vec<String>>)
+            "ListView" | "List" => {
+                let var = st.next_widget("ListView");
+
+                let sig_var = find_signal_binding(
+                    &elem.bindings, "items", "ListView", &mut stmts, st,
+                );
+
+                let mut init = format!("ListView::new({})", sig_var);
+                for b in &elem.bindings {
+                    if b.property == "items" { continue; }
+                    let expr_str = match &b.value { Expr::Raw(r) => r.text.clone() };
+                    if let Some(chain) = emit_builder_call(&b.property, &expr_str) {
+                        init.push_str(&chain);
+                    }
+                }
+
+                stmts.push(format!("        let {} = {};", var, init));
+                stmts.push(String::new());
+                (stmts, subs, var)
+            }
+
+            // ── TouchArea / ScrollArea ─────────────────────────────────────────
+            // These wrap a single child; children vec is flattened into the first child.
+            "TouchArea" | "ScrollArea" | "ScrollView" => {
+                let (rust_ty, _) = map_element(elem.name.as_str())
+                    .expect("map_element covers these arms");
+                let var = st.next_widget(rust_ty);
+
+                // Emit first child (or empty Column as placeholder).
+                let child_expr = if let Some(first_child) = elem.children.first() {
+                    let (child_stmts, child_subs, child_var) =
+                        self.gen_child(first_child, prop_names, st);
+                    stmts.extend(child_stmts);
+                    subs.extend(child_subs);
+                    format!(
+                        "alloc::boxed::Box::new({}) as alloc::boxed::Box<dyn ViNode>",
+                        child_var
+                    )
+                } else {
+                    "alloc::boxed::Box::new(Column::new(alloc::vec![])) \
+                     as alloc::boxed::Box<dyn ViNode>".to_string()
+                };
+
+                stmts.push(format!("        let {} = {}::new({});", var, rust_ty, child_expr));
+                stmts.push(String::new());
+                (stmts, subs, var)
+            }
+
+            // ── Image ─────────────────────────────────────────────────────────
+            // Image::new(data, width, height) is too complex to auto-map from .vi
+            // bindings alone. Emit a zero-size placeholder with a clarifying comment.
+            "Image" => {
+                let var = st.next_widget("Image");
                 stmts.push(format!(
-                    "        // TODO: unsupported element '{}' — emitted as empty Column", unknown
+                    "        // Image: set data/width/height on {} after build()", var
                 ));
+                stmts.push(format!(
+                    "        let {} = Image::new(\
+                     Signal::new(None), 0u32, 0u32);",
+                    var
+                ));
+                stmts.push(String::new());
+                (stmts, subs, var)
+            }
+
+            // ── Unknown widget ────────────────────────────────────────────────
+            // Emit a compile_error! so the .vi source fails at Rust compile time
+            // with a clear diagnostic instead of silently building a broken UI.
+            unknown => {
+                let var = format!("_unknown_{}", unknown.to_lowercase());
+                stmts.push(format!(
+                    "        compile_error!(\"vi-compiler: unknown widget '{}' at line {}\");",
+                    unknown, elem.span.line
+                ));
+                // Emit a fallback placeholder so the rest of codegen can proceed
+                // (the compile_error! above will halt compilation anyway).
                 stmts.push(format!("        let {} = Column::new(alloc::vec![]);", var));
                 stmts.push(String::new());
                 (stmts, subs, var)
@@ -551,6 +744,57 @@ fn build_format_args(parts: &[InterpolPart]) -> String {
         .filter_map(|p| if let InterpolPart::Var(v) = p { Some(v.as_str()) } else { None })
         .collect();
     vars.iter().map(|_| "n").collect::<Vec<_>>().join(", ")
+}
+
+/// Locate a binding by `prop_name`, evaluate it, and emit a `Signal::new(...)` local
+/// variable. Returns the variable name to pass to the widget constructor.
+///
+/// If the binding references `self.X` it is desugared to the local variable form.
+/// If no binding is found, a zero-valued default signal is emitted.
+fn find_signal_binding(
+    bindings: &[Binding],
+    prop_name: &str,
+    widget_ty: &str,
+    stmts: &mut Vec<String>,
+    st: &mut CompState,
+) -> String {
+    let sig_var = format!("sig_{}_{}", prop_name, st.sub_counter);
+    st.sub_counter += 1;
+
+    if let Some(b) = bindings.iter().find(|b| b.property == prop_name) {
+        let Expr::Raw(r) = &b.value;
+        // If the raw text is a bare `self.X` reference, emit a `.clone()` of
+        // the local variable rather than wrapping it in Signal::new again.
+        let desugared = desugar_prop_refs(&r.text);
+        // A desugared prop ref looks like `*foo.get()` — detect by `*` prefix.
+        if desugared.starts_with('*') && desugared.ends_with(".get()") {
+            // Strip leading `*` and trailing `.get()` to get the signal variable name.
+            let signal_name = &desugared[1..desugared.len() - 6];
+            stmts.push(format!(
+                "        let {} = {}.clone();",
+                sig_var, signal_name
+            ));
+        } else {
+            stmts.push(format!(
+                "        let {} = Signal::new({});",
+                sig_var, desugared
+            ));
+        }
+    } else {
+        // No binding found — determine a sensible zero-value default for the widget.
+        let default_val = match (widget_ty, prop_name) {
+            ("CheckBox", "checked")  => "false".to_string(),
+            ("TextEdit", "text")     => "String::new()".to_string(),
+            ("ListView", "items")    => "alloc::vec::Vec::<String>::new()".to_string(),
+            _                        => "0.0f32".to_string(),
+        };
+        stmts.push(format!(
+            "        let {} = Signal::new({});",
+            sig_var, default_val
+        ));
+    }
+
+    sig_var
 }
 
 fn find_binding_f32(bindings: &[Binding], prop: &str) -> Option<f32> {

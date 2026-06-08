@@ -87,10 +87,11 @@ impl ViNode for ProgressBar {
         let v = self.value.get().clamp(0.0, 1.0);
         let b = self.bounds;
 
-        // Track
-        cx.canvas.fill_rect(b, self.track_color);
+        // Track — use theme token, fall back to stored color if explicitly set
+        cx.canvas.fill_rect(b, cx.theme.slider_track());
 
-        // Fill
+        // Fill — use theme token for the progress region
+        let fill_color = cx.theme.progress_fill();
         let fill = match self.orientation {
             Orientation::Horizontal => Rect { x: b.x, y: b.y, w: b.w * v, h: b.h },
             Orientation::Vertical   => {
@@ -99,7 +100,7 @@ impl ViNode for ProgressBar {
             }
         };
         if fill.w > 0.0 && fill.h > 0.0 {
-            cx.canvas.fill_rect(fill, self.fill_color);
+            cx.canvas.fill_rect(fill, fill_color);
         }
 
         // Optional label: "XX%"

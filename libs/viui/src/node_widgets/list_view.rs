@@ -17,7 +17,6 @@ extern crate alloc;
 use alloc::{boxed::Box, vec::Vec};
 use core::cell::Cell;
 
-use crate::canvas::Color;
 use crate::dirty::DirtyRegion;
 use crate::event::{Event, MouseButton};
 use crate::layout::{Constraints, Point, Rect, Size};
@@ -114,7 +113,7 @@ impl ViNode for ListView {
         let scroll = self.scroll_offset.get();
 
         // Background
-        cx.canvas.fill_rect(b, Color::rgb(20, 20, 30));
+        cx.canvas.fill_rect(b, cx.theme.bg());
 
         cx.canvas.clip_push(b);
 
@@ -135,13 +134,14 @@ impl ViNode for ListView {
                 let item_rect = Rect { x: b.x, y: item_y, w: b.w, h: self.item_height };
 
                 if sel == Some(i) {
-                    cx.canvas.fill_rect(item_rect, Color::rgb(50, 80, 140));
+                    cx.canvas.fill_rect(item_rect, cx.theme.list_selected_bg());
                 }
 
                 if let Some(text) = items.get(i) {
                     let line_h = cx.line_height();
                     let ty = (item_y + (self.item_height - line_h) * 0.5).max(b.y);
-                    cx.draw_text(Point::new(b.x + 6.0, ty), text, Color::rgb(220, 220, 230));
+                    let text_color = if sel == Some(i) { cx.theme.list_selected_fg() } else { cx.theme.text_primary() };
+                    cx.draw_text(Point::new(b.x + 6.0, ty), text, text_color);
                 }
             }
         }
@@ -164,11 +164,11 @@ impl ViNode for ListView {
 
             cx.canvas.fill_rect(
                 Rect { x: bar_x, y: b.y, w: bar_w, h: b.h },
-                Color::rgb(30, 30, 45),
+                cx.theme.surface(),
             );
             cx.canvas.fill_rect(
                 Rect { x: bar_x, y: thumb_y, w: bar_w, h: thumb_h },
-                Color::rgb(90, 90, 120),
+                cx.theme.border(),
             );
         }
     }

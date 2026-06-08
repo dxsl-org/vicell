@@ -47,6 +47,7 @@ use crate::node::ViNode;
 use crate::render_ctx::RenderCtx;
 use crate::renderer::ViRenderer;
 use crate::signal::SubscriptionHandle;
+use crate::theme::{DarkTheme, ViTheme};
 
 // ─── Key repeat ──────────────────────────────────────────────────────────────
 
@@ -101,6 +102,8 @@ pub struct ViApp {
     dirty_region:  DirtyRegion,
     dirty_handles: Vec<SubscriptionHandle>,
     layout_dirty:  bool,
+    /// Active design-token set. Widgets read colors/spacing from `cx.theme`.
+    theme:         Box<dyn ViTheme>,
     /// Software key-repeat state. See `KeyRepeatState` for rationale.
     key_repeat:    KeyRepeatState,
 }
@@ -119,6 +122,7 @@ impl ViApp {
             dirty_region,
             dirty_handles: Vec::new(),
             layout_dirty:  true,
+            theme:         Box::new(DarkTheme),
             key_repeat:    KeyRepeatState::new(),
         }
     }
@@ -133,6 +137,11 @@ impl ViApp {
             self.font_ctx = ctx;
         }
         self
+    }
+
+    /// Switch the active theme. The next frame will render with the new tokens.
+    pub fn set_theme<T: ViTheme + 'static>(&mut self, theme: T) {
+        self.theme = Box::new(theme);
     }
 
     /// Register an animation that is advanced every `tick_with_dt()` call.
@@ -223,13 +232,14 @@ impl ViApp {
         let damage = self.dirty_region.borrow_mut().take();
         if damage.is_none() { return false; }
 
-        // Split borrows: renderer, font_ctx, and root are disjoint fields.
+        // Split borrows: renderer, font_ctx, theme, and root are disjoint fields.
         let renderer  = &mut self.renderer;
         let font_ctx  = &mut self.font_ctx;
+        let theme     = &*self.theme;
         let root      = &self.root;
 
         renderer.render(damage, &mut |canvas| {
-            let mut cx = RenderCtx { canvas, font: font_ctx };
+            let mut cx = RenderCtx { canvas, font: font_ctx, theme };
             root.paint(&mut cx);
         });
         true

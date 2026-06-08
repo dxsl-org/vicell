@@ -6,7 +6,6 @@ use alloc::{boxed::Box, vec};
 use alloc::vec::Vec;
 use core::cell::Cell;
 
-use crate::canvas::Color;
 use crate::dirty::DirtyRegion;
 use crate::event::{Event, MouseButton};
 use crate::layout::{Constraints, Point, Rect, Size};
@@ -64,29 +63,30 @@ impl ViNode for Slider {
         let track  = Rect { x: b.x + THUMB_R, y: cy - TRACK_H * 0.5, w: b.w - THUMB_R * 2.0, h: TRACK_H };
 
         // Track
-        cx.canvas.fill_rect(track, Color::rgb(60, 60, 80));
+        cx.canvas.fill_rect(track, cx.theme.slider_track());
 
         // Filled portion
         let v = self.value.get().clamp(0.0, 1.0);
         let filled = Rect { x: track.x, y: track.y, w: track.w * v, h: track.h };
         if filled.w > 0.0 {
-            cx.canvas.fill_rect(filled, Color::rgb(80, 140, 220));
+            cx.canvas.fill_rect(filled, cx.theme.accent());
         }
 
         // Thumb — drawn as a small square (circle approximation, no trig needed)
         let tx = b.x + THUMB_R + (b.w - THUMB_R * 2.0) * v - THUMB_R;
         let ty = cy - THUMB_R;
         let thumb = Rect { x: tx, y: ty, w: THUMB_R * 2.0, h: THUMB_R * 2.0 };
-        let thumb_color = if self.dragging.get() { Color::rgb(160, 200, 255) } else { Color::rgb(120, 180, 240) };
+        let thumb_color = if self.dragging.get() { cx.theme.button_pressed() } else { cx.theme.accent() };
         cx.canvas.fill_rect(thumb, thumb_color);
         // Thin border around thumb
+        let border = cx.theme.border();
         for (a, bb) in [
             (Point::new(thumb.x,            thumb.y),            Point::new(thumb.x + thumb.w, thumb.y)),
             (Point::new(thumb.x + thumb.w,  thumb.y),            Point::new(thumb.x + thumb.w, thumb.y + thumb.h)),
             (Point::new(thumb.x + thumb.w,  thumb.y + thumb.h),  Point::new(thumb.x,           thumb.y + thumb.h)),
             (Point::new(thumb.x,            thumb.y + thumb.h),  Point::new(thumb.x,           thumb.y)),
         ] {
-            cx.canvas.draw_line(a, bb, Color::rgb(200, 220, 255));
+            cx.canvas.draw_line(a, bb, border);
         }
     }
 

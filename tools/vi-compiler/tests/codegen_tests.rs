@@ -1,5 +1,102 @@
 use vi_compiler::{codegen::CodeGen, compile_str};
 
+// ─── New widget registry tests ───────────────────────────────────────────────
+
+#[test]
+fn test_progressbar_codegen() {
+    let src = r#"
+component SensorPanel {
+    in property <float> battery: 0.0;
+    VBox {
+        ProgressBar { value: self.battery; }
+    }
+}
+"#;
+    let file = compile_str(src).expect("parse failed");
+    let rust = CodeGen::new().generate(&file);
+    assert!(
+        rust.contains("ProgressBar::new("),
+        "ProgressBar::new missing: {}",
+        &rust[..rust.len().min(600)]
+    );
+    assert!(
+        rust.contains("battery"),
+        "battery signal ref missing: {}",
+        &rust[..rust.len().min(600)]
+    );
+}
+
+#[test]
+fn test_slider_codegen() {
+    let src = r#"
+component Controls {
+    in property <float> speed: 0.5;
+    VBox {
+        Slider { value: self.speed; }
+    }
+}
+"#;
+    let file = compile_str(src).expect("parse failed");
+    let rust = CodeGen::new().generate(&file);
+    assert!(
+        rust.contains("Slider::new("),
+        "Slider::new missing: {}",
+        &rust[..rust.len().min(600)]
+    );
+    assert!(
+        rust.contains("speed"),
+        "speed signal ref missing: {}",
+        &rust[..rust.len().min(600)]
+    );
+}
+
+#[test]
+fn test_listview_codegen() {
+    let src = r#"
+component Log {
+    in property <string> entries: "";
+    VBox {
+        ListView { items: self.entries; }
+    }
+}
+"#;
+    let file = compile_str(src).expect("parse failed");
+    let rust = CodeGen::new().generate(&file);
+    assert!(
+        rust.contains("ListView::new("),
+        "ListView::new missing: {}",
+        &rust[..rust.len().min(600)]
+    );
+    assert!(
+        rust.contains("entries"),
+        "entries signal ref missing: {}",
+        &rust[..rust.len().min(600)]
+    );
+}
+
+#[test]
+fn test_unknown_widget_emits_compile_error() {
+    let src = r#"
+component Broken {
+    VBox {
+        FooWidget { }
+    }
+}
+"#;
+    let file = compile_str(src).expect("parse failed");
+    let rust = CodeGen::new().generate(&file);
+    assert!(
+        rust.contains("compile_error!"),
+        "compile_error! not emitted for unknown widget: {}",
+        &rust[..rust.len().min(600)]
+    );
+    assert!(
+        rust.contains("FooWidget"),
+        "widget name not in error msg: {}",
+        &rust[..rust.len().min(600)]
+    );
+}
+
 fn gen_counter() -> String {
     let src = include_str!("fixtures/counter.vi");
     let file = compile_str(src).expect("counter.vi should parse");
