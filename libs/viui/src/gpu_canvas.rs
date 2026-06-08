@@ -63,7 +63,13 @@ impl<'buf> ViCanvas for GpuCanvas<'buf> {
     }
 
     fn draw_text(&mut self, pos: Point, text: &str, style: TextStyle) {
-        self.buf.push(GpuCmd::DrawText { pos, text: String::from(text), style });
+        if text.len() <= 127 {
+            let mut bytes = [0u8; 128];
+            bytes[..text.len()].copy_from_slice(text.as_bytes());
+            self.buf.push(GpuCmd::DrawTextShort { pos, bytes, len: text.len() as u8, style });
+        } else {
+            self.buf.push(GpuCmd::DrawText { pos, text: String::from(text), style });
+        }
     }
 
     fn draw_image(&mut self, dest: Rect, pixels: &[u8], src_stride: u32) {

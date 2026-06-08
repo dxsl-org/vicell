@@ -24,6 +24,9 @@ pub enum GpuCmd {
     /// Blit raw BGRA pixels. Destination may extend beyond current clip —
     /// executor applies clipping during playback.
     DrawImage { dest: Rect, pixels: Vec<u8>, src_stride: u32 },
+    /// Zero-alloc path for text ≤ 127 bytes (covers all typical single-line UI strings).
+    /// Bytes are always valid UTF-8 — written from `&str` in `GpuCanvas::draw_text`.
+    DrawTextShort { pos: Point, bytes: [u8; 128], len: u8, style: TextStyle },
 }
 
 impl GpuCmd {
@@ -47,6 +50,9 @@ impl GpuCmd {
                 Some(Rect { x: pos.x, y: pos.y, w: text.len() as f32 * 8.0, h: 8.0 })
             }
             GpuCmd::DrawImage { dest, .. } => Some(*dest),
+            GpuCmd::DrawTextShort { pos, len, .. } => {
+                Some(Rect { x: pos.x, y: pos.y, w: *len as f32 * 8.0, h: 8.0 })
+            }
         }
     }
 }
@@ -68,6 +74,9 @@ impl GpuCommandBuffer {
     pub fn len(&self) -> usize { self.cmds.len() }
 
     pub fn is_empty(&self) -> bool { self.cmds.is_empty() }
+
+    /// Clear all commands while retaining the Vec's heap allocation for the next frame.
+    pub fn clear(&mut self) { self.cmds.clear(); }
 }
 
 impl Default for GpuCommandBuffer {

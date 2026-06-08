@@ -100,15 +100,25 @@ impl<T: 'static> Signal<T> {
     fn notify(&self) {
         if self.inner.notifying.get() { return; }
         self.inner.notifying.set(true);
-        // Clone the list so subscribers may call set() on *other* signals without
-        // hitting the subs RefCell borrow conflict on this signal.
-        let subs: Vec<Rc<dyn Fn()>> = self.inner.subs.borrow().clone();
-        for sub in &subs {
-            // strong_count > 1 → external SubscriptionHandle is still alive
-            if Rc::strong_count(sub) > 1 { sub(); }
+        let len = self.inner.subs.borrow().len();
+        let mut any_dead = false;
+        for i in 0..len {
+            // Check liveness before cloning so strong_count is unmodified by us.
+            // count == 1 → only subs Vec holds a ref → handle was dropped.
+            let is_live = self.inner.subs.borrow()
+                .get(i)
+                .map(|rc| Rc::strong_count(rc) > 1)
+                .unwrap_or(false);
+            if !is_live { any_dead = true; continue; }
+            // Borrow again to clone and call — previous borrow already released.
+            let sub = self.inner.subs.borrow().get(i).cloned();
+            if let Some(rc) = sub { rc(); }
         }
-        // Prune dead entries (only one strong ref left = this subs vec)
-        self.inner.subs.borrow_mut().retain(|rc| Rc::strong_count(rc) > 1);
+        // Prune dead entries only when a handle was actually dropped.
+        // In steady state (all handles alive), retain() is never called — zero O(n) scan.
+        if any_dead {
+            self.inner.subs.borrow_mut().retain(|rc| Rc::strong_count(rc) > 1);
+        }
         self.inner.notifying.set(false);
     }
 }

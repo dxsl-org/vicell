@@ -168,17 +168,16 @@ impl<'fb> FramebufferCanvas<'fb> {
         if (py as f32) < clip.y || (py as f32) >= clip.y + clip.h { return; }
         let off = (py * self.stride + px * 4) as usize;
         if off + 3 >= self.pixels.len() { return; }
-        let dst = Color::bgra(
+        // u32 load: LLVM emits single LDR on aligned targets
+        let dst = Color(u32::from_le_bytes([
             self.pixels[off],
             self.pixels[off + 1],
             self.pixels[off + 2],
             self.pixels[off + 3],
-        );
+        ]));
         let out = Color::blend_over(color, dst);
-        self.pixels[off]     = out.b();
-        self.pixels[off + 1] = out.g();
-        self.pixels[off + 2] = out.r();
-        self.pixels[off + 3] = out.a();
+        // u32 store: LLVM emits single STR on aligned targets
+        self.pixels[off..off + 4].copy_from_slice(&out.0.to_le_bytes());
     }
 }
 
@@ -193,7 +192,8 @@ impl<'fb> ViCanvas for FramebufferCanvas<'fb> {
         let y1 = (clipped.y + clipped.h) as i32;
 
         if color.a() == 255 {
-            // Fast path: no blending
+            // Fast path: no blending — precompute bytes once, write as u32 per pixel
+            let pixel = color.0.to_le_bytes();
             for y in y0..y1 {
                 if y < 0 || y as u32 >= self.height { continue; }
                 let row_off = (y as u32 * self.stride) as usize;
@@ -201,10 +201,7 @@ impl<'fb> ViCanvas for FramebufferCanvas<'fb> {
                     if x < 0 || x as u32 >= self.width { continue; }
                     let off = row_off + (x as usize) * 4;
                     if off + 3 < self.pixels.len() {
-                        self.pixels[off]     = color.b();
-                        self.pixels[off + 1] = color.g();
-                        self.pixels[off + 2] = color.r();
-                        self.pixels[off + 3] = 0xFF;
+                        self.pixels[off..off + 4].copy_from_slice(&pixel);
                     }
                 }
             }
@@ -241,16 +238,54 @@ impl<'fb> ViCanvas for FramebufferCanvas<'fb> {
         use ostd::font::FONT8X8;
         let mut cx = pos.x as i32;
         let cy = pos.y as i32;
+        let w = self.width as i32;
+        let h = self.height as i32;
+        let opaque = style.color.a() == 255;
+        // Precompute bytes once — avoids b()/g()/r() extraction inside glyph loop
+        let pixel = style.color.0.to_le_bytes();
+        let clip = self.active_clip();
+
         for ch in text.chars() {
+            // A — skip char entirely outside screen bounds
+            if cx >= w || cx + 8 <= 0 || cy >= h || cy + 8 <= 0 {
+                cx += 8;
+                continue;
+            }
+
             // FONT8X8 covers 0x20..=0x7E (95 glyphs); index 0 = space (0x20)
             let code = ch as u32;
-            let idx = if code >= 0x20 && code <= 0x7E { (code - 0x20) as usize } else { (b'?' - 0x20) as usize };
+            let idx = if (0x20..=0x7E).contains(&code) { (code - 0x20) as usize } else { (b'?' - 0x20) as usize };
             let glyph = &FONT8X8[idx];
-            for row in 0..8i32 {
-                let bits = glyph[row as usize];
-                for col in 0..8i32 {
-                    if bits & (0x80u8 >> col) != 0 {
-                        self.put_pixel(cx + col, cy + row, style.color);
+
+            // Fast path: char fully in screen bounds + clip + opaque — no per-pixel checks, no blend
+            let fully_in_bounds = cx >= 0 && cx + 8 <= w && cy >= 0 && cy + 8 <= h;
+            let fully_in_clip   = (cx as f32) >= clip.x
+                && (cx + 8) as f32 <= clip.x + clip.w
+                && (cy as f32) >= clip.y
+                && (cy + 8) as f32 <= clip.y + clip.h;
+
+            if opaque && fully_in_bounds && fully_in_clip {
+                for (row, &bits) in glyph.iter().enumerate() {
+                    // C — skip empty glyph rows (space, punctuation)
+                    if bits == 0 { continue; }
+                    // B — row byte offset computed once per row
+                    let row_off = (cy as usize + row) * self.stride as usize;
+                    for col in 0..8usize {
+                        if bits & (0x80u8 >> col) != 0 {
+                            let off = row_off + (cx as usize + col) * 4;
+                            self.pixels[off..off + 4].copy_from_slice(&pixel);
+                        }
+                    }
+                }
+            } else {
+                // Slow path — boundary chars, semi-transparent, or partial clip
+                for row in 0..8i32 {
+                    let bits = glyph[row as usize];
+                    if bits == 0 { continue; }  // C — empty row skip even in slow path
+                    for col in 0..8i32 {
+                        if bits & (0x80u8 >> col) != 0 {
+                            self.put_pixel(cx + col, cy + row, style.color);
+                        }
                     }
                 }
             }
