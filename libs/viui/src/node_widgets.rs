@@ -5,9 +5,26 @@
 //! instead of the Elm rebuild model in `crate::widgets` (v1).
 
 pub mod button;
+pub mod card;
+pub mod checkbox;
 pub mod column;
+pub mod divider;
+pub mod image;
 pub mod label;
+pub mod list_view;
 pub mod progress_bar;
 pub mod row;
+pub mod scroll_area;
 pub mod slider;
+pub mod space;
+pub mod text_edit;
 pub mod touch_area;
+
+pub use card::Card;
+pub use checkbox::CheckBox;
+pub use divider::Divider;
+pub use image::Image;
+pub use list_view::ListView;
+pub use scroll_area::ScrollArea;
+pub use space::Space;
+pub use text_edit::TextEdit;

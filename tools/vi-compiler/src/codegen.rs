@@ -16,7 +16,7 @@
 //! ```
 
 use std::prelude::v1::*;
-use crate::ast::{Binding, CallbackBinding, Component, Element, Expr, ViFile};
+use crate::ast::{Binding, CallbackBinding, Child, Component, Element, Expr, ViFile};
 use crate::eval::{eval_binding, eval_callback, eval_property, AugOp, InterpolPart, TypedExpr};
 
 // ─── Element → Widget mapping ────────────────────────────────────────────────
@@ -162,12 +162,12 @@ impl CodeGen {
         if !comp.properties.is_empty() { build_stmts.push(String::new()); }
 
         // 2. Walk element tree.
-        let root_widget = if let Some(root_elem) = comp.children.first() {
+        let root_widget = if let Some(root_child) = comp.children.first() {
             let prop_name_list: Vec<&str> = comp.properties.iter()
                 .map(|p| p.name.as_str())
                 .collect();
             let (stmts, subs, var_name) =
-                self.gen_element(root_elem, &prop_name_list, &mut st);
+                self.gen_child(root_child, &prop_name_list, &mut st);
             for s in stmts  { build_stmts.push(s); }
             for sub in &subs { sub_fields.push(sub.clone()); }
             var_name
@@ -177,8 +177,14 @@ impl CodeGen {
 
         // 3. Root widget type for return signature.
         let root_ty = comp.children.first()
-            .and_then(|e| map_element(&e.name))
-            .map(|(t, _)| t)
+            .and_then(|c| {
+                if let Child::Element(e) = c {
+                    map_element(&e.name).map(|(t, _)| t)
+                } else {
+                    // if/for at root → wrap in Column
+                    Some("Column")
+                }
+            })
             .unwrap_or("Column");
 
         // ── Emit struct ───────────────────────────────────────────────────────
@@ -213,7 +219,112 @@ impl CodeGen {
         out
     }
 
-    /// Recursively generate code for one element.
+    // ── gen_child ────────────────────────────────────────────────────────────
+
+    /// Dispatch to the appropriate generator based on `Child` variant.
+    ///
+    /// Returns `(statements, subscription_handle_names, widget_variable_name)`.
+    fn gen_child(
+        &mut self,
+        child: &Child,
+        prop_names: &[&str],
+        st: &mut CompState,
+    ) -> (Vec<String>, Vec<String>, String) {
+        match child {
+            Child::Element(e) => self.gen_element(e, prop_names, st),
+
+            Child::If { cond, body, .. } => {
+                let mut stmts: Vec<String> = Vec::new();
+                let mut subs:  Vec<String> = Vec::new();
+                let var = st.next_widget("if");
+
+                // Generate body children
+                let mut child_vars: Vec<String> = Vec::new();
+                for c in body {
+                    let (cs, ss, v) = self.gen_child(c, prop_names, st);
+                    stmts.extend(cs);
+                    subs.extend(ss);
+                    child_vars.push(v);
+                }
+
+                let items_str: String = child_vars.iter()
+                    .map(|v| format!(
+                        "alloc::boxed::Box::new({}) as alloc::boxed::Box<dyn ViNode>",
+                        v
+                    ))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+
+                // Desugar `self.X` → `*self.X.get()` in the raw condition expression.
+                let desugared = desugar_prop_refs(cond);
+                stmts.push(format!(
+                    "        let {}_items = if {} {{ alloc::vec![{}] }} else {{ alloc::vec![] }};",
+                    var, desugared, items_str
+                ));
+                stmts.push(format!(
+                    "        let {} = Column::new({}_items);",
+                    var, var
+                ));
+                stmts.push(String::new());
+                (stmts, subs, var)
+            }
+
+            Child::For { var: loop_var, iter, body, .. } => {
+                let mut stmts: Vec<String> = Vec::new();
+                let subs: Vec<String> = Vec::new();
+                let container = st.next_widget("for");
+
+                let desugared_iter = desugar_prop_refs(iter);
+
+                // G1: single-item body supported. Each iteration produces one Box<dyn ViNode>.
+                let inner_item_expr = if let Some(Child::Element(e)) = body.first() {
+                    match e.name.as_str() {
+                        "Text" | "Label" => {
+                            let text_val = e.bindings.iter()
+                                .find(|b| b.property == "text")
+                                .map(|b| match &b.value {
+                                    Expr::Raw(r) => r.text.clone(),
+                                })
+                                .unwrap_or_else(|| loop_var.clone());
+                            format!(
+                                "alloc::boxed::Box::new(Label::new(Signal::new(({}).to_string()))) \
+                                 as alloc::boxed::Box<dyn ViNode>",
+                                desugar_prop_refs(&text_val)
+                            )
+                        }
+                        _ => {
+                            "alloc::boxed::Box::new(Column::new(alloc::vec![])) \
+                             as alloc::boxed::Box<dyn ViNode>".to_string()
+                        }
+                    }
+                } else {
+                    "alloc::boxed::Box::new(Column::new(alloc::vec![])) \
+                     as alloc::boxed::Box<dyn ViNode>".to_string()
+                };
+
+                // `enumerate()` is present for parity with future indexed templates.
+                stmts.push(format!(
+                    "        let {container}_items: alloc::vec::Vec<alloc::boxed::Box<dyn ViNode>> = \
+                     ({iter}).iter().enumerate().map(|(_{idx}_idx, {lv})| {{ {inner} }}).collect();",
+                    container = container,
+                    iter      = desugared_iter,
+                    idx       = loop_var,
+                    lv        = loop_var,
+                    inner     = inner_item_expr,
+                ));
+                stmts.push(format!(
+                    "        let {} = Column::new({}_items);",
+                    container, container
+                ));
+                stmts.push(String::new());
+                (stmts, subs, container)
+            }
+        }
+    }
+
+    // ── gen_element ──────────────────────────────────────────────────────────
+
+    /// Recursively generate code for one concrete element.
     ///
     /// Returns `(statements, subscription_handle_names, widget_variable_name)`.
     fn gen_element(
@@ -233,7 +344,7 @@ impl CodeGen {
                 let mut child_vars: Vec<String> = Vec::new();
                 for child in &elem.children {
                     let (child_stmts, child_subs, child_var) =
-                        self.gen_element(child, prop_names, st);
+                        self.gen_child(child, prop_names, st);
                     stmts.extend(child_stmts);
                     subs.extend(child_subs);
                     child_vars.push(child_var);
@@ -400,7 +511,11 @@ fn typed_expr_to_rust(expr: &TypedExpr, ty: &str) -> String {
         TypedExpr::StringLit(s) => {
             format!("Signal::new(String::from(\"{}\"))", escape_str(s))
         }
-        TypedExpr::Ident(s) => format!("Signal::new(String::from({}))", s),
+        TypedExpr::Ident(s) => match ty {
+            // `true`/`false` are valid Rust bool literals — no String wrapping.
+            "bool"            => format!("Signal::new({})", s),
+            _                 => format!("Signal::new(String::from({}))", s),
+        },
         _ => default_signal_init(ty).to_string(),
     }
 }
@@ -451,4 +566,60 @@ fn find_binding_f32(bindings: &[Binding], prop: &str) -> Option<f32> {
 
 fn escape_str(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+/// G1 heuristic: replace `self . ident` with `*self.ident.get()` in raw expressions.
+///
+/// `parse_until_lbrace` joins tokens with single spaces, so the `.vi` source
+/// `self.show_panel` becomes the three-token sequence `self`, `.`, `show_panel`
+/// which is joined into the string `"self . show_panel"`.  We must match that
+/// spaced form.  If a caller produces the compact form `self.ident` directly
+/// (e.g. in unit tests) that is also handled.
+///
+/// Does not handle `self.` inside string literals. Use P10 proper AST desugaring
+/// when that matters.
+fn desugar_prop_refs(s: &str) -> String {
+    let mut result    = String::new();
+    let mut remaining = s;
+
+    while !remaining.is_empty() {
+        // Prefer the spaced form `self . ident` (what the token-joiner emits).
+        // Fall back to the compact form `self.ident` for direct usage.
+        let (matched_prefix, idx) = if let Some(i) = remaining.find("self . ") {
+            ("self . ", i)
+        } else if let Some(i) = remaining.find("self.") {
+            ("self.", i)
+        } else {
+            break;
+        };
+
+        result.push_str(&remaining[..idx]);
+        let after = &remaining[idx + matched_prefix.len()..];
+
+        // Skip any stray leading spaces before the identifier.
+        let after_trimmed = after.trim_start_matches(' ');
+        let trim_offset   = after.len() - after_trimmed.len();
+
+        let ident_end = after_trimmed
+            .char_indices()
+            .take_while(|(_, c)| c.is_alphanumeric() || *c == '_')
+            .last()
+            .map(|(i, c)| i + c.len_utf8())
+            .unwrap_or(0);
+
+        if ident_end > 0 {
+            let ident = &after_trimmed[..ident_end];
+            // build() is a static fn — properties are local variables, not self fields.
+            result.push_str("*");
+            result.push_str(ident);
+            result.push_str(".get()");
+            remaining = &after_trimmed[ident_end..];
+        } else {
+            // No identifier — emit prefix literally to avoid an infinite loop.
+            result.push_str(matched_prefix);
+            remaining = &after[trim_offset..];
+        }
+    }
+    result.push_str(remaining);
+    result
 }

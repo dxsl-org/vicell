@@ -1,4 +1,4 @@
-use crate::ast::*;
+use crate::ast::{Binding, CallbackBinding, Child, Component, Element, Expr, RawExpr, ViFile};
 use crate::error::ParseError;
 use crate::token::{Span, Token, TokenKind};
 use std::prelude::v1::*;
@@ -97,9 +97,11 @@ impl Parser {
                 } else {
                     properties.push(self.parse_property_decl()?);
                 }
-            } else if *self.peek_kind() == TokenKind::Ident {
-                // Must be a child element: IDENT {
-                children.push(self.parse_element()?);
+            } else if matches!(
+                self.peek_kind(),
+                TokenKind::Ident | TokenKind::KwIf | TokenKind::KwFor
+            ) {
+                children.push(self.parse_child()?);
             } else {
                 return Err(self.unexpected("property, callback, or element"));
             }
@@ -190,6 +192,77 @@ impl Parser {
         Ok(CallbackDecl { name, params, span: span_start })
     }
 
+    // ── parse_child ──────────────────────────────────────────────────────────
+
+    /// Parse one child — either a concrete element or a control-flow node.
+    fn parse_child(&mut self) -> Result<Child, ParseError> {
+        match self.peek_kind().clone() {
+            TokenKind::KwIf  => self.parse_if_child(),
+            TokenKind::KwFor => self.parse_for_child(),
+            _                => Ok(Child::Element(self.parse_element()?)),
+        }
+    }
+
+    /// Parse `if <cond> { <children> }`.
+    fn parse_if_child(&mut self) -> Result<Child, ParseError> {
+        let span = self.current_span();
+        self.expect(TokenKind::KwIf, "'if'")?;
+        let cond = self.parse_until_lbrace()?;
+        self.expect(TokenKind::LBrace, "'{'")?;
+        let mut body = Vec::new();
+        while !matches!(self.peek_kind(), TokenKind::RBrace | TokenKind::Eof) {
+            body.push(self.parse_child()?);
+        }
+        self.expect(TokenKind::RBrace, "'}'")?;
+        Ok(Child::If { cond, body, span })
+    }
+
+    /// Parse `for <var> in <iter> { <children> }`.
+    fn parse_for_child(&mut self) -> Result<Child, ParseError> {
+        let span = self.current_span();
+        self.expect(TokenKind::KwFor, "'for'")?;
+        let var = self.expect(TokenKind::Ident, "loop variable")?.text;
+        self.expect(TokenKind::KwIn, "'in'")?;
+        let iter = self.parse_until_lbrace()?;
+        self.expect(TokenKind::LBrace, "'{'")?;
+        let mut body = Vec::new();
+        while !matches!(self.peek_kind(), TokenKind::RBrace | TokenKind::Eof) {
+            body.push(self.parse_child()?);
+        }
+        self.expect(TokenKind::RBrace, "'}'")?;
+        Ok(Child::For { var, iter, body, span })
+    }
+
+    /// Collect token texts until `{` at paren/bracket-depth 0, returning them space-joined.
+    ///
+    /// Does NOT consume the `{`. Returns an error if EOF is reached first.
+    fn parse_until_lbrace(&mut self) -> Result<String, ParseError> {
+        let mut parts = Vec::new();
+        let mut depth = 0i32;
+        loop {
+            match self.peek_kind().clone() {
+                TokenKind::LParen | TokenKind::LBracket => {
+                    depth += 1;
+                    parts.push(self.advance().text.clone());
+                }
+                TokenKind::RParen | TokenKind::RBracket => {
+                    depth -= 1;
+                    parts.push(self.advance().text.clone());
+                }
+                TokenKind::LBrace if depth == 0 => break,
+                TokenKind::LBrace => {
+                    depth += 1;
+                    parts.push(self.advance().text.clone());
+                }
+                TokenKind::Eof => {
+                    return Err(self.unexpected("'{' after condition"));
+                }
+                _ => parts.push(self.advance().text.clone()),
+            }
+        }
+        Ok(parts.join(" ").trim().to_string())
+    }
+
     // ── parse_element ────────────────────────────────────────────────────────
 
     fn parse_element(&mut self) -> Result<Element, ParseError> {
@@ -211,9 +284,11 @@ impl Parser {
                 (TokenKind::Ident, TokenKind::Colon) => {
                     bindings.push(self.parse_binding()?);
                 }
-                // child element: IDENT {
-                (TokenKind::Ident, TokenKind::LBrace) => {
-                    children.push(self.parse_element()?);
+                // child element or control-flow node
+                (TokenKind::Ident, TokenKind::LBrace)
+                | (TokenKind::KwIf, _)
+                | (TokenKind::KwFor, _) => {
+                    children.push(self.parse_child()?);
                 }
                 _ => return Err(self.unexpected("binding, callback, or child element")),
             }
@@ -301,3 +376,6 @@ impl Parser {
 pub fn parse(tokens: Vec<Token>) -> Result<ViFile, ParseError> {
     Parser::new(tokens).parse_file()
 }
+
+// Re-export ast types used in parser for import hygiene
+use crate::ast::{CallbackDecl, Import, PropertyDecl, Visibility};

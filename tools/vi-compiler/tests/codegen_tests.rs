@@ -61,3 +61,87 @@ fn counter_has_pub_count_field() {
     let out = gen_counter();
     assert!(out.contains("pub count: Signal<i32>"), "missing pub count: Signal<i32>");
 }
+
+#[test]
+fn test_if_codegen() {
+    let src = r#"
+component ShowPanel {
+    in property <bool> show_panel: true;
+    VBox {
+        if self.show_panel {
+            Label { text: "Panel visible"; }
+        }
+    }
+}
+"#;
+    let file = vi_compiler::compile_str(src).expect("parse failed");
+    let mut gen = vi_compiler::codegen::CodeGen::new();
+    let rust = gen.generate(&file);
+    // build() is static — properties are local variables, not self fields.
+    assert!(
+        rust.contains("if *show_panel.get()"),
+        "if desugaring missing (expected local var, not self.): {}",
+        &rust[..rust.len().min(500)]
+    );
+    assert!(
+        rust.contains("alloc::vec![]"),
+        "empty else branch missing: {}",
+        &rust[..rust.len().min(500)]
+    );
+    // Bool property default `true` must emit Signal::new(true) not Signal::new(String::from(true)).
+    assert!(
+        rust.contains("Signal::new(true)"),
+        "bool default not emitted correctly: {}",
+        &rust[..rust.len().min(500)]
+    );
+}
+
+#[test]
+fn test_for_codegen() {
+    let src = r#"
+component ItemList {
+    in property <string> items: "";
+    VBox {
+        for item in self.items {
+            Label { text: item; }
+        }
+    }
+}
+"#;
+    let file = vi_compiler::compile_str(src).expect("parse failed");
+    let mut gen = vi_compiler::codegen::CodeGen::new();
+    let rust = gen.generate(&file);
+    assert!(rust.contains("iter()"),      "for loop iter() missing: {}", &rust[..rust.len().min(500)]);
+    assert!(rust.contains("enumerate()"), "enumerate missing: {}",        &rust[..rust.len().min(500)]);
+    assert!(rust.contains("Column::new"), "Column wrapper missing: {}",   &rust[..rust.len().min(500)]);
+    // build() is static — iter expression is a local variable ref, not self.
+    assert!(
+        rust.contains("*items.get()"),
+        "for iter should desugar to local var (no self.): {}",
+        &rust[..rust.len().min(500)]
+    );
+}
+
+#[test]
+fn test_desugar_prop_refs() {
+    // Test the desugar helper indirectly via a component that uses self.X in a condition
+    let src = r#"
+component Cond {
+    in property <bool> flag: false;
+    VBox {
+        if self.flag {
+            Label { text: "yes"; }
+        }
+    }
+}
+"#;
+    let file = vi_compiler::compile_str(src).expect("parse failed");
+    let mut gen = vi_compiler::codegen::CodeGen::new();
+    let rust = gen.generate(&file);
+    // build() is static — `self.flag` in .vi source desugars to local variable `*flag.get()`.
+    assert!(
+        rust.contains("*flag.get()"),
+        "flag not desugared (expected local var, not self.): {}",
+        &rust[..rust.len().min(500)]
+    );
+}
