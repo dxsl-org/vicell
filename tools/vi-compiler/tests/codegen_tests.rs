@@ -306,6 +306,172 @@ fn test_interpolated_text_into_parts() {
     );
 }
 
+// ─── Syntax-validity (syn) ───────────────────────────────────────────────────
+
+/// The counter.vi fixture must produce syntactically well-formed Rust.
+///
+/// `syn::parse_str::<syn::File>` is a fast, zero-linking check that catches
+/// malformed token output (unbalanced braces, bad expression structure,
+/// stray punctuation). It does NOT perform type or path resolution — a
+/// call like `Signal::new(String::from(true))` would pass syn because it is
+/// syntactically valid, even though it fails `rustc`. For type correctness
+/// see the per-property-type tests in this file (e.g. `test_if_codegen`).
+#[test]
+fn counter_generates_valid_rust_syntax() {
+    let rust = gen_counter();
+    syn::parse_str::<syn::File>(&rust)
+        .unwrap_or_else(|e| panic!("counter.vi codegen produced invalid Rust: {e}\n--- generated ---\n{rust}"));
+}
+
+/// A component with all primitive property types must produce valid Rust.
+#[test]
+fn all_property_types_generate_valid_rust_syntax() {
+    let src = r#"
+component AllTypes {
+    in property <bool>   flag:  false;
+    in property <int>    count: 0;
+    in property <float>  ratio: 1.0;
+    in property <string> label: "hi";
+    VBox { }
+}
+"#;
+    let file = vi_compiler::compile_str(src).expect("parse failed");
+    let rust = vi_compiler::codegen::CodeGen::new().generate(&file);
+    syn::parse_str::<syn::File>(&rust)
+        .unwrap_or_else(|e| panic!("all-types codegen invalid Rust: {e}\n--- generated ---\n{rust}"));
+}
+
+// ─── Missing widget codegen tests ────────────────────────────────────────────
+
+#[test]
+fn test_flexbox_codegen() {
+    let src = r#"
+component Flex {
+    HFlex {
+        Label { text: "a"; }
+        Label { text: "b"; }
+    }
+}
+"#;
+    let file = vi_compiler::compile_str(src).expect("parse failed");
+    let rust = vi_compiler::codegen::CodeGen::new().generate(&file);
+    assert!(rust.contains("FlexBox::"), "FlexBox ctor missing: {}", &rust[..rust.len().min(600)]);
+}
+
+#[test]
+fn test_vflex_codegen() {
+    let src = r#"
+component VFlexComp {
+    VFlex {
+        Label { text: "x"; }
+    }
+}
+"#;
+    let file = vi_compiler::compile_str(src).expect("parse failed");
+    let rust = vi_compiler::codegen::CodeGen::new().generate(&file);
+    assert!(rust.contains("FlexBox::"), "VFlex → FlexBox ctor missing: {}", &rust[..rust.len().min(600)]);
+}
+
+#[test]
+fn test_checkbox_codegen() {
+    let src = r#"
+component Check {
+    in property <bool> checked: false;
+    VBox {
+        CheckBox { checked: self.checked; }
+    }
+}
+"#;
+    let file = vi_compiler::compile_str(src).expect("parse failed");
+    let rust = vi_compiler::codegen::CodeGen::new().generate(&file);
+    assert!(rust.contains("CheckBox::new("), "CheckBox::new missing: {}", &rust[..rust.len().min(600)]);
+    assert!(rust.contains("checked"),        "checked signal missing: {}",  &rust[..rust.len().min(600)]);
+}
+
+#[test]
+fn test_touch_area_codegen() {
+    let src = r#"
+component Tap {
+    VBox {
+        TouchArea { }
+    }
+}
+"#;
+    let file = vi_compiler::compile_str(src).expect("parse failed");
+    let rust = vi_compiler::codegen::CodeGen::new().generate(&file);
+    assert!(rust.contains("TouchArea::new("), "TouchArea::new missing: {}", &rust[..rust.len().min(600)]);
+}
+
+#[test]
+fn test_card_codegen() {
+    let src = r#"
+component C {
+    VBox {
+        Card { Label { text: "hi"; } }
+    }
+}
+"#;
+    let file = vi_compiler::compile_str(src).expect("parse failed");
+    let rust = vi_compiler::codegen::CodeGen::new().generate(&file);
+    assert!(rust.contains("Card::"), "Card ctor missing: {}", &rust[..rust.len().min(600)]);
+}
+
+#[test]
+fn test_divider_codegen() {
+    let src = r#"
+component D {
+    VBox {
+        Divider { }
+    }
+}
+"#;
+    let file = vi_compiler::compile_str(src).expect("parse failed");
+    let rust = vi_compiler::codegen::CodeGen::new().generate(&file);
+    assert!(rust.contains("Divider::horizontal("), "Divider::horizontal missing: {}", &rust[..rust.len().min(600)]);
+}
+
+#[test]
+fn test_space_codegen() {
+    let src = r#"
+component S {
+    VBox {
+        Space { }
+    }
+}
+"#;
+    let file = vi_compiler::compile_str(src).expect("parse failed");
+    let rust = vi_compiler::codegen::CodeGen::new().generate(&file);
+    assert!(rust.contains("Space::new("), "Space::new missing: {}", &rust[..rust.len().min(600)]);
+}
+
+#[test]
+fn test_image_codegen() {
+    let src = r#"
+component Img {
+    VBox {
+        Image { }
+    }
+}
+"#;
+    let file = vi_compiler::compile_str(src).expect("parse failed");
+    let rust = vi_compiler::codegen::CodeGen::new().generate(&file);
+    assert!(rust.contains("Image::new("), "Image::new missing: {}", &rust[..rust.len().min(600)]);
+}
+
+#[test]
+fn test_scroll_area_codegen() {
+    let src = r#"
+component Scroll {
+    VBox {
+        ScrollArea { Label { text: "content"; } }
+    }
+}
+"#;
+    let file = vi_compiler::compile_str(src).expect("parse failed");
+    let rust = vi_compiler::codegen::CodeGen::new().generate(&file);
+    assert!(rust.contains("ScrollArea::"), "ScrollArea ctor missing: {}", &rust[..rust.len().min(600)]);
+}
+
 /// compile_expr unit tests — typed AST nodes → Rust source strings.
 #[cfg(test)]
 mod compile_expr_tests {

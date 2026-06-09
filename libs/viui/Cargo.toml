@@ -17,3 +17,6 @@ viui-macros  = { path = "../viui-macros" }
 
 [features]
 default = []
+# Hardware GPU backend (GLES2). Skeleton only until the compositor EGL surface
+# grant is wired (G2+ work). Compile-check: cargo check --features viui/gles2
+gles2 = []

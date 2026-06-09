@@ -15,11 +15,9 @@
 //! - **ViOS compositor surface** — compositor is up, Grant API is ready; use
 //!   `FramebufferRenderer::new(ViSurface::create(...))`.
 //!
-//! # TODO (tracked)
-//! Replace no-op present with compositor Grant surface flush when the Grant-based
-//! compositor redesign (`.agents/260607-1854-compositor-grant-surfaces/`) ships.
-//! At that point `ViSurfaceRenderer` may be retired entirely in favour of
-//! `FramebufferRenderer`, or kept as a headless fallback.
+//! The Grant-based compositor redesign shipped — see `renderer.rs::FramebufferRenderer`
+//! which uses `ViSurface` (zero-copy Grant path) for real display output.
+//! `ViSurfaceRenderer` is the permanent **headless / test** path.
 
 extern crate alloc;
 use alloc::{vec, vec::Vec};
@@ -84,10 +82,8 @@ impl ViRenderer for ViSurfaceRenderer {
         let stride = self.stride();
         let mut canvas = FramebufferCanvas::new(&mut self.pixels, stride, self.width, self.height);
         draw(&mut canvas);
-        // TODO: present dirty region to compositor via Grant IPC when
-        // `.agents/260607-1854-compositor-grant-surfaces/` plan is merged.
-        // For now this is a no-op: pixels stay in `self.pixels` and callers
-        // can read them via `pixels()` for testing or manual flush.
+        // No-op present: pixels stay in `self.pixels` for test inspection or manual flush.
+        // Production path: use FramebufferRenderer::new(ViSurface::create(...)) instead.
     }
 
     fn size(&self) -> (u32, u32) {

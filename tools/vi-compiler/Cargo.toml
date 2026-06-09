@@ -1,0 +1,25 @@
+# Standalone crate — NOT part of the ViCell embedded workspace.
+# ViCell workspace targets riscv64gc-unknown-none-elf; vi-compiler needs host std.
+# Build: cargo run --manifest-path tools/vi-compiler/Cargo.toml -- <file.vi>
+[workspace]
+
+[package]
+name        = "vi-compiler"
+version     = "0.1.0"
+edition     = "2021"
+description = "ViUI .vi DSL compiler — lexer + parser → AST (Slint-compatible syntax)"
+
+[[bin]]
+name = "vi-compiler"
+path = "src/main.rs"
+
+[lib]
+name = "vi_compiler"
+path = "src/lib.rs"
+
+# Hand-written lexer/parser — no external parser dependencies
+[dependencies]
+
+[dev-dependencies]
+# Used in codegen_tests for syntax-validity checks on generated Rust.
+syn = { version = "2", features = ["full"] }

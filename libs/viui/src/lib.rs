@@ -47,6 +47,8 @@ pub mod font_context;
 pub mod gpu_canvas;
 pub mod gpu_cmd;
 pub mod gpu_renderer;
+#[cfg(feature = "gles2")]
+pub mod gles2_canvas;
 pub mod layout;
 pub mod node;
 pub mod node_widgets;

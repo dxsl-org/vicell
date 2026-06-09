@@ -212,6 +212,10 @@ impl CodeGen {
             out.push_str("    use viui::node_widgets::touch_area::TouchArea;\n");
             out.push_str("    use viui::node_widgets::scroll_area::ScrollArea;\n");
             out.push_str("    use viui::node_widgets::image::Image;\n");
+            out.push_str("    use viui::node_widgets::flex_box::FlexBox;\n");
+            out.push_str("    use viui::node_widgets::card::Card;\n");
+            out.push_str("    use viui::node_widgets::divider::Divider;\n");
+            out.push_str("    use viui::node_widgets::space::Space;\n");
             out.push_str("    use viui::canvas::Color;\n\n");
 
             // Indent each line of component source by 4 spaces.
@@ -674,6 +678,74 @@ impl CodeGen {
                      Signal::new(None), 0u32, 0u32);",
                     var
                 ));
+                stmts.push(String::new());
+                (stmts, subs, var)
+            }
+
+            // ── FlexBox / HFlex / VFlex ───────────────────────────────────────
+            // Builder pattern: FlexBox::row()|column() + .child() chain.
+            "FlexBox" | "HFlex" | "VFlex" => {
+                let is_row = !matches!(elem.name.as_str(), "VFlex");
+                let ctor = if is_row { "FlexBox::row()" } else { "FlexBox::column()" };
+                let var = st.next_widget("FlexBox");
+
+                let mut child_vars: Vec<String> = Vec::new();
+                for child in &elem.children {
+                    let (child_stmts, child_subs, child_var) =
+                        self.gen_child(child, prop_names, st);
+                    stmts.extend(child_stmts);
+                    subs.extend(child_subs);
+                    child_vars.push(child_var);
+                }
+
+                let chain: String = child_vars.iter()
+                    .map(|v| format!(".child({})", v))
+                    .collect::<Vec<_>>()
+                    .join("");
+                let gap     = find_binding_f32(&elem.bindings, "gap");
+                let padding = find_binding_f32(&elem.bindings, "padding");
+                let mut init = format!("{}{}", ctor, chain);
+                if let Some(g) = gap     { init = format!("{}.gap({}f32)", init, g); }
+                if let Some(p) = padding { init = format!("{}.padding({}f32)", init, p); }
+
+                stmts.push(format!("        let {} = {};", var, init));
+                stmts.push(String::new());
+                (stmts, subs, var)
+            }
+
+            // ── Card ──────────────────────────────────────────────────────────
+            // Card::new(Box<dyn ViNode>) — wraps a single child.
+            "Card" => {
+                let var = st.next_widget("Card");
+                let child_expr = if let Some(first) = elem.children.first() {
+                    let (cs, ss, cv) = self.gen_child(first, prop_names, st);
+                    stmts.extend(cs);
+                    subs.extend(ss);
+                    format!("alloc::boxed::Box::new({}) as alloc::boxed::Box<dyn ViNode>", cv)
+                } else {
+                    "alloc::boxed::Box::new(Column::new(alloc::vec![])) \
+                     as alloc::boxed::Box<dyn ViNode>".to_string()
+                };
+                stmts.push(format!("        let {} = Card::new({});", var, child_expr));
+                stmts.push(String::new());
+                (stmts, subs, var)
+            }
+
+            // ── Divider ───────────────────────────────────────────────────────
+            "Divider" => {
+                let var = st.next_widget("Divider");
+                stmts.push(format!("        let {} = Divider::horizontal();", var));
+                stmts.push(String::new());
+                (stmts, subs, var)
+            }
+
+            // ── Space ─────────────────────────────────────────────────────────
+            // Space::new(width, height) — flexible spacer.
+            "Space" => {
+                let var = st.next_widget("Space");
+                let w = find_binding_f32(&elem.bindings, "width").unwrap_or(0.0);
+                let h = find_binding_f32(&elem.bindings, "height").unwrap_or(0.0);
+                stmts.push(format!("        let {} = Space::new({}f32, {}f32);", var, w, h));
                 stmts.push(String::new());
                 (stmts, subs, var)
             }
