@@ -376,7 +376,29 @@ fn panic(info: &PanicInfo) -> ! {
     let cell_id = task::hart_local::current_cell_id();
 
     if cell_id != 0 {
-        // Cell OOM/panic — kill the Cell, kernel survives.
+        // Cell OOM/panic — kill the Cell, kernel survives. Print the panic
+        // FIRST: this path used to swallow the message entirely, leaving only
+        // a meaningless "scause=0x0 sepc=0x0" fault line to debug from.
+        {
+            #[inline(always)]
+            fn cell_panic_putchar(c: u8) {
+                #[cfg(any(target_arch = "riscv64", target_arch = "riscv32"))]
+                { let _ = crate::hal::sbi::console_putchar(c); }
+                #[cfg(any(target_arch = "aarch64", target_arch = "arm"))]
+                { crate::hal::uart_pl011::putchar(c); }
+                #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
+                { crate::hal::uart_16550::putchar(c); }
+            }
+            struct CellPanicWriter;
+            impl core::fmt::Write for CellPanicWriter {
+                fn write_str(&mut self, s: &str) -> core::fmt::Result {
+                    for c in s.bytes() { cell_panic_putchar(c); }
+                    Ok(())
+                }
+            }
+            use core::fmt::Write;
+            let _ = write!(CellPanicWriter, "\n[panic-in-cell {}] {}\n", cell_id, info);
+        }
         // SAFETY: panic context, interrupts disabled (abort mode), single-hart.
         task::terminate_current_cell_on_fault(0, 0, 0);
         // terminate_current_cell_on_fault calls yield_cpu() which switches away.

@@ -7,15 +7,29 @@
 #       Contains release-built cell ELFs + /hostname + /readme.
 #       Served by the kernel's internal filesystem (sys_open / ReadDir).
 #
-#   disk_v3.img  (~270 MB, FAT32 data area + cell bootstrap table)
+#   disk_v3.img  (~455 MB, MBR — see tools/write-mbr.py and api::disk)
 #       Passed to QEMU as a VirtIO block device (-drive file=disk_v3.img).
-#       LBA 0-525823:  FAT32 /data volume mounted by the VFS cell.
-#       LBA 526336+:   Cell bootstrap table read by the early loader.
-#       SpawnFromPath uses this table to load VFS, config, shell.
+#       P1 @2048:   FAT32 interop volume (/mnt/sd)
+#       P2 @526336: Cell bootstrap table read by the early loader.
+#       P3 @560000: kernel heap snapshot region (Phase 29).
+#       P4 @800000: littlefs /data volume (power-safe persistent store).
+#       SpawnFromPath uses the P2 table to load VFS, config, shell.
 
 $kernel_root = Get-Location
 $tools_dir   = "$kernel_root\tools"
 $rel_dir     = "$kernel_root\target\riscv64gc-unknown-none-elf\release"
+
+# Toolchain for the littlefs C core inside service-vfs (littlefs2-sys):
+# cross-compile with the xpack riscv gcc; bindgen needs a 64-bit libclang
+# (the VS BuildTools x64 copy). LFS_NO_INTRINSICS avoids __bswapsi2/__popcountdi2
+# libcalls whose prebuilt compiler-builtins objects carry a soft-float ABI tag
+# and refuse to link with our lp64d objects.
+$env:CC_riscv64gc_unknown_none_elf     = "riscv-none-elf-gcc"
+$env:CFLAGS_riscv64gc_unknown_none_elf = "-march=rv64gc -mabi=lp64d -mcmodel=medany -ffreestanding -DLFS_NO_INTRINSICS"
+if (-not $env:LIBCLANG_PATH) {
+    $vsLlvm = "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\Llvm\x64\bin"
+    if (Test-Path "$vsLlvm\libclang.dll") { $env:LIBCLANG_PATH = $vsLlvm }
+}
 
 # 1. Build ALL cells in release mode.
 # Release binaries are 10-100x smaller than debug, which matters because

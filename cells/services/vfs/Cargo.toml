@@ -9,6 +9,7 @@ api = { path = "../../../libs/api" }
 ostd = { path = "../../../libs/ostd" }
 driver-disk = { path = "../../drivers/disk" }
 fatfs = { git = "https://github.com/rafalh/rust-fatfs", default-features = false, features = ["alloc"] }
+littlefs2 = { version = "0.7.2", default-features = false }
 
 [features]
 # Shrinks the per-cell quota to a tiny limit so the vfs-test cell can exercise

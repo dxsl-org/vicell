@@ -4,6 +4,43 @@
 
 ---
 
+## [2026-06-10] VFS Phase 2.5-4 — littlefs /data: power-loss survives 20/20 kills
+
+### Summary
+`/data` now lives on littlefs (MBR partition P4) — the power-loss-resilient persistent store
+that gates the real-board robot demo. FAT32 moved to `/mnt/sd` (SD-card/PC interop). The proof:
+a harness that boots, floods `/data` with appends and kill-9's QEMU at a random point
+(122–1056 ms) **20 times against one disk image** — zero lost volumes, zero lost markers
+(`.agents/260610-1202-vfs-mount-table-backends/reports/power-loss-harness.ps1`). The vfs suite
+runs 11/11 on littlefs unchanged (client paths kept), including reboot persistence.
+
+### Toolchain (littlefs2 0.7.2 C core, riscv64gc-unknown-none-elf)
+- `CC_riscv64gc_unknown_none_elf=riscv-none-elf-gcc` (xpack), `CFLAGS=-march=rv64gc -mabi=lp64d
+  -mcmodel=medany -ffreestanding -DLFS_NO_INTRINSICS`, `LIBCLANG_PATH` → VS BuildTools **x64**
+  libclang (bindgen; the default `Llvm\bin` copy is 32-bit and fails). Persisted in gen_disk.ps1.
+- `LFS_NO_INTRINSICS`: gcc's `__bswapsi2`/`__popcountdi2` libcalls pull soft-float-tagged objects
+  from Rust's prebuilt compiler-builtins, which refuse to link with lp64d code.
+- `-zmuldefs` (vfs build.rs): littlefs2-sys vendors a freestanding string.c whose
+  strlen/strchr/strspn collide with api's POSIX shim — first definition (the shim's) wins.
+
+### Design
+- `lfs_disk.rs`: littlefs `Storage` → raw block syscalls inside P4 only (4 KiB blocks ×16384);
+  erase is a no-op (block device overwrites in place); NEVER routed through the FAT PageCache —
+  littlefs's power-loss guarantee depends on its prog ordering reaching the device.
+- `backend_littlefs.rs`: mount-per-operation via `mount_and_then` — no self-referential mounted
+  handle across IPC turns, and every request leaves the volume in a committed state.
+  Format-on-first-mount, scoped to P4.
+- Kernel hardening en route: the cell-kill path of the panic handler now PRINTS the panic
+  message first (`[panic-in-cell N] …`) — it used to swallow it, leaving only a meaningless
+  `scause=0x0` fault line (this had hidden the real trap-entry fault of the known flaky
+  boot race, now diagnosed as a nested-trap stack issue and tracked for follow-up).
+
+### Verify
+vfs suite **11/11 on littlefs** · `/mnt/sd` (FAT) + `/data` (littlefs) read/write side by side ·
+**power-loss 20/20 PASS** · full suite **48/51 = baseline**.
+
+---
+
 ## [2026-06-10] VFS Phase 2.5-3 — real MBR partition table + per-cell block region grants
 
 ### Summary

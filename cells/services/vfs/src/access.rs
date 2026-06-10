@@ -28,12 +28,13 @@ pub struct AccessTable {
     rules: &'static [PathRule],
 }
 
-/// Default rules: all cells may read and write to data/tmp; bin is read-only.
+/// Default rules: all cells may read and write to data/tmp/sd; bin is read-only.
 static DEFAULT_RULES: &[PathRule] = &[
-    PathRule { prefix: "/bin/",  allow_read_all: true,  allow_write_all: false },
-    PathRule { prefix: "/data/", allow_read_all: true,  allow_write_all: true  },
-    PathRule { prefix: "/tmp/",  allow_read_all: true,  allow_write_all: true  },
-    PathRule { prefix: "/",      allow_read_all: true,  allow_write_all: false }, // root: read-only
+    PathRule { prefix: "/bin/",    allow_read_all: true,  allow_write_all: false },
+    PathRule { prefix: "/data/",   allow_read_all: true,  allow_write_all: true  },
+    PathRule { prefix: "/tmp/",    allow_read_all: true,  allow_write_all: true  },
+    PathRule { prefix: "/mnt/sd/", allow_read_all: true,  allow_write_all: true  }, // FAT32 interop (P04)
+    PathRule { prefix: "/",        allow_read_all: true,  allow_write_all: false }, // root: read-only
 ];
 
 impl AccessTable {

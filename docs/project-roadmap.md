@@ -886,10 +886,12 @@ Note: QEMU TCG VirtIO throughput ~30 MB/s. Sub-100 ms on QEMU requires memory-ba
 - [x] `check_block_access()` thay 3 gate hardcode — deny-by-default + log; P2/P3 kernel-only by construction
 - Verify: vfs 11/11, block_io_denied_non_vfs ✓, full suite 48/51 (= baseline)
 
-**Phase 2.5-4 — littlefs backend cho /data (P1, ~1 week):**
-- [ ] littlefs2 C FFI trong VFS cell (chốt validate — pattern picolibc; KHÔNG route qua PageCache)
-- [ ] Remount FAT32 → `/mnt/sd`; `/data` → littlefs trên P3 (path giữ nguyên, test hiện có không đổi)
-- [ ] Power-loss harness: kill QEMU giữa write loop ≥20 lần → remount → verify, 0 corruption
+**Phase 2.5-4 — littlefs backend cho /data: ✅ COMPLETE 2026-06-10** 🎯 *gate robot board thật ĐÃ MỞ*
+- [x] littlefs2 0.7.2 C FFI trong VFS cell (riscv-none-elf-gcc + LFS_NO_INTRINSICS + -zmuldefs; KHÔNG qua PageCache; mount-per-operation)
+- [x] Remount FAT32 → `/mnt/sd`; `/data` → littlefs trên P4 (path client giữ nguyên — vfs suite không sửa)
+- [x] **Power-loss harness 20/20 PASS** (kill QEMU 122-1056ms giữa append storm: 0 mất volume, 0 mất marker)
+- Verify: vfs 11/11 trên littlefs (kể cả reboot-persistence); /mnt/sd + /data song song; full suite 48/51 (= baseline)
+- Follow-up: throughput benchmark littlefs vs FAT; mount-message rename cùng test
 
 **Phase 2.5-5 — exFAT + Native FS (DEFERRED, decision-only):**
 - [ ] exFAT: chỉ khi cần đọc SDXC >32GB nguyên bản (`fatfs` không hỗ trợ)

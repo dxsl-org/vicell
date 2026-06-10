@@ -13,6 +13,7 @@ use ostd::prelude::*;
 use crate::access::AccessTable;
 use crate::backend_bootfs::BootFsProxy;
 use crate::backend_fat::FatBackend;
+use crate::backend_littlefs::LittlefsBackend;
 use crate::backend_ramfs::RamFsBackend;
 use crate::handle_table::HandleTable;
 use crate::mount::MountTable;
@@ -31,14 +32,18 @@ impl VfsManager {
     pub fn new() -> Self {
         let mut mounts = MountTable::new();
         let ram  = mounts.add_backend(Box::new(RamFsBackend::new()));
-        let fat  = mounts.add_backend(Box::new(FatBackend::mount("/data")));
+        // FAT32 (P1) is the SD-card/PC interop volume since P04 — /data moved
+        // to littlefs (P4), which survives power cuts (FAT has no journal).
+        let fat  = mounts.add_backend(Box::new(FatBackend::mount("/mnt/sd")));
+        let lfs  = mounts.add_backend(Box::new(LittlefsBackend::mount("/data")));
         let boot = mounts.add_backend(Box::new(BootFsProxy));
-        // Longest prefix wins: /tmp, /data and /bin shadow the read-only root.
-        mounts.mount("/",     ram,  false);
-        mounts.mount("/tmp",  ram,  true);
-        mounts.mount("/data", fat,  true);
+        // Longest prefix wins: the specific mounts shadow the read-only root.
+        mounts.mount("/",       ram,  false);
+        mounts.mount("/tmp",    ram,  true);
+        mounts.mount("/data",   lfs,  true);
+        mounts.mount("/mnt/sd", fat,  true);
         // /bin proxies the kernel initramfs (VIFS1) — no more double-embedded ELFs.
-        mounts.mount("/bin",  boot, false);
+        mounts.mount("/bin",    boot, false);
 
         Self {
             mounts,
