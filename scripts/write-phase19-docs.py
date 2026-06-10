@@ -77,8 +77,8 @@ jobs:
       - name: Update full CHANGELOG.md
         run: |
           git-cliff --output CHANGELOG.md
-          git config user.name "ViOS Team"
-          git config user.email "ci@vios"
+          git config user.name "ViCell Team"
+          git config user.email "ci@ViCell"
           git add CHANGELOG.md
           git commit -m "chore(release): update CHANGELOG" || true
       - name: Build kernel (RV64)
@@ -90,11 +90,11 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           body_path: RELEASE_NOTES.md
-          files: target/riscv64gc-unknown-none-elf/release/vios-kernel
+          files: target/riscv64gc-unknown-none-elf/release/vicell-kernel
 """
 
 cliff_toml = """[changelog]
-header = "# Changelog\\n\\nAll notable changes to ViOS.\\n"
+header = "# Changelog\\n\\nAll notable changes to ViCell.\\n"
 body = \"\"\"
 {% if version %}## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
 {% else %}## [unreleased]
@@ -126,9 +126,9 @@ filter_commits = false
 tag_pattern = "v[0-9]*"
 """
 
-contributing_md = """# Contributing to ViOS
+contributing_md = """# Contributing to ViCell
 
-Welcome! ViOS is a `no_std` Rust OS with a Cellular Single Address Space architecture.
+Welcome! ViCell is a `no_std` Rust OS with a Cellular Single Address Space architecture.
 
 ## Quick Start
 
@@ -192,18 +192,18 @@ changelog_seed = """# Changelog
 - x86_64 HAL: GDT/IDT, LAPIC, COM1, PML4 paging
 - External ELF loading via SpawnFromPath syscall + bootstrap disk table
 - Capability-based FileHandle IPC (CapId, OpenCap, ReadCap, CloseCap)
-- Lua 5.4 C binding with ViOS glue layer
+- Lua 5.4 C binding with ViCell glue layer
 - STRIDE security model documentation + cargo-geiger CI gate
 """
 
-llms_txt = """# ViOS
+llms_txt = """# ViCell
 
-> ViOS is a Rust no_std OS using Cellular Single Address Space + Language-Based Isolation.
+> ViCell is a Rust no_std OS using Cellular Single Address Space + Language-Based Isolation.
 
 ## Core
 
 - [Architecture Overview](docs/ARCHITECTURE.md): System design and Cell lifecycle
-- [Coding Guide](docs/CODING_GUIDE.md): How to write ViOS code
+- [Coding Guide](docs/CODING_GUIDE.md): How to write ViCell code
 - [Patterns](docs/PATTERNS.md): Common design patterns
 - [API Reference](docs/API.md): Public API for Cells and the kernel
 - [Onboarding](docs/ONBOARDING.md): Getting started
@@ -232,7 +232,7 @@ gen_llms_sh = """#!/usr/bin/env bash
 set -euo pipefail
 python3 -c "
 import os, re
-lines = ['# ViOS', '', '> ViOS is a Rust no_std OS using Cellular SAS + LBI.', '', '## Docs', '']
+lines = ['# ViCell', '', '> ViCell is a Rust no_std OS using Cellular SAS + LBI.', '', '## Docs', '']
 for root, dirs, files in os.walk('docs'):
     dirs.sort()
     for f in sorted(files):

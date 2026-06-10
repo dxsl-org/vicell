@@ -3,7 +3,7 @@
 ## Cargo Tree Analysis
 
 ```
-vios-kernel v0.2.0
+ViCell-kernel v0.2.0
 ├── types v0.1.0
 └── api v0.1.0
     └── types v0.1.0

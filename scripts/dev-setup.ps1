@@ -1,4 +1,4 @@
-# dev-setup.ps1 — One-command ViOS development environment setup for Windows.
+# dev-setup.ps1 — One-command ViCell development environment setup for Windows.
 #
 # Supports: Windows 10 (21H2+) / Windows 11, PowerShell 7+
 # Idempotent: safe to run multiple times.
@@ -31,7 +31,7 @@ if ($Help) {
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $RepoRoot
-Write-Step "ViOS Developer Setup (Windows)"
+Write-Step "ViCell Developer Setup (Windows)"
 Write-Info "Repo: $RepoRoot"
 
 # ── Read pinned toolchain ──────────────────────────────────────────────────────
@@ -112,7 +112,7 @@ Write-Info "cargo check ✓"
 # ── 5. Summary ────────────────────────────────────────────────────────────────
 Write-Step "5/5 Done!"
 Write-Host ""
-Write-Host "ViOS development environment is ready." -ForegroundColor Green -BackgroundColor Black
+Write-Host "ViCell development environment is ready." -ForegroundColor Green -BackgroundColor Black
 Write-Host ""
 Write-Host "  Build kernel:   cargo build --release"
 Write-Host "  Generate disk:  .\gen_disk.ps1"

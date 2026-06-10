@@ -136,7 +136,7 @@ impl ViVmRuntime for MockVMM {
             VmTrap::Syscall { nr, .. } => {
                 // Simulate syscall handling
                 if nr == 1 {
-                    // write syscall - would translate to ViOS API
+                    // write syscall - would translate to ViCell API
                     Ok(())
                 } else {
                     Err(Error::InvalidArgument)

@@ -1,4 +1,4 @@
-# Standalone integration-test crate. It is NOT a member of the root ViOS
+# Standalone integration-test crate. It is NOT a member of the root ViCell
 # workspace because the root defaults to the riscv64gc-unknown-none-elf
 # (no_std) target, whereas these tests are host binaries that spawn QEMU as a
 # subprocess and drive the guest over serial.
@@ -7,10 +7,10 @@
 #   cargo test --manifest-path tests/integration/Cargo.toml --target x86_64-pc-windows-msvc
 #
 # Prerequisites: qemu-system-riscv64 on PATH, and a release kernel + disk built:
-#   cargo build --release -p vios-kernel
+#   cargo build --release -p vicell-kernel
 #   ./gen_disk.ps1
 [package]
-name = "vios-integration-tests"
+name = "vicell-integration-tests"
 version = "0.1.0"
 edition = "2021"
 publish = false
@@ -21,6 +21,10 @@ path = "src/lib.rs"
 [[test]]
 name = "boot"
 path = "tests/boot.rs"
+
+[[test]]
+name = "handoff"
+path = "tests/handoff.rs"
 
 # Detach from the parent workspace so the riscv64 default target is not inherited.
 [workspace]

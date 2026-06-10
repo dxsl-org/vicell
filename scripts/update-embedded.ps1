@@ -60,4 +60,4 @@ foreach ($c in $cells) {
 
 Write-Host ""
 Write-Host "Done. Rebuild the kernel to embed the new cells:"
-Write-Host "  cargo build --release -p vios-kernel"
+Write-Host "  cargo build --release -p vicell-kernel"

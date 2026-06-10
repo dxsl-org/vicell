@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Append the ViCell cell bootstrap table to an existing disk image.
 
-The bootstrap table is appended at CELL_TABLE_BASE_LBA (524800 sectors = ~270 MB),
+The bootstrap table is appended at CELL_TABLE_BASE_LBA (526336 sectors = ~257 MB offset),
 AFTER the primary FAT32 partition.  The FAT32 filesystem is not affected.
 
 Usage:
@@ -15,7 +15,7 @@ import sys
 import os
 
 SECTOR_SIZE       = 512
-CELL_TABLE_BASE_LBA = 524_800         # must match disk_layout.rs
+CELL_TABLE_BASE_LBA = 526_336         # must match disk_layout.rs
 CELL_TABLE_MAGIC  = 0x5649_4F53_5F43_454C  # "ViCell_CEL"
 CELL_PATH_LEN     = 64
 MAX_CELL_ENTRIES  = 32

@@ -25,7 +25,7 @@ FS_INFO_SECTOR    = 1
 BACKUP_BOOT       = 6
 
 # Must match disk_layout.rs after the Phase 00 update.
-CELL_TABLE_BASE_LBA = 524_800
+CELL_TABLE_BASE_LBA = 526_336
 
 
 def fat32_geometry(total_sectors: int):

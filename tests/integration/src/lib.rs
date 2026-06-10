@@ -1,4 +1,4 @@
-//! ViOS integration-test harness.
+//! ViCell integration-test harness.
 //!
 //! `QemuRunner` spawns `qemu-system-riscv64`, captures serial output on a
 //! background thread (so `wait_for` can be called repeatedly), and can inject
@@ -19,10 +19,10 @@ use std::time::{Duration, Instant};
 
 /// Resolve the qemu-system-riscv64 binary.
 ///
-/// Order: `$VIOS_QEMU` env override → bare name on PATH → the default Windows
+/// Order: `$ViCell_QEMU` env override → bare name on PATH → the default Windows
 /// install location (`C:\Program Files\qemu\...`), mirroring run.ps1.
 pub fn qemu_binary() -> String {
-    if let Ok(p) = std::env::var("VIOS_QEMU") {
+    if let Ok(p) = std::env::var("ViCell_QEMU") {
         if !p.is_empty() {
             return p;
         }
@@ -43,7 +43,122 @@ pub fn qemu_binary() -> String {
     "qemu-system-riscv64".to_string()
 }
 
-/// QEMU-driven ViOS integration test runner.
+/// Resolve the qemu-system-aarch64 binary.
+///
+/// Order: `$ViCell_QEMU_AARCH64` env override → bare name on PATH → Windows default.
+pub fn qemu_binary_aarch64() -> String {
+    if let Ok(p) = std::env::var("ViCell_QEMU_AARCH64") {
+        if !p.is_empty() {
+            return p;
+        }
+    }
+    if Command::new("qemu-system-aarch64")
+        .arg("--version")
+        .output()
+        .is_ok()
+    {
+        return "qemu-system-aarch64".to_string();
+    }
+    let win = r"C:\Program Files\qemu\qemu-system-aarch64.exe";
+    if Path::new(win).exists() {
+        return win.to_string();
+    }
+    "qemu-system-aarch64".to_string()
+}
+
+/// Resolve the qemu-system-x86_64 binary.
+///
+/// Order: `$ViCell_QEMU_X86` env override → bare name on PATH → Windows default.
+pub fn qemu_binary_x86() -> String {
+    if let Ok(p) = std::env::var("ViCell_QEMU_X86") {
+        if !p.is_empty() {
+            return p;
+        }
+    }
+    if Command::new("qemu-system-x86_64")
+        .arg("--version")
+        .output()
+        .is_ok()
+    {
+        return "qemu-system-x86_64".to_string();
+    }
+    let win = r"C:\Program Files\qemu\qemu-system-x86_64.exe";
+    if Path::new(win).exists() {
+        return win.to_string();
+    }
+    "qemu-system-x86_64".to_string()
+}
+
+/// Resolve the qemu-system-riscv32 binary.
+///
+/// Order: `$ViCell_QEMU_RV32` env override → bare name on PATH → Windows default.
+pub fn qemu_binary_rv32() -> String {
+    if let Ok(p) = std::env::var("ViCell_QEMU_RV32") {
+        if !p.is_empty() {
+            return p;
+        }
+    }
+    if Command::new("qemu-system-riscv32")
+        .arg("--version")
+        .output()
+        .is_ok()
+    {
+        return "qemu-system-riscv32".to_string();
+    }
+    let win = r"C:\Program Files\qemu\qemu-system-riscv32.exe";
+    if Path::new(win).exists() {
+        return win.to_string();
+    }
+    "qemu-system-riscv32".to_string()
+}
+
+/// Resolve the qemu-system-arm binary (AArch32 / ARMv7-A).
+///
+/// Order: `$ViCell_QEMU_ARM32` env override → bare name on PATH → Windows default.
+pub fn qemu_binary_arm32() -> String {
+    if let Ok(p) = std::env::var("ViCell_QEMU_ARM32") {
+        if !p.is_empty() {
+            return p;
+        }
+    }
+    if Command::new("qemu-system-arm")
+        .arg("--version")
+        .output()
+        .is_ok()
+    {
+        return "qemu-system-arm".to_string();
+    }
+    let win = r"C:\Program Files\qemu\qemu-system-arm.exe";
+    if Path::new(win).exists() {
+        return win.to_string();
+    }
+    "qemu-system-arm".to_string()
+}
+
+/// Resolve the qemu-system-i386 binary (x86_32 / IA-32).
+///
+/// Order: `$ViCell_QEMU_I386` env override → bare name on PATH → Windows default.
+pub fn qemu_binary_i386() -> String {
+    if let Ok(p) = std::env::var("ViCell_QEMU_I386") {
+        if !p.is_empty() {
+            return p;
+        }
+    }
+    if Command::new("qemu-system-i386")
+        .arg("--version")
+        .output()
+        .is_ok()
+    {
+        return "qemu-system-i386".to_string();
+    }
+    let win = r"C:\Program Files\qemu\qemu-system-i386.exe";
+    if Path::new(win).exists() {
+        return win.to_string();
+    }
+    "qemu-system-i386".to_string()
+}
+
+/// QEMU-driven ViCell integration test runner.
 ///
 /// The guest serial port is exposed over a TCP socket (QEMU
 /// `-serial tcp:...,server`) rather than stdio. A TCP byte stream is the
@@ -75,7 +190,7 @@ impl QemuRunner {
     /// to `/tmp/` (VFS RamFS, in-memory) can use the shared `boot` instead.
     pub fn boot_with_fresh_disk(kernel: &str, disk: &str) -> Self {
         let tmp = std::env::temp_dir().join(format!(
-            "vios_disk_{}_{}.img",
+            "ViCell_disk_{}_{}.img",
             std::process::id(),
             // Use a combination of PID + a monotonic discriminator so that
             // multiple tests in the same process get distinct names.
@@ -111,6 +226,277 @@ impl QemuRunner {
 
         let netdev = format!("user,id=net0,hostfwd=tcp:127.0.0.1:{host_port}-:{guest_port}");
         (Self::boot_with_netdev(kernel, disk, &netdev), host_port)
+    }
+
+    /// Boot QEMU with a minimal RV64 configuration (no disk, no VirtIO peripherals).
+    ///
+    /// Suitable for handoff smoke tests that only need to observe early boot markers
+    /// (`Frame allocator initialized`, `Heap initialized`, etc.) without requiring a
+    /// pre-built `disk_v3.img`. The guest serial is bridged to a TCP socket as usual.
+    pub fn boot_rv64(kernel: &str) -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind serial socket");
+        let port = listener.local_addr().unwrap().port();
+
+        let child = Command::new(qemu_binary())
+            .args([
+                "-machine", "virt",
+                "-m", "256M",
+                "-nographic",
+                "-bios", "default",
+                "-kernel", kernel,
+                "-monitor", "none",
+                "-serial", &format!("tcp:127.0.0.1:{port}"),
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("qemu-system-riscv64 must be on PATH");
+
+        listener.set_nonblocking(false).expect("blocking listener");
+        let stream = listener.accept().expect("QEMU did not connect to the serial socket").0;
+        let writer = stream.try_clone().expect("clone serial stream");
+
+        let output = Arc::new(Mutex::new(String::new()));
+        let buf = Arc::clone(&output);
+        thread::spawn(move || {
+            let mut reader = BufReader::new(stream);
+            let mut byte = [0u8; 1];
+            loop {
+                match reader.read(&mut byte) {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => buf.lock().unwrap().push(byte[0] as char),
+                }
+            }
+        });
+
+        Self { child, writer: Some(writer), output, temp_disk: None }
+    }
+
+    /// Boot QEMU with an AArch64 kernel (no disk, no netdev — bring-up mode).
+    ///
+    /// Uses the `virt` machine with `cortex-a57`. The kernel is expected to
+    /// fall back to its embedded ramdisk since no VirtIO block is attached.
+    /// The PL011 UART on QEMU `virt` is mapped to serial 0 → the TCP socket.
+    pub fn boot_aarch64(kernel: &str) -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind serial socket");
+        let port = listener.local_addr().unwrap().port();
+
+        let child = Command::new(qemu_binary_aarch64())
+            .args([
+                "-machine", "virt",
+                "-cpu", "cortex-a57",
+                "-m", "256M",
+                "-nographic",
+                "-kernel", kernel,
+                "-monitor", "none",
+                "-serial", &format!("tcp:127.0.0.1:{port}"),
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("qemu-system-aarch64 must be on PATH");
+
+        listener.set_nonblocking(false).expect("blocking listener");
+        let stream = listener.accept().expect("QEMU did not connect to the serial socket").0;
+        let writer = stream.try_clone().expect("clone serial stream");
+
+        let output = Arc::new(Mutex::new(String::new()));
+        let buf = Arc::clone(&output);
+        thread::spawn(move || {
+            let mut reader = BufReader::new(stream);
+            let mut byte = [0u8; 1];
+            loop {
+                match reader.read(&mut byte) {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => buf.lock().unwrap().push(byte[0] as char),
+                }
+            }
+        });
+
+        Self { child, writer: Some(writer), output, temp_disk: None }
+    }
+
+    /// Boot QEMU with an x86_64 Limine BIOS ISO.
+    ///
+    /// Uses SeaBIOS (no OVMF required) + Limine BIOS El Torito boot. The ISO
+    /// must be built via `build/make-iso.sh` (WSL). Limine is configured with
+    /// `timeout: 0` so it boots immediately; `serial: yes` routes Limine output
+    /// to the COM1 UART, which is bridged to the TCP socket.
+    pub fn boot_x86_bios(iso: &str) -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind serial socket");
+        let port = listener.local_addr().unwrap().port();
+
+        let child = Command::new(qemu_binary_x86())
+            .args([
+                "-machine", "q35",
+                "-cpu", "qemu64",
+                "-m", "256M",
+                "-nographic",
+                "-cdrom", iso,
+                "-boot", "d",
+                "-no-reboot",
+                "-monitor", "none",
+                "-serial", &format!("tcp:127.0.0.1:{port}"),
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("qemu-system-x86_64 must be on PATH");
+
+        listener.set_nonblocking(false).expect("blocking listener");
+        let stream = listener.accept().expect("QEMU did not connect to the serial socket").0;
+        let writer = stream.try_clone().expect("clone serial stream");
+
+        let output = Arc::new(Mutex::new(String::new()));
+        let buf = Arc::clone(&output);
+        thread::spawn(move || {
+            let mut reader = BufReader::new(stream);
+            let mut byte = [0u8; 1];
+            loop {
+                match reader.read(&mut byte) {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => buf.lock().unwrap().push(byte[0] as char),
+                }
+            }
+        });
+
+        Self { child, writer: Some(writer), output, temp_disk: None }
+    }
+
+    /// Boot QEMU with a RISC-V 32-bit kernel (Phase-31 Nano, no disk, no VirtIO).
+    ///
+    /// Uses OpenSBI (`-bios default`) + S-mode kernel. SATP=0 (bare physical).
+    /// No disk or peripheral devices are attached — the kernel idles after init.
+    pub fn boot_rv32(kernel: &str) -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind serial socket");
+        let port = listener.local_addr().unwrap().port();
+
+        let child = Command::new(qemu_binary_rv32())
+            .args([
+                "-machine", "virt",
+                "-m", "128M",
+                "-nographic",
+                "-bios", "default",
+                "-kernel", kernel,
+                "-monitor", "none",
+                "-serial", &format!("tcp:127.0.0.1:{port}"),
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("qemu-system-riscv32 must be on PATH");
+
+        listener.set_nonblocking(false).expect("blocking listener");
+        let stream = listener.accept().expect("QEMU did not connect to the serial socket").0;
+        let writer = stream.try_clone().expect("clone serial stream");
+
+        let output = Arc::new(Mutex::new(String::new()));
+        let buf = Arc::clone(&output);
+        thread::spawn(move || {
+            let mut reader = BufReader::new(stream);
+            let mut byte = [0u8; 1];
+            loop {
+                match reader.read(&mut byte) {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => buf.lock().unwrap().push(byte[0] as char),
+                }
+            }
+        });
+
+        Self { child, writer: Some(writer), output, temp_disk: None }
+    }
+
+    /// Boot QEMU with an AArch32 (ARMv7-A) bare-metal kernel (Nano profile).
+    ///
+    /// Machine: `virt`, CPU: `cortex-a15`, MMU off, PL011 UART at 0x09000000.
+    /// Kernel is loaded directly with `-kernel`; no firmware (SVC mode entry).
+    pub fn boot_aarch32(kernel: &str) -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind serial socket");
+        let port = listener.local_addr().unwrap().port();
+
+        let child = Command::new(qemu_binary_arm32())
+            .args([
+                "-machine", "virt",
+                "-cpu", "cortex-a15",
+                "-m", "128M",
+                "-nographic",
+                "-kernel", kernel,
+                "-monitor", "none",
+                "-serial", &format!("tcp:127.0.0.1:{port}"),
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("qemu-system-arm must be on PATH");
+
+        listener.set_nonblocking(false).expect("blocking listener");
+        let stream = listener.accept().expect("QEMU did not connect to the serial socket").0;
+        let writer = stream.try_clone().expect("clone serial stream");
+
+        let output = Arc::new(Mutex::new(String::new()));
+        let buf = Arc::clone(&output);
+        thread::spawn(move || {
+            let mut reader = BufReader::new(stream);
+            let mut byte = [0u8; 1];
+            loop {
+                match reader.read(&mut byte) {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => buf.lock().unwrap().push(byte[0] as char),
+                }
+            }
+        });
+
+        Self { child, writer: Some(writer), output, temp_disk: None }
+    }
+
+    /// Boot QEMU with an x86_32 (IA-32) bare-metal kernel via Multiboot1.
+    ///
+    /// Machine: `pc`, CPU: `base`, paging disabled (CR0.PG=0).
+    /// QEMU `-kernel` speaks Multiboot1 — the multiboot header in `.text.boot`
+    /// is detected and the kernel entry is called in protected mode.
+    pub fn boot_x86_32(kernel: &str) -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind serial socket");
+        let port = listener.local_addr().unwrap().port();
+
+        let child = Command::new(qemu_binary_i386())
+            .args([
+                "-machine", "pc",
+                "-cpu", "base",
+                "-m", "128M",
+                "-nographic",
+                "-kernel", kernel,
+                "-monitor", "none",
+                "-serial", &format!("tcp:127.0.0.1:{port}"),
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("qemu-system-i386 must be on PATH");
+
+        listener.set_nonblocking(false).expect("blocking listener");
+        let stream = listener.accept().expect("QEMU did not connect to the serial socket").0;
+        let writer = stream.try_clone().expect("clone serial stream");
+
+        let output = Arc::new(Mutex::new(String::new()));
+        let buf = Arc::clone(&output);
+        thread::spawn(move || {
+            let mut reader = BufReader::new(stream);
+            let mut byte = [0u8; 1];
+            loop {
+                match reader.read(&mut byte) {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => buf.lock().unwrap().push(byte[0] as char),
+                }
+            }
+        });
+
+        Self { child, writer: Some(writer), output, temp_disk: None }
     }
 
     /// Internal: boot QEMU with a caller-specified `-netdev` value.

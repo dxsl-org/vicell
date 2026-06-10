@@ -1,4 +1,4 @@
-# format-disk.ps1 — Generate the ViOS disk image with FAT32 and populate /bin/
+# format-disk.ps1 — Generate the ViCell disk image with FAT32 and populate /bin/
 #
 # Prerequisites (on the build host):
 #   - mtools  (mcopy, mformat, mpartition) — available via msys2 or WSL
@@ -32,7 +32,7 @@ $fs.Close()
 # mpartition: create MBR with a single FAT32 primary partition starting at 1 MiB
 Write-Host "[format-disk] Partitioning and formatting as FAT32..."
 & mpartition -I -B -T 0x0b -b 2048 "$OutFile"   # MBR + type 0x0b = FAT32
-& mformat -i "${OutFile}@@1M" -F -v VIOS ::       # FAT32 volume label VIOS
+& mformat -i "${OutFile}@@1M" -F -v ViCell ::       # FAT32 volume label ViCell
 
 # ----- Step 3: Create directory structure -----
 Write-Host "[format-disk] Creating directory structure..."
@@ -42,9 +42,9 @@ Write-Host "[format-disk] Creating directory structure..."
 
 # ----- Step 4: Populate /etc -----
 Write-Host "[format-disk] Writing /etc/hostname..."
-"vios" | Out-File -Encoding ascii -NoNewline -FilePath "$StagingDir\hostname"
+"ViCell" | Out-File -Encoding ascii -NoNewline -FilePath "$StagingDir\hostname"
 New-Item -ItemType Directory -Force $StagingDir | Out-Null
-Set-Content -Path "$StagingDir\hostname" -Value "vios" -NoNewline -Encoding ascii
+Set-Content -Path "$StagingDir\hostname" -Value "ViCell" -NoNewline -Encoding ascii
 & mcopy -i "${OutFile}@@1M" "$StagingDir\hostname" ::/etc/hostname
 
 # ----- Step 5: Populate /bin/ from build output -----

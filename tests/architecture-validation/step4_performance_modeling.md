@@ -49,7 +49,7 @@ VMM::run_guest()
       └─> Guest executes...
       └─> VM-Exit (trap)          [0 allocations]
   └─> ViVmRuntime::handle_trap()    [0-1 allocations depending on trap]
-      └─> Translate to ViOS API   [varies]
+      └─> Translate to ViCell API   [varies]
 ```
 
 **Allocation Count**: 0-1 (depends on trap type)

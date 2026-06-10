@@ -52,6 +52,13 @@ for f in files:
             name = entry.get("name", "?")
             p99  = float(entry.get("p99", 0))
             history.setdefault(name, []).append(p99)
+            # RT-specific latency metrics (p999, jitter): tracked alongside p99
+            for rt_key in ("p999", "jitter"):
+                if rt_key in entry:
+                    history.setdefault(f"{name}/{rt_key}", []).append(float(entry[rt_key]))
+            # Deadline-miss count: tracked separately (special zero-baseline rule)
+            if "miss" in entry:
+                history.setdefault(f"{name}/miss", []).append(float(entry["miss"]))
     except Exception as e:
         print(f"[compare] Warning: could not parse {f}: {e}")
 
@@ -72,6 +79,23 @@ for metric, samples in history.items():
     hist = sorted(samples[:-1])
     median = hist[len(hist) // 2]
     current = samples[-1]
+
+    # Deadline-miss: any miss when baseline was clean is an immediate regression.
+    if metric.endswith("/miss"):
+        if median == 0 and current > 0:
+            state[metric] = state.get(metric, 0) + 1
+            print(f"[compare] REGRESSION (deadline-miss appeared): {metric} "
+                  f"baseline=0 current={current:.0f} "
+                  f"[{state[metric]}/{consec_req} consecutive]")
+            if state[metric] >= consec_req:
+                regressions.append(metric)
+        else:
+            if metric in state:
+                print(f"[compare] RECOVERED: {metric} (was {state[metric]} consecutive runs)")
+                del state[metric]
+            else:
+                print(f"[compare] OK: {metric} miss={current:.0f}")
+        continue
 
     if median == 0:
         continue
