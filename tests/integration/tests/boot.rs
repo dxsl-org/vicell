@@ -320,7 +320,7 @@ fn vfs_fat16_write_read() {
 
     // Verify the VFS cell successfully mounted the Phase 2 FAT16 volume.
     assert!(
-        qemu.output_contains("FAT16 /data volume mounted"),
+        qemu.output_contains("FAT32 /data volume mounted"),
         "VFS did not mount FAT16 /data volume\n--- output ---\n{}",
         qemu.dump()
     );
@@ -361,7 +361,7 @@ fn vfs_fat16_reboot_persistence() {
     qemu.wait_for("ViCell >", BOOT_TIMEOUT)
         .unwrap_or_else(|e| panic!("first boot prompt failed: {e}\n{}", qemu.dump()));
     assert!(
-        qemu.output_contains("FAT16 /data volume mounted"),
+        qemu.output_contains("FAT32 /data volume mounted"),
         "FAT16 not mounted on first boot\n{}", qemu.dump()
     );
     std::thread::sleep(std::time::Duration::from_millis(500));
@@ -389,7 +389,7 @@ fn vfs_fat16_reboot_persistence() {
     qemu2.wait_for("ViCell >", BOOT_TIMEOUT)
         .unwrap_or_else(|e| panic!("second boot prompt failed: {e}\n{}", qemu2.dump()));
     assert!(
-        qemu2.output_contains("FAT16 /data volume mounted"),
+        qemu2.output_contains("FAT32 /data volume mounted"),
         "FAT16 not mounted on second boot\n{}", qemu2.dump()
     );
     std::thread::sleep(std::time::Duration::from_millis(500));
@@ -426,7 +426,7 @@ fn vfs_fat16_unlink() {
     let mut qemu = QemuRunner::boot_with_fresh_disk(&kernel_path(), &disk_path());
     qemu.wait_for("ViCell >", BOOT_TIMEOUT)
         .unwrap_or_else(|e| panic!("prompt: {e}\n{}", qemu.dump()));
-    assert!(qemu.output_contains("FAT16 /data volume mounted"), "FAT16 not mounted\n{}", qemu.dump());
+    assert!(qemu.output_contains("FAT32 /data volume mounted"), "FAT16 not mounted\n{}", qemu.dump());
     std::thread::sleep(std::time::Duration::from_millis(500));
     qemu.send_line("echo PHASE_F_DEL > /data/del.txt");
     qemu.wait_for("ViCell >", CMD_TIMEOUT)
@@ -451,7 +451,7 @@ fn vfs_fat16_subdir() {
     let mut qemu = QemuRunner::boot_with_fresh_disk(&kernel_path(), &disk_path());
     qemu.wait_for("ViCell >", BOOT_TIMEOUT)
         .unwrap_or_else(|e| panic!("prompt: {e}\n{}", qemu.dump()));
-    assert!(qemu.output_contains("FAT16 /data volume mounted"), "FAT16 not mounted\n{}", qemu.dump());
+    assert!(qemu.output_contains("FAT32 /data volume mounted"), "FAT16 not mounted\n{}", qemu.dump());
     std::thread::sleep(std::time::Duration::from_millis(500));
     qemu.send_line("mkdir /data/sub");
     qemu.wait_for("ViCell >", CMD_TIMEOUT)
@@ -505,7 +505,7 @@ fn vfs_fat16_subdir_persistence() {
     qemu.wait_for("ViCell >", BOOT_TIMEOUT)
         .unwrap_or_else(|e| panic!("first boot prompt failed: {e}\n{}", qemu.dump()));
     assert!(
-        qemu.output_contains("FAT16 /data volume mounted"),
+        qemu.output_contains("FAT32 /data volume mounted"),
         "FAT16 not mounted on first boot\n{}", qemu.dump()
     );
     std::thread::sleep(std::time::Duration::from_millis(500));
@@ -534,7 +534,7 @@ fn vfs_fat16_subdir_persistence() {
     qemu2.wait_for("ViCell >", BOOT_TIMEOUT)
         .unwrap_or_else(|e| panic!("second boot prompt failed: {e}\n{}", qemu2.dump()));
     assert!(
-        qemu2.output_contains("FAT16 /data volume mounted"),
+        qemu2.output_contains("FAT32 /data volume mounted"),
         "FAT16 not mounted on second boot\n{}", qemu2.dump()
     );
     std::thread::sleep(std::time::Duration::from_millis(500));
@@ -565,7 +565,7 @@ fn vfs_fat16_recursive_rmdir() {
     let mut qemu = QemuRunner::boot_with_fresh_disk(&kernel_path(), &disk_path());
     qemu.wait_for("ViCell >", BOOT_TIMEOUT)
         .unwrap_or_else(|e| panic!("prompt: {e}\n{}", qemu.dump()));
-    assert!(qemu.output_contains("FAT16 /data volume mounted"), "FAT16 not mounted\n{}", qemu.dump());
+    assert!(qemu.output_contains("FAT32 /data volume mounted"), "FAT16 not mounted\n{}", qemu.dump());
     std::thread::sleep(std::time::Duration::from_millis(500));
 
     qemu.send_line("mkdir /data/rr");
@@ -586,7 +586,7 @@ fn vfs_fat16_append() {
     let mut qemu = QemuRunner::boot_with_fresh_disk(&kernel_path(), &disk_path());
     qemu.wait_for("ViCell >", BOOT_TIMEOUT)
         .unwrap_or_else(|e| panic!("prompt: {e}\n{}", qemu.dump()));
-    assert!(qemu.output_contains("FAT16 /data volume mounted"), "FAT16 not mounted\n{}", qemu.dump());
+    assert!(qemu.output_contains("FAT32 /data volume mounted"), "FAT16 not mounted\n{}", qemu.dump());
     std::thread::sleep(std::time::Duration::from_millis(500));
 
     qemu.send_line("vwrite /data/big.txt AAA");
@@ -721,7 +721,7 @@ fn shell_while_loop() {
     let mut qemu = QemuRunner::boot_with_fresh_disk(&kernel_path(), &disk_path());
     qemu.wait_for("ViCell >", BOOT_TIMEOUT)
         .unwrap_or_else(|e| panic!("prompt: {e}\n{}", qemu.dump()));
-    assert!(qemu.output_contains("FAT16 /data volume mounted"), "FAT16 not mounted\n{}", qemu.dump());
+    assert!(qemu.output_contains("FAT32 /data volume mounted"), "FAT16 not mounted\n{}", qemu.dump());
     std::thread::sleep(Duration::from_millis(300));
 
     // (a) False condition: body must NOT execute.
@@ -969,7 +969,7 @@ fn shell_test_builtin() {
     let mut qemu = QemuRunner::boot_with_fresh_disk(&kernel_path(), &disk_path());
     qemu.wait_for("ViCell >", BOOT_TIMEOUT)
         .unwrap_or_else(|e| panic!("prompt: {e}\n{}", qemu.dump()));
-    assert!(qemu.output_contains("FAT16 /data volume mounted"), "FAT16 not mounted\n{}", qemu.dump());
+    assert!(qemu.output_contains("FAT32 /data volume mounted"), "FAT16 not mounted\n{}", qemu.dump());
     std::thread::sleep(Duration::from_millis(300));
 
     // -f: existing file → 0 → then branch runs.
@@ -1326,7 +1326,7 @@ fn shell_source_script() {
     let mut qemu = QemuRunner::boot_with_fresh_disk(&kernel_path(), &disk_path());
     qemu.wait_for("ViCell >", BOOT_TIMEOUT)
         .unwrap_or_else(|e| panic!("prompt: {e}\n{}", qemu.dump()));
-    assert!(qemu.output_contains("FAT16 /data volume mounted"), "FAT16 not mounted\n{}", qemu.dump());
+    assert!(qemu.output_contains("FAT32 /data volume mounted"), "FAT16 not mounted\n{}", qemu.dump());
     std::thread::sleep(Duration::from_millis(500));
 
     // Write a one-line shell script (8.3-compatible filename).
