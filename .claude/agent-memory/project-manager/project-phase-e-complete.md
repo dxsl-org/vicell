@@ -39,7 +39,7 @@ All 4 sub-phases complete; all 14 integration tests pass.
 - **Verification:** Phase 4 integration test proves echo redirection working (write persists across reboot)
 
 ### Evidence
-- `cargo test -p vios-integration-tests` — all 14 tests pass
+- `cargo test -p ViCell-integration-tests` — all 14 tests pass
 - `cargo check` clean across kernel, vfs, ostd, shell, integration targets
 - `shutdown` built-in cleanly terminates QEMU within 15s
 - Phase 4 test reads back `REBOOT_OK` marker from FAT16 after reboot — persistence proven

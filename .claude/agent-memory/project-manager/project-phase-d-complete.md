@@ -12,7 +12,7 @@ metadata:
 **Test Status:** 13/13 integration tests pass ✅
 
 ### Sub-phases
-1. **Phase 1 (BlkRead/BlkWrite Syscalls)** — exposed VirtIO block I/O via raw syscalls 500/501; kernel handlers in `vios_syscall_dispatch` numeric fallback
+1. **Phase 1 (BlkRead/BlkWrite Syscalls)** — exposed VirtIO block I/O via raw syscalls 500/501; kernel handlers in `ViCell_syscall_dispatch` numeric fallback
 2. **Phase 2 (FAT16 Format)** — created `tools/mkfat16.py` formatter (81920 sectors, 8 sec/cluster, 10225 clusters); integrated into `gen_disk.ps1` step 3c
 3. **Phase 3 (BlockStream + fatfs)** — created `/src/block_stream.rs` IoBase adapter; mounted FAT16 at VFS startup; verified zero unsafe in cell
 4. **Phase 4 (VFS Routing)** — branched OP_WRITE and OP_READ on `/data/` prefix; `write_fat16`/`read_fat16` helpers; `/tmp/` unchanged (RamFS)

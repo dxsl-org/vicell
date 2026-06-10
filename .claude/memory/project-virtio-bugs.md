@@ -1,6 +1,6 @@
 ---
 name: project-virtio-bugs
-description: Root cause analysis of ViOS VirtIO block hang and keyboard deadlock bugs
+description: Root cause analysis of ViCell VirtIO block hang and keyboard deadlock bugs
 metadata:
   type: project
 ---

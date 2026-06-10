@@ -16,7 +16,7 @@ Four independent sub-phases closed all FAT16 feature gaps and added two key secu
 4. **Subdir persistence test** — Proves `/data/pdir/` writes survive reboot; mirrors Phase E pattern
 
 ## Evidence
-- All 4 phases compile: `cargo build -p vios-kernel -p service-vfs -p app-shell -r` succeeds
+- All 4 phases compile: `cargo build -p ViCell-kernel -p service-vfs -p app-shell -r` succeeds
 - `VFS_TASK_ID` constant fully removed (0 grep hits)
 - 19/19 integration tests pass (2 new tests appended to boot.rs; 17 existing tests still pass)
 - Phase files updated with Evidence sections

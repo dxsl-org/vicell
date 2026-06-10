@@ -26,7 +26,7 @@ CAP_TABLE.lock().unpark_file(cap_id, file);                  // put Box back
 
 ## Capability Ownership — Always Use task.cell_id, Never caller_id as CellId
 
-In `vios_syscall_dispatch`, `caller_id` is the **task ID** (TID), not the **cell ID**. For capability ownership checks, always resolve the cell ID from the scheduler:
+In `ViCell_syscall_dispatch`, `caller_id` is the **task ID** (TID), not the **cell ID**. For capability ownership checks, always resolve the cell ID from the scheduler:
 
 ```rust
 let cell_id = SCHEDULER.lock().as_ref()
@@ -58,7 +58,7 @@ The kernel uses `pub use api::cap::CapId` in `kernel/src/cell/cap_registry.rs`. 
 
 ## Lua C Binding — cc Crate RISC-V Compiler Detection
 
-The `cc` crate auto-detects the cross-compiler from the target triple. For `riscv64gc-unknown-none-elf`, it looks for `riscv64-unknown-elf-gcc`, but the ViOS toolchain is `riscv-none-elf-gcc` (xpack). The build.rs must explicitly set the compiler when the env var isn't provided:
+The `cc` crate auto-detects the cross-compiler from the target triple. For `riscv64gc-unknown-none-elf`, it looks for `riscv64-unknown-elf-gcc`, but the ViCell toolchain is `riscv-none-elf-gcc` (xpack). The build.rs must explicitly set the compiler when the env var isn't provided:
 
 ```rust
 if target.contains("riscv") && std::env::var("CC_riscv64gc_unknown_none_elf").is_err() {
@@ -68,11 +68,11 @@ if target.contains("riscv") && std::env::var("CC_riscv64gc_unknown_none_elf").is
 ```
 
 **Why:** Without this, `cargo check -p lua` fails with "ToolNotFound: riscv64-unknown-elf-gcc not found" even though `riscv-none-elf-gcc` is on PATH. Code review Phase 10.
-**How to apply:** Any C crate built for RISC-V in ViOS must either set this explicitly or require the caller to export `CC_riscv64gc_unknown_none_elf=riscv-none-elf-gcc`.
+**How to apply:** Any C crate built for RISC-V in ViCell must either set this explicitly or require the caller to export `CC_riscv64gc_unknown_none_elf=riscv-none-elf-gcc`.
 
 ## no_std Unit Tests — Cannot Run via Default `cargo test` in RISC-V Workspace
 
-ViOS `.cargo/config.toml` sets `target = "riscv64gc-unknown-none-elf"`. When running `cargo test -p <no_std_crate>`, Rust uses this RISC-V target which has no `libtest` or `libstd`. Even `#![cfg_attr(not(test), no_std)]` does NOT help because `test` cfg is still not set for cross-compiled RISC-V targets.
+ViCell `.cargo/config.toml` sets `target = "riscv64gc-unknown-none-elf"`. When running `cargo test -p <no_std_crate>`, Rust uses this RISC-V target which has no `libtest` or `libstd`. Even `#![cfg_attr(not(test), no_std)]` does NOT help because `test` cfg is still not set for cross-compiled RISC-V targets.
 
 **Fix options:**
 1. Run tests with explicit host target: `cargo test -p types --target x86_64-unknown-linux-gnu`
@@ -220,7 +220,7 @@ When a kernel driver appears to "deadlock after first event" (input, block, netw
 3. **Only if both pass:** investigate async waker ordering, `sys_recv` blocking semantics, or executor re-poll
 
 **Why:** An interrupt storm (missing `ack_interrupt()`) is a hardware-level event that preempts ALL software execution. No amount of correct async waker ordering fixes a CPU stuck in a trap handler loop. Phase 05 lesson: the plan listed three async root causes, but the actual cause was an IRQ storm — a purely hardware concern that was simpler and more fundamental.
-**How to apply:** When debugging any "first event works, second is lost" symptom in ViOS, open `hal/arch/riscv/src/rv64/trap.rs` and `vi_handle_virtio_irq` first. Confirm every device that fires IRQs 1-8 has an `ack_irq()` call registered.
+**How to apply:** When debugging any "first event works, second is lost" symptom in ViCell, open `hal/arch/riscv/src/rv64/trap.rs` and `vi_handle_virtio_irq` first. Confirm every device that fires IRQs 1-8 has an `ack_irq()` call registered.
 
 ## VirtIO Device IRQ Handler — Always ack every device
 
@@ -315,7 +315,7 @@ fn flush(&self) -> ViResult<()> {
 
 ## Kernel Integration Tests — Defer Until Phase 11
 
-The kernel (`vios-kernel`) is a **binary crate** with no `[lib]` section. Rust integration tests require a library crate (or `#![feature(custom_test_frameworks)]` + a `no_std`-compatible harness). Do NOT create `tests/` directories or `.rs` files under `tests/integration/` until Phase 11 sets up the test harness.
+The kernel (`ViCell-kernel`) is a **binary crate** with no `[lib]` section. Rust integration tests require a library crate (or `#![feature(custom_test_frameworks)]` + a `no_std`-compatible harness). Do NOT create `tests/` directories or `.rs` files under `tests/integration/` until Phase 11 sets up the test harness.
 
 **Why:** A test file in `tests/` that isn't a workspace member, or that tries to import a binary crate, will not compile. The reviewer flagged `tests/integration/virtio_block.rs` as dead orphan code (deleted). Misleading "test exists" claims in commit messages are worse than no test.
 **How to apply:** Kernel smoke tests live inline in the kernel (gated on a feature flag) until Phase 11 wires up the harness. Phase 11 should declare `[lib]` in `kernel/Cargo.toml` or use a `custom_test_frameworks` harness.

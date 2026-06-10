@@ -1,4 +1,4 @@
-- [ViOS Functional Audit 2026-05-30](project-vios-functional-status.md) — 12 complete, 6 partial; 5 bugs fixed; 100% claim was file-based, not functional
+- [ViCell Functional Audit 2026-05-30](project-ViCell-functional-status.md) — 12 complete, 6 partial; 5 bugs fixed; 100% claim was file-based, not functional
 - [Phase C: VFS Write Complete 2026-06-03](project-phase-c-complete.md) — 4 sub-phases, 12/12 tests pass; RamFS write + echo redirect working
 - [Phase D: FAT16 Write Complete 2026-06-03](project-phase-d-complete.md) — 5 sub-phases, 13/13 tests pass; BlkRead/BlkWrite + mkfat16 + BlockStream working
 - [Phase E: Hardening + Reboot Persistence Complete 2026-06-03](project-phase-e-complete.md) — 4 sub-phases, 14/14 tests pass; FAT16 persistence proven, echo-redirect bug fixed

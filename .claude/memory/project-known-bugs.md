@@ -1,6 +1,6 @@
 ---
 name: project-known-bugs
-description: Pre-existing bugs in ViOS kernel that are tracked but not yet fixed
+description: Pre-existing bugs in ViCell kernel that are tracked but not yet fixed
 metadata:
   type: project
 ---
