@@ -4,8 +4,8 @@
 
 use crate::memory::frame::FrameAllocator;
 use crate::*;
-// RV32 Nano uses bare physical addressing (SATP=0) — no PageTable implementation.
-#[cfg(not(target_arch = "riscv32"))]
+// Bare-physical arches (riscv32, x86_32, arm32) have no PageTable implementation.
+#[cfg(not(any(target_arch = "riscv32", target_arch = "x86", target_arch = "arm")))]
 use hal::{PageFlags, PageTable, PageTableTrait};
 
 /// Page size (4KB)
@@ -35,33 +35,17 @@ pub static KERNEL_ROOT: Spinlock<Option<PhysAddr>> = Spinlock::new(None);
 /// Call in place of `init_kernel_paging` + `activate_paging` on riscv32.
 pub fn init_bare() {}
 
-// Helper for debugging
-#[cfg(not(target_arch = "riscv32"))]
-fn puts(s: &str) {
-    for c in s.bytes() {
-        #[cfg(target_arch = "riscv64")]
-        { let _ = crate::hal::sbi::console_putchar(c); }
-        #[cfg(target_arch = "aarch64")]
-        { crate::hal::uart_pl011::putchar(c); }
-        #[cfg(target_arch = "x86_64")]
-        { crate::hal::uart_16550::putchar(c); }
-        let _ = c; // suppress unused warning on other arches
-    }
-}
 
-/// Initialize the kernel page table (not used on riscv32 Nano — call init_bare() instead)
-#[cfg(not(target_arch = "riscv32"))]
+/// Initialize the kernel page table (not used on bare-physical arches — call init_bare() instead)
+#[cfg(not(any(target_arch = "riscv32", target_arch = "x86", target_arch = "arm")))]
 pub fn init_kernel_paging(
     allocator: &mut FrameAllocator,
     mmap: &[crate::boot::MemoryMapEntry],
 ) -> PagingResult<PhysAddr> {
-    puts("TRACE: init_kernel_paging start\n");
     // 1. Allocate root page table
     let root_frame = allocator
         .allocate_frame()
         .ok_or(PageTableError::OutOfMemory)?;
-    
-    puts("TRACE: root_frame allocated\n");
 
     // Zero it out
     unsafe {
@@ -73,11 +57,7 @@ pub fn init_kernel_paging(
     let root_table = unsafe { &mut *(root_frame as *mut PageTable) };
 
     // 2. Identity map all usable memory and kernel sections
-    for (_i, entry) in mmap.iter().enumerate() {
-        puts("TRACE: mapping region ");
-        // We can't format easily, so just trace index
-        // puts(entry.ty as u8 + '0' as u8 ...); 
-        
+    for entry in mmap.iter() {
         let flags = match entry.ty {
             crate::boot::MemoryType::Usable => PageFlags::from_bits(
                 PageFlags::VALID
@@ -119,20 +99,10 @@ pub fn init_kernel_paging(
             _ => continue,
         };
 
-        puts("TRACE: mapping... \n");
-        // Identity map this region using HAL
         let mut alloc_closure = || allocator.allocate_frame();
-
         root_table
-            .identity_map(
-                entry.base,
-                entry.base + entry.length,
-                flags,
-                &mut alloc_closure,
-            )
+            .identity_map(entry.base, entry.base + entry.length, flags, &mut alloc_closure)
             .map_err(|_| PageTableError::OutOfMemory)?;
-        
-        puts("TRACE: mapped region\n");
     }
 
     // Explicitly identity-map QEMU virt machine MMIO regions.
@@ -149,13 +119,16 @@ pub fn init_kernel_paging(
 
     #[cfg(target_arch = "riscv64")]
     {
-        // QEMU riscv64 virt MMIO layout:
-        //   0x0200_0000: CLINT  0x0C00_0000: PLIC  0x1000_0000: UART/VirtIO
-        root_table.identity_map(0x0200_0000, 0x0201_0000, mmio_flags, &mut alloc_fn)
+        // MMIO bases from DTB; falls back to QEMU virt defaults when DTB absent.
+        // uart_region is aligned to 64 KB to cover UART + adjacent VirtIO MMIO slots.
+        let (clint_base, plic_base, plic_size, uart_region) = crate::platform::with(|p| {
+            (p.clint_base, p.plic_base, p.plic_size, p.uart_base & !0xFFFF)
+        });
+        root_table.identity_map(clint_base, clint_base + 0x10000, mmio_flags, &mut alloc_fn)
             .map_err(|_| PageTableError::OutOfMemory)?;
-        root_table.identity_map(0x0C00_0000, 0x1000_0000, mmio_flags, &mut alloc_fn)
+        root_table.identity_map(plic_base, plic_base + plic_size, mmio_flags, &mut alloc_fn)
             .map_err(|_| PageTableError::OutOfMemory)?;
-        root_table.identity_map(0x1000_0000, 0x1001_0000, mmio_flags, &mut alloc_fn)
+        root_table.identity_map(uart_region, uart_region + 0x10000, mmio_flags, &mut alloc_fn)
             .map_err(|_| PageTableError::OutOfMemory)?;
     }
     #[cfg(target_arch = "aarch64")]
@@ -192,18 +165,12 @@ pub fn init_kernel_paging(
             .map_err(|_| PageTableError::OutOfMemory)?;
     }
 
-    puts("TRACE: MMIO regions mapped\n");
-
-    // Store globally
     *KERNEL_ROOT.lock() = Some(root_frame);
-
-    puts("TRACE: init_kernel_paging success\n");
-
     Ok(root_frame)
 }
 
 /// Helper to remap a range of memory with USER permissions.
-#[cfg(not(target_arch = "riscv32"))]
+#[cfg(not(any(target_arch = "riscv32", target_arch = "x86", target_arch = "arm")))]
 /// Used for User Stacks which are allocated in Identity Map (Usable RAM).
 pub fn remap_range_user(start: PhysAddr, pages: usize) {
     let mut root_guard = KERNEL_ROOT.lock();
@@ -241,11 +208,11 @@ pub fn remap_range_user(start: PhysAddr, pages: usize) {
     }
 }
 
-/// Activate virtual memory (not used on riscv32 Nano — SATP stays 0)
+/// Activate virtual memory (not used on bare-physical arches).
 ///
 /// # Safety
 /// This function enables paging. The root table MUST contain a valid identity mapping.
-#[cfg(not(target_arch = "riscv32"))]
+#[cfg(not(any(target_arch = "riscv32", target_arch = "x86", target_arch = "arm")))]
 pub unsafe fn activate_paging(root_table_phys: PhysAddr) {
     let root_table = &*(root_table_phys as *const PageTable);
     root_table.activate();
@@ -254,9 +221,9 @@ pub unsafe fn activate_paging(root_table_phys: PhysAddr) {
 /// Translate a virtual address to its physical address by walking the kernel
 /// page table.
 ///
-/// On riscv32 Nano (SATP=0, bare physical), VA == PA; use the identity stub below.
-/// On riscv64/aarch64 reads the page-table root from the CSR directly (no lock taken).
-#[cfg(not(target_arch = "riscv32"))]
+/// Bare-physical arches (riscv32, x86_32, arm32): VA == PA — use the identity stub below.
+/// Paged arches (riscv64, aarch64) read the page-table root from the CSR.
+#[cfg(not(any(target_arch = "riscv32", target_arch = "x86", target_arch = "arm")))]
 pub fn virt_to_phys(vaddr: VAddr) -> Option<PhysAddr> {
     use hal::traits::PageTableTrait;
 
@@ -290,16 +257,17 @@ pub fn virt_to_phys(vaddr: VAddr) -> Option<PhysAddr> {
     None
 }
 
-/// RV32 Nano identity translation: physical == virtual (SATP=0).
-#[cfg(target_arch = "riscv32")]
+/// Bare-physical identity translation: physical == virtual.
+/// Used by riscv32 (SATP=0), x86_32 (CR0.PG=0), and arm32 (MMU off).
+#[cfg(any(target_arch = "riscv32", target_arch = "x86", target_arch = "arm"))]
 pub fn virt_to_phys(vaddr: VAddr) -> Option<PhysAddr> {
     Some(vaddr)
 }
 
 /// Unmap a virtual page in the kernel address space (clears the PTE).
 /// Used to create true guard pages that trap on access.
-/// RV32 Nano: SATP=0, no page tables — returns NotSupported (never called in Phase 31).
-#[cfg(not(target_arch = "riscv32"))]
+/// Bare-physical arches: no page tables — returns NotSupported.
+#[cfg(not(any(target_arch = "riscv32", target_arch = "x86", target_arch = "arm")))]
 pub fn unmap_page(vaddr: VAddr) -> PagingResult<()> {
     let root_lock = KERNEL_ROOT.lock();
     if let Some(root_phys) = *root_lock {
@@ -312,8 +280,8 @@ pub fn unmap_page(vaddr: VAddr) -> PagingResult<()> {
 }
 
 /// Map a page in the kernel address space.
-/// RV32 Nano: SATP=0, no page tables — returns NotSupported (never called in Phase 31).
-#[cfg(not(target_arch = "riscv32"))]
+/// Bare-physical arches (riscv32, x86, arm): no page tables — stub below returns NotSupported.
+#[cfg(not(any(target_arch = "riscv32", target_arch = "x86", target_arch = "arm")))]
 pub fn map_page(
     allocator: &mut FrameAllocator,
     vaddr: VAddr,
@@ -336,14 +304,15 @@ pub fn map_page(
     }
 }
 
-// RV32 Nano stubs: bare physical addressing — no page-table operations.
-// These are never called in Phase 31 but must exist for the code to compile.
-#[cfg(target_arch = "riscv32")]
+// Bare-physical stubs: no page-table operations for riscv32, x86_32, arm32.
+// These arches run with paging disabled; these stubs satisfy the compiler
+// without ever being called at runtime.
+#[cfg(any(target_arch = "riscv32", target_arch = "x86", target_arch = "arm"))]
 pub fn unmap_page(_vaddr: VAddr) -> PagingResult<()> {
     Err(PageTableError::NotSupported)
 }
 
-#[cfg(target_arch = "riscv32")]
+#[cfg(any(target_arch = "riscv32", target_arch = "x86", target_arch = "arm"))]
 pub fn map_page(
     _allocator: &mut FrameAllocator,
     _vaddr: VAddr,
@@ -353,7 +322,7 @@ pub fn map_page(
     Err(PageTableError::NotSupported)
 }
 
-#[cfg(target_arch = "riscv32")]
+#[cfg(any(target_arch = "riscv32", target_arch = "x86", target_arch = "arm"))]
 pub fn remap_range_user(_start: PhysAddr, _pages: usize) {
-    // No-op: SATP=0, no page tables.
+    // No-op: paging disabled.
 }

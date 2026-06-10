@@ -52,6 +52,9 @@ pub enum AuditEvent {
     /// (deadlock / stuck loop) the CPU watchdog cannot detect. The kernel terminates it
     /// for supervised restart. Payload: `encode_u32x2(cell_id, tid)`.
     CellHung = 13,
+    /// A cell invoked a syscall not present in its `__ViCell_syscalls` allowlist.
+    /// Payload: `encode_u32x2(caller_tid, allowlist_bit)`.
+    SyscallDenied = 14,
 }
 
 struct AuditRing {
@@ -105,7 +108,10 @@ pub fn log_event(event: AuditEvent, payload: &[u8]) {
         return;
     }
 
+    #[cfg(target_arch = "riscv64")]
     let mtime = hal::common::timer::read_mtime().to_le_bytes();
+    #[cfg(not(target_arch = "riscv64"))]
+    let mtime = 0u64.to_le_bytes();
     let buf = unsafe { &mut *RING.buf.get() };
     let mut pos = head;
     for &b in mtime.iter()

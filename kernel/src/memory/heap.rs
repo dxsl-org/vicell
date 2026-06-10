@@ -56,7 +56,9 @@ fn alloc_error_handler(layout: core::alloc::Layout) -> ! {
     // Panic recovery is not possible for OOM, but we loop to avoid double-panics
     // if the panic handler tries to allocate.
     loop {
-        // Halt CPU
+        #[cfg(target_arch = "x86_64")]
+        unsafe { core::arch::asm!("hlt", options(nomem, nostack)) };
+        #[cfg(not(target_arch = "x86_64"))]
         unsafe { core::arch::asm!("wfi") };
     }
 }

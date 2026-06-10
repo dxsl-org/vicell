@@ -13,6 +13,8 @@ fn main() {
         "aarch64"  => ("kernel/linker-aarch64.ld",  "kernel/linker-aarch64.ld"),
         "x86_64"   => ("kernel/linker-x86-64.ld",   "kernel/linker-x86-64.ld"),
         "riscv32"  => ("kernel/linker-riscv32.ld",  "kernel/linker-riscv32.ld"),
+        "arm"      => ("kernel/linker-aarch32.ld",  "kernel/linker-aarch32.ld"),
+        "x86"      => ("kernel/linker-x86-32.ld",   "kernel/linker-x86-32.ld"),
         _          => ("kernel/linker.ld",           "kernel/linker.ld"),
     };
     println!("cargo:rustc-link-arg=-T{ld_script}");

@@ -5,9 +5,27 @@
 
 use crate::boot::MemoryMapEntry;
 use crate::*;
+use core::sync::atomic::{AtomicUsize, Ordering};
 
 // Define PAGE_SIZE to avoid circular dependency with paging.rs
 const PAGE_SIZE: usize = 4096;
+
+/// Physical-to-virtual address offset.
+/// - RISC-V: 0 (identity-mapped before activate_paging, SATP disabled)
+/// - x86_64: HHDM_BASE from Limine (RAM mapped at hhdm+phys, not identity)
+static PHYS_OFFSET: AtomicUsize = AtomicUsize::new(0);
+
+/// Set the physical-to-virtual offset. Must be called before `new_from_map`.
+/// On x86_64, set to the Limine HHDM base address.
+pub fn set_phys_offset(offset: usize) {
+    PHYS_OFFSET.store(offset, Ordering::Relaxed);
+}
+
+/// Convert a physical address to the virtual address used to access it.
+#[inline]
+pub fn phys_to_virt(phys: usize) -> usize {
+    phys + PHYS_OFFSET.load(Ordering::Relaxed)
+}
 
 /// Bitmap Frame Allocator
 pub struct FrameAllocator {
@@ -62,10 +80,15 @@ impl FrameAllocator {
         let bitmap_pages = (bitmap_size_bytes + PAGE_SIZE - 1) / PAGE_SIZE;
         let bitmap_phys_addr = aligned_start;
 
-        // 4. Create the bitmap slice
-        // SAFETY: We own this memory region and we are single-threaded (or locked) at init.
+        // 4. Create the bitmap slice.
+        // On RISC-V, phys == virt (SATP disabled). On x86_64, Limine maps RAM
+        // at HHDM_BASE+phys — physical addresses are NOT identity-mapped.
+        // SAFETY: We own this memory region and we are single-threaded at init.
         let bitmap = unsafe {
-            core::slice::from_raw_parts_mut(bitmap_phys_addr as *mut u64, bitmap_u64_count)
+            core::slice::from_raw_parts_mut(
+                phys_to_virt(bitmap_phys_addr) as *mut u64,
+                bitmap_u64_count,
+            )
         };
 
         // 5. Initialize bitmap

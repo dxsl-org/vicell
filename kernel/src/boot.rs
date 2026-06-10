@@ -305,3 +305,35 @@ pub static FALLBACK_BOOT_INFO: SimpleBootInfo = SimpleBootInfo {
     kernel_phys_base: 0x0020_0000,
     hhdm_offset: 0x0,
 };
+
+// x86_32 QEMU pc -m 128M: multiboot1, kernel at 1 MiB (0x00100000).
+// Bare physical (CR0.PG=0); no HHDM.
+#[cfg(target_arch = "x86")]
+static FALLBACK_MEMORY_MAP: [MemoryMapEntry; 2] = [
+    // Kernel region: 1 MiB → 5 MiB (4 MiB kernel window).
+    MemoryMapEntry { base: 0x0010_0000, length: 0x0040_0000, ty: MemoryType::Kernel },
+    // Usable: 5 MiB → 128 MiB.
+    MemoryMapEntry { base: 0x0050_0000, length: 0x07B0_0000, ty: MemoryType::Usable },
+];
+#[cfg(target_arch = "x86")]
+pub static FALLBACK_BOOT_INFO: SimpleBootInfo = SimpleBootInfo {
+    memory_map: &FALLBACK_MEMORY_MAP,
+    kernel_phys_base: 0x0010_0000,
+    hhdm_offset: 0x0,
+};
+
+// AArch32 QEMU virt -m 256M: kernel at 0x40080000 (ARM virt load address).
+// Bare physical (MMU off); PL011 UART at 0x09000000.
+#[cfg(target_arch = "arm")]
+static FALLBACK_MEMORY_MAP: [MemoryMapEntry; 2] = [
+    // Kernel region: 0x4008_0000 → 0x4048_0000 (4 MiB).
+    MemoryMapEntry { base: 0x4008_0000, length: 0x0040_0000, ty: MemoryType::Kernel },
+    // Usable: 0x4048_0000 → 0x5000_0000 (~188 MiB).
+    MemoryMapEntry { base: 0x4048_0000, length: 0x0BB8_0000, ty: MemoryType::Usable },
+];
+#[cfg(target_arch = "arm")]
+pub static FALLBACK_BOOT_INFO: SimpleBootInfo = SimpleBootInfo {
+    memory_map: &FALLBACK_MEMORY_MAP,
+    kernel_phys_base: 0x4008_0000,
+    hhdm_offset: 0x0,
+};

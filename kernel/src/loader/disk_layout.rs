@@ -17,9 +17,9 @@
 //! ```
 
 /// Sector offset (from LBA 0) where the cell bootstrap section begins.
-/// FAT32 data volume occupies LBA 0-524287 (256 MB, 65525+ clusters).
-/// 256 sectors of padding follow (524288-524799) before the table at 524800.
-pub const CELL_TABLE_BASE_LBA: u64 = 524_800;
+/// FAT32 data volume occupies LBA 0-525823 (~257 MB, 65595+ data clusters).
+/// 512 sectors of padding follow (525824-526335) before the table at 526336.
+pub const CELL_TABLE_BASE_LBA: u64 = 526_336;
 
 /// Magic bytes at the start of `CellTableHeader`; identifies a valid table.
 pub const CELL_TABLE_MAGIC: u64 = 0x5649_4F53_5F43_454C; // "ViCell_CEL" in ASCII

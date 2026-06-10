@@ -147,6 +147,16 @@ pub extern "Rust" fn vi_timer_tick() {
         hal::common::sbi::set_timer(next);
     }
 
+    // Poll VirtIO input on every 10 ms tick.
+    //
+    // VirtIO RING_EVENT_IDX may suppress the device→driver interrupt even when
+    // QEMU places an event in the used ring.  Polling the ring directly ensures
+    // keyboard/mouse events are never dropped regardless of IRQ delivery.
+    // ipc_send(0, …) is fire-and-forget (caller_id=0 has no task entry), so
+    // this is safe to call from timer-ISR context with interrupts disabled.
+    crate::task::drivers::virtio_input::poll_events();
+    crate::task::drivers::virtio_input::dispatch_pending();
+
     // Run the scheduler.  If a higher-priority (or simply next round-robin)
     // task is ready, this performs a context switch.  Safe to call from the
     // timer ISR because:
