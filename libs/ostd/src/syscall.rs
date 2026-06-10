@@ -430,6 +430,32 @@ pub fn sys_read(fd: usize, buffer: &mut [u8]) -> Result<usize, SyscallError> {
     }
 }
 
+/// Read the next directory entry from an open directory fd.
+///
+/// Returns `Ok(Some(entry))` per entry, `Ok(None)` at end of directory.
+/// The kernel serializes one `types::DirEntry` (repr(C)) per call and
+/// advances the handle's cursor — loop until `None`.
+pub fn sys_readdir(fd: usize) -> Result<Option<types::DirEntry>, SyscallError> {
+    let mut entry = types::DirEntry::default();
+    let size = core::mem::size_of::<types::DirEntry>();
+    // SAFETY: entry is a repr(C) value with no padding invariants; the kernel
+    // writes exactly `size` bytes on success and nothing on EOF.
+    let ret = unsafe {
+        syscall(
+            ViSyscall::ReadDir,
+            fd,
+            &mut entry as *mut types::DirEntry as usize,
+            size,
+            0,
+        )
+    };
+    match ret {
+        0 => Ok(None), // end of directory
+        n if n > 0 => Ok(Some(entry)),
+        _ => Err(SyscallError::Unknown),
+    }
+}
+
 pub fn sys_write(fd: usize, buffer: &[u8]) -> Result<usize, SyscallError> {
     unsafe {
         let ret = syscall(

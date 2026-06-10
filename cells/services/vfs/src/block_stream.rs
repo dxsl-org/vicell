@@ -10,6 +10,14 @@ use ostd::syscall::{sys_blk_flush, sys_blk_read, sys_blk_write};
 
 const SECTOR_SIZE: u64 = 512;
 
+/// First absolute LBA of the FAT32 volume — MBR partition P1 (Milestone 2.5
+/// Phase 03; see `tools/write-mbr.py` and `kernel/src/loader/disk_layout.rs`).
+/// `pos` stays partition-relative; only the syscall LBA gets the offset, so
+/// fatfs and the page cache never see absolute sector numbers.
+/// TODO(P03 step B): replace with the shared `api::disk` constant once the
+/// Law-1 change lands.
+const FAT_PART_BASE_LBA: u64 = 2_048;
+
 pub struct BlockStream {
     /// Byte position within the FAT32 volume (LBA 0 = byte 0).
     pos: u64,
@@ -37,7 +45,7 @@ impl fatfs::Read for BlockStream {
         // increased STACK_PAGES to 64 (256 KB) so the deep fatfs nesting
         // during recursive directory removal no longer overflows the stack.
         let mut sec = [0u8; 512];
-        if !sys_blk_read(sector, &mut sec) {
+        if !sys_blk_read(FAT_PART_BASE_LBA + sector, &mut sec) {
             return Err(());
         }
         let n = core::cmp::min(SECTOR_SIZE as usize - off, buf.len());
@@ -59,17 +67,17 @@ impl fatfs::Write for BlockStream {
                 // Full-sector write — no need to read first.
                 let mut full = [0u8; 512]; // stack-allocated (VirtIO DMA constraint)
                 full.copy_from_slice(&buf[written..written + 512]);
-                if !sys_blk_write(sector, &full) {
+                if !sys_blk_write(FAT_PART_BASE_LBA + sector, &full) {
                     return Err(());
                 }
             } else {
                 // Partial sector — read-modify-write.
                 let mut sec = [0u8; 512]; // stack-allocated (VirtIO DMA constraint)
-                if !sys_blk_read(sector, &mut sec) {
+                if !sys_blk_read(FAT_PART_BASE_LBA + sector, &mut sec) {
                     return Err(());
                 }
                 sec[off..off + chunk].copy_from_slice(&buf[written..written + chunk]);
-                if !sys_blk_write(sector, &sec) {
+                if !sys_blk_write(FAT_PART_BASE_LBA + sector, &sec) {
                     return Err(());
                 }
             }
@@ -108,15 +116,15 @@ impl fatfs::Seek for BlockStream {
 
 impl BlockStream {
     /// Read one 512-byte sector directly from disk, bypassing the page cache.
-    /// Called by `PageCache` on a cache miss.
+    /// Called by `PageCache` on a cache miss. `sector` is partition-relative.
     pub fn read_raw_sector(&mut self, sector: u64, buf: &mut [u8; 512]) -> bool {
-        sys_blk_read(sector, buf)
+        sys_blk_read(FAT_PART_BASE_LBA + sector, buf)
     }
 
     /// Write one 512-byte sector directly to disk, bypassing the page cache.
-    /// Called by `PageCache::flush_dirty`.
+    /// Called by `PageCache::flush_dirty`. `sector` is partition-relative.
     pub fn write_raw_sector(&mut self, sector: u64, data: &[u8; 512]) -> bool {
-        sys_blk_write(sector, data)
+        sys_blk_write(FAT_PART_BASE_LBA + sector, data)
     }
 }
 

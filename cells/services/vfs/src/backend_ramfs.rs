@@ -1,8 +1,8 @@
-//! In-memory RamFS backend: read-only embedded catalog (`/`, `/bin`) plus the
-//! volatile read-write `/tmp` scratch space.
+//! In-memory RamFS backend: read-only root catalog plus the volatile
+//! read-write `/tmp` scratch space.
 //!
-//! Write/append are structurally restricted to `/tmp/` — the embedded catalog
-//! is immutable by design. mkdir/rmdir/unlink operate anywhere in the tree;
+//! Write/append are structurally restricted to `/tmp/` — the root catalog is
+//! immutable by design. mkdir/rmdir/unlink operate anywhere in the tree;
 //! the dispatcher's AccessTable is the authorization layer above this.
 
 use alloc::boxed::Box;
@@ -11,14 +11,6 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::backend::FsBackend;
-
-// Embedded binaries served from /bin/ until the BootFS proxy lands (Phase 02
-// of the mount-table plan removes this duplication with kernel_fs.img).
-static SHELL_ELF: &[u8] = include_bytes!("../../../../kernel/src/embedded/shell");
-static HELLO_ELF: &[u8] = include_bytes!("../../../../kernel/src/embedded/hello");
-static ECHO_ELF:  &[u8] = include_bytes!("../../../../kernel/src/embedded/echo");
-static CAT_ELF:   &[u8] = include_bytes!("../../../../kernel/src/embedded/cat");
-static LS_ELF:    &[u8] = include_bytes!("../../../../kernel/src/embedded/ls");
 
 #[derive(Clone)]
 struct RamFile {
@@ -45,15 +37,9 @@ impl RamFsBackend {
         let mut root = Box::new(RamFile::new_dir());
         root.children.insert(String::from("readme.txt"),
             Box::new(RamFile::new_file(b"Welcome to ViCell!\n")));
-
-        let mut bin = Box::new(RamFile::new_dir());
-        for (name, data) in [
-            ("shell", SHELL_ELF), ("hello", HELLO_ELF), ("echo", ECHO_ELF),
-            ("cat",   CAT_ELF),   ("ls",    LS_ELF),
-        ] {
-            bin.children.insert(String::from(name), Box::new(RamFile::new_file(data)));
-        }
-        root.children.insert(String::from("bin"), bin);
+        // /bin is served by BootFsProxy (kernel initramfs) since Phase 02 —
+        // the embedded ELF copies that used to live here doubled every /bin
+        // binary in RAM (once in kernel_fs.img, once in the VFS cell image).
         root.children.insert(String::from("tmp"), Box::new(RamFile::new_dir()));
 
         Self { root }

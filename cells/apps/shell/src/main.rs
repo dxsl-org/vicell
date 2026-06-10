@@ -16,10 +16,11 @@ api::declare_syscalls![
     OpenCap, ReadCap, CloseCap,
     GrantAlloc, GrantShare, GrantSlice, GrantFree,
     // Read = stdin readline; Open/Close (+Read) = `cat` over the kernel FS;
+    // ReadDir = the `ls` built-in (reads the kernel FS directly, not VFS IPC);
     // Snapshot = the `snapshot` built-in. Omitting Read silently bricked the
     // shell's serial input once dispatch-level allowlist enforcement landed
     // (Phase 31b check_allowlist denies without logging).
-    Read, Open, Close, Snapshot,
+    Read, Open, Close, ReadDir, Snapshot,
 ];
 
 mod aliases;

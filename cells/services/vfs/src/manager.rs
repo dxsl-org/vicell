@@ -11,6 +11,7 @@ use api::hotswap::ViStateTransfer;
 use ostd::prelude::*;
 
 use crate::access::AccessTable;
+use crate::backend_bootfs::BootFsProxy;
 use crate::backend_fat::FatBackend;
 use crate::backend_ramfs::RamFsBackend;
 use crate::handle_table::HandleTable;
@@ -29,12 +30,15 @@ pub struct VfsManager {
 impl VfsManager {
     pub fn new() -> Self {
         let mut mounts = MountTable::new();
-        let ram = mounts.add_backend(Box::new(RamFsBackend::new()));
-        let fat = mounts.add_backend(Box::new(FatBackend::mount("/data")));
-        // Longest prefix wins: /tmp and /data shadow the read-only root catalog.
-        mounts.mount("/",     ram, false);
-        mounts.mount("/tmp",  ram, true);
-        mounts.mount("/data", fat, true);
+        let ram  = mounts.add_backend(Box::new(RamFsBackend::new()));
+        let fat  = mounts.add_backend(Box::new(FatBackend::mount("/data")));
+        let boot = mounts.add_backend(Box::new(BootFsProxy));
+        // Longest prefix wins: /tmp, /data and /bin shadow the read-only root.
+        mounts.mount("/",     ram,  false);
+        mounts.mount("/tmp",  ram,  true);
+        mounts.mount("/data", fat,  true);
+        // /bin proxies the kernel initramfs (VIFS1) — no more double-embedded ELFs.
+        mounts.mount("/bin",  boot, false);
 
         Self {
             mounts,

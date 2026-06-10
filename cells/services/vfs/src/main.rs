@@ -6,6 +6,7 @@ extern crate driver_disk;
 
 mod access;
 mod backend;
+mod backend_bootfs;
 mod backend_fat;
 mod backend_ramfs;
 mod block_stream;
@@ -22,14 +23,23 @@ use ostd::io::println;
 use ostd::prelude::*;
 
 // Declares block-I/O capability; the kernel grants BlockIoCap at spawn.
-api::declare_manifest!(block_io = true, network = false, spawn = false);
+// part_data/part_lfs scope the raw block syscalls to P1 (FAT32) + P4
+// (littlefs) — P2 cell-table and P3 snapshot stay kernel-only (P03 design).
+api::declare_manifest!(block_io = true, network = false, spawn = false,
+                       part_data = true, part_lfs = true);
 
 // Narrow syscall allowlist — kernel enforces this at dispatch (Phase 27).
+// BootFS proxy (/bin via the kernel initramfs VIFS1): Open/Close/ReadDir for
+// listing (all synchronous), OpenCap/ReadCap/CloseCap for file reads — the FD
+// `Read` syscall is deliberately ABSENT: it is an async transformation that
+// requires the caller to park immediately, which a service dispatch loop
+// cannot do (see backend_bootfs.rs::read_to_vec).
 api::declare_syscalls![
     Send, Recv, TryRecv, Reply, Log, Heartbeat, LookupService,
     GrantAlloc, GrantShare, GrantSlice, GrantFree, BlkReadAsync,
     GrantRegister, GrantUnregister,
     StateStash, StateRestore,
+    Open, Close, ReadDir, OpenCap, ReadCap, CloseCap,
 ];
 
 // Global VFS manager for the fast-IPC handler (which runs outside the main recv loop).

@@ -131,8 +131,11 @@ pub fn handle_request<'a>(
             // With a synchronous backend data is always ready on first poll.
             match vfs.pending.poll(handle) {
                 Some(data) => {
-                    // Copy into resp_buf (limited to buffer size).
-                    let n = data.len().min(resp_buf.len());
+                    // Cap at 480, not resp_buf.len(): the reply must still fit
+                    // the 512-byte IPC frame AFTER the postcard envelope. A
+                    // full 512-byte payload made encode fail and the client
+                    // saw an empty reply (surfaced by /bin ELF reads).
+                    let n = data.len().min(480);
                     resp_buf[..n].copy_from_slice(&data[..n]);
                     api::ipc::VfsResponse::Data(&resp_buf[..n])
                 }
