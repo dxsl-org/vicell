@@ -342,6 +342,46 @@ pub fn read_file_vfs(path: &str, out: &mut [u8]) -> usize {
             unsafe { core::ptr::copy_nonoverlapping(ptr as *const u8, out.as_mut_ptr(), data_len); }
             data_len
         }
+        // GetFile only serves in-memory backends (RamFS) — disk-backed paths
+        // (/data on FAT) have no stable pointer to hand out. Fall back to the
+        // copy path: ReadAsync stores the bytes under a handle, Poll returns
+        // them inline. This is how vcat reads /data since the typed migration.
+        _ => read_file_vfs_async(path, out),
+    }
+}
+
+/// Copy-path read via `ReadAsync` + `Poll` (≤480 bytes, the `Data` reply limit).
+fn read_file_vfs_async(path: &str, out: &mut [u8]) -> usize {
+    use api::ipc::{VfsRequest, VfsResponse};
+    let mut buf = [0u8; 512];
+
+    let n = match api::ipc::encode(&VfsRequest::ReadAsync { path }, &mut buf) {
+        Ok(s) => s.len(),
+        Err(_) => return 0,
+    };
+    syscall::sys_send(VFS_ENDPOINT, &buf[..n]);
+    let handle = match syscall::sys_recv(0, &mut buf) {
+        syscall::SyscallResult::Ok(_) => match api::ipc::decode::<VfsResponse>(&buf) {
+            Ok(VfsResponse::PendingHandle(h)) => h,
+            _ => return 0,
+        },
+        _ => return 0,
+    };
+
+    let n = match api::ipc::encode(&VfsRequest::Poll { handle }, &mut buf) {
+        Ok(s) => s.len(),
+        Err(_) => return 0,
+    };
+    syscall::sys_send(VFS_ENDPOINT, &buf[..n]);
+    match syscall::sys_recv(0, &mut buf) {
+        syscall::SyscallResult::Ok(_) => match api::ipc::decode::<VfsResponse>(&buf) {
+            Ok(VfsResponse::Data(data)) => {
+                let len = data.len().min(out.len());
+                out[..len].copy_from_slice(&data[..len]);
+                len
+            }
+            _ => 0,
+        },
         _ => 0,
     }
 }

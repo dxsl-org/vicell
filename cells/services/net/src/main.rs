@@ -147,8 +147,11 @@ pub fn main() {
             }
             _ => {
                 // Block until NIC RX fires or the smoltcp maintenance deadline.
-                // timeout = POLL_TICKS in scheduler ticks (10ms each).
-                let timeout_ticks = POLL_TICKS;
+                // UNIT TRAP: WaitForEvent takes SCHEDULER ticks (10 ms each),
+                // while POLL_TICKS is mtime ticks (10 MHz) for sys_get_time
+                // comparisons. Passing POLL_TICKS here meant a ~2.8 h park —
+                // the 5 s heartbeat then killed net every cycle (restart loop).
+                let timeout_ticks = POLL_INTERVAL_MS / 10; // 100 ms → 10 ticks
                 sys_wait_for_event(NET_RX, timeout_ticks);
             }
         }
