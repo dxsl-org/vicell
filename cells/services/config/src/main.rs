@@ -6,8 +6,12 @@ extern crate ostd;
 
 use alloc::collections::BTreeMap;
 use api::hotswap::ViStateTransfer;
+use api::ipc::{ConfigRequest, ConfigResponse, IPC_BUF_SIZE};
 use ostd::io::println;
 use ostd::prelude::*;
+
+api::declare_manifest!(block_io = false, network = false, spawn = false);
+api::declare_syscalls![Send, Recv, TryRecv, Log, Heartbeat, LookupService, StateStash, StateRestore];
 
 // Singleton storage
 struct ConfigStore {
@@ -17,9 +21,8 @@ struct ConfigStore {
 impl ConfigStore {
     fn new() -> Self {
         let mut map = BTreeMap::new();
-        // Default values
         map.insert(String::from("PATH"), String::from("/bin"));
-        map.insert(String::from("OS"), String::from("ViOS"));
+        map.insert(String::from("OS"), String::from("ViCell"));
         Self { map }
     }
 }
@@ -27,7 +30,6 @@ impl ConfigStore {
 struct ConfigService {
     store: Mutex<ConfigStore>,
 }
-
 
 impl ConfigService {
     fn new() -> Self {
@@ -37,66 +39,71 @@ impl ConfigService {
     }
 }
 
-// Implement ViConfig trait
-// Note: We implement this on the Service side struct.
-// The `get` returns &str, which is tied to the lifetime of `self` (the service).
-// This fits the SAS model.
-impl ConfigService {
-    fn get_value(&self, key: &str) -> Option<(usize, usize)> {
-        let store = self.store.lock();
-        if let Some(val) = store.map.get(key) {
-            Some((val.as_ptr() as usize, val.len()))
-        } else {
-            None
-        }
-    }
-
-    fn set_value(&self, key: &str, value: &str) {
-        let mut store = self.store.lock();
-        store.map.insert(String::from(key), String::from(value));
-        // TODO: Notification
-    }
-}
-
 #[no_mangle]
 pub fn main() {
-    println("Config Service: Starting...");
+    println("[config] Config Service v0.3 (typed IPC)");
 
     let service = ConfigService::new();
+    let mut buf = [0u8; IPC_BUF_SIZE];
+    let mut resp_buf = [0u8; IPC_BUF_SIZE];
 
-    let mut buf = [0u8; 256];
     loop {
         match ostd::syscall::sys_recv(0, &mut buf) {
             ostd::syscall::SyscallResult::Ok(sender) if sender > 0 => {
-                // Protocol:
-                // 1: Get (Key) -> Ptr/Len
-                // 2: Set (Key, Val) -> OK
+                let response = match api::ipc::decode::<ConfigRequest>(&buf) {
+                    Ok(ConfigRequest::Get(key)) => {
+                        let store = service.store.lock();
+                        match store.map.get(key) {
+                            Some(val) => {
+                                // Encode value inline into resp_buf while holding the lock,
+                                // so the &str borrow from store does not escape.
+                                let r = ConfigResponse::Value(val.as_str());
+                                let encoded = api::ipc::encode(&r, &mut resp_buf);
+                                drop(store);
+                                if let Ok(slice) = encoded {
+                                    ostd::syscall::sys_send(sender, slice);
+                                    continue;
+                                }
+                                ConfigResponse::Err(0xFF)
+                            }
+                            None => {
+                                drop(store);
+                                ConfigResponse::NotFound
+                            }
+                        }
+                    }
+                    Ok(ConfigRequest::Set { key, value }) => {
+                        let mut store = service.store.lock();
+                        store.map.insert(String::from(key), String::from(value));
+                        ConfigResponse::Ok
+                    }
+                    Ok(ConfigRequest::Delete(key)) => {
+                        let mut store = service.store.lock();
+                        store.map.remove(key);
+                        ConfigResponse::Ok
+                    }
+                    Ok(ConfigRequest::List) => {
+                        // Build a newline-separated key list and send inline.
+                        let store = service.store.lock();
+                        let mut list = alloc::string::String::new();
+                        for k in store.map.keys() {
+                            if !list.is_empty() {
+                                list.push('\n');
+                            }
+                            list.push_str(k);
+                        }
+                        drop(store);
+                        let r = ConfigResponse::Keys(list.as_str());
+                        if let Ok(slice) = api::ipc::encode(&r, &mut resp_buf) {
+                            ostd::syscall::sys_send(sender, slice);
+                        }
+                        continue;
+                    }
+                    Err(_) => ConfigResponse::Err(0xFF),
+                };
 
-                if buf[0] == 1 {
-                    // Get
-                    let key_len = buf[1] as usize;
-                    if let Ok(key) = core::str::from_utf8(&buf[2..2 + key_len]) {
-                        if let Some((ptr, len)) = service.get_value(key) {
-                            let mut resp = [0u8; 16];
-                            resp[0..8].copy_from_slice(&(ptr as u64).to_le_bytes());
-                            resp[8..16].copy_from_slice(&(len as u64).to_le_bytes());
-                            ostd::syscall::sys_send(sender, &resp);
-                        } else {
-                            ostd::syscall::sys_send(sender, b"");
-                        }
-                    }
-                } else if buf[0] == 2 {
-                    // Set
-                    let key_len = buf[1] as usize;
-                    let val_len = buf[2] as usize;
-                    if let Ok(key) = core::str::from_utf8(&buf[3..3 + key_len]) {
-                        if let Ok(val) =
-                            core::str::from_utf8(&buf[3 + key_len..3 + key_len + val_len])
-                        {
-                            service.set_value(key, val);
-                            ostd::syscall::sys_send(sender, b"OK");
-                        }
-                    }
+                if let Ok(slice) = api::ipc::encode(&response, &mut resp_buf) {
+                    ostd::syscall::sys_send(sender, slice);
                 }
             }
             _ => {
