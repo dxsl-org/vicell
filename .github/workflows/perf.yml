@@ -36,9 +36,6 @@ jobs:
           sudo apt-get update -q
           sudo apt-get install -y -q qemu-system-misc
 
-      - name: Download Limine RISC-V bootloader
-        run: bash scripts/download-limine.sh tools/limine-riscv64
-
       - name: Restore perf history
         uses: actions/cache/restore@v4
         with:
@@ -63,22 +60,18 @@ jobs:
 
       - name: Rebuild kernel with bench-aware init
         env:
-          # relocation-model=pic emits R_RISCV_RELATIVE entries for absolute
-          # pointers in .data so Limine can apply the KASLR slide correctly.
-          # -pie and --no-dynamic-linker come from kernel/build.rs (scoped to kernel).
           RUSTFLAGS: "-C relocation-model=pic"
         run: |
           REL=target/riscv64gc-unknown-none-elf/release
-          # Update the embedded init binary so the kernel auto-spawns /bin/bench
+          # Refresh the embedded init binary from the just-built source so the kernel
+          # auto-spawns /bin/bench from the cell table on the bench disk.
           cp "$REL/app-init" kernel/src/embedded/init
-          # Regenerate kernel_fs.img using committed embedded binaries (shell/vfs/config)
-          # plus the freshly-built init that tries to spawn bench
+          # Regenerate kernel_fs.img with the fresh init.
           python3 tools/mkfat32.py kernel/src/embedded/kernel_fs.img \
             kernel/src/embedded/init   /bin/init \
             kernel/src/embedded/shell  /bin/shell \
             kernel/src/embedded/vfs    /bin/vfs \
             kernel/src/embedded/config /bin/config
-          # Rebuild kernel as PIE (ET_DYN) so Limine KASLR can relocate it
           cargo build --release \
             --target riscv64gc-unknown-none-elf \
             -Z build-std=core,alloc \
@@ -86,39 +79,36 @@ jobs:
 
       - name: Generate bench disk image
         run: |
-          # Disk contains: FAT16 with limine.conf + kernel ELF (for Limine boot),
-          # plus cell table at LBA 82000+ with /bin/bench (for EarlyLoader).
+          # Cell-table-only disk: /bin/bench at CELL_TABLE_BASE_LBA.
+          # Kernel is passed directly as -kernel; no Limine/FAT partition needed.
           bash scripts/gen-bench-disk.sh \
             target/riscv64gc-unknown-none-elf/release/app-bench \
-            target/riscv64gc-unknown-none-elf/release/vicell-kernel \
             bench-disk.img
 
       - name: Boot QEMU and capture bench output
         id: bench_run
         timeout-minutes: 10
         run: |
-          LIMINE=tools/limine-riscv64
-          # Limine is the -kernel (S-mode bootloader after OpenSBI).
-          # It reads limine.conf from the FAT16 partition, loads vicell-kernel
-          # at a randomized physical address (KASLR=yes in limine.conf), then
-          # jumps to _start. The kernel's EarlyLoader reads /bin/bench from the
-          # cell table at LBA 82000+ for auto-spawn via init.
+          KERNEL=target/riscv64gc-unknown-none-elf/release/vicell-kernel
+          # Direct boot: kernel ELF passed as -kernel (OpenSBI → kernel → init → bench).
+          # bench-disk.img contains only the cell bootstrap table (/bin/bench).
+          # init reads the cell table and auto-spawns /bin/bench.
           #
-          # Capture both human-readable [bench] lines and bare JSON lines.
+          # Capture [bench]/[rt] human-readable lines and bare JSON result lines.
           # print_report emits "[bench] ..." — used for PDR FAIL check.
           # print_json  emits '{"name":...}' with no prefix — used for results JSON.
           OUTPUT=$(timeout 300 qemu-system-riscv64 \
             -machine virt \
             -nographic \
             -bios default \
-            -kernel "$LIMINE" \
+            -kernel "$KERNEL" \
             -m 256M \
             -drive file=bench-disk.img,format=raw,id=hd0,if=none \
             -device virtio-blk-device,drive=hd0 \
-            2>&1 | grep -E '^\[bench\]|^\{"name":|^\[boot\] kernel_phys_base' || true)
+            2>&1 | grep -E '^\[bench\]|^\[rt\]|^\{"name":|^\[boot\] kernel_phys_base' || true)
 
-          # bench_output: only [bench]-prefixed lines (used by PDR FAIL check below)
-          BENCH_LINES=$(echo "$OUTPUT" | grep '^\[bench\]' || true)
+          # bench_output: [bench] and [rt] lines — FAIL in either fails the PDR check below
+          BENCH_LINES=$(echo "$OUTPUT" | grep -E '^\[bench\]|^\[rt\]' || true)
           echo "bench_output<<EOF" >> "$GITHUB_OUTPUT"
           echo "$BENCH_LINES" >> "$GITHUB_OUTPUT"
           echo "EOF" >> "$GITHUB_OUTPUT"

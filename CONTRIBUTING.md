@@ -1,6 +1,6 @@
-# Contributing to ViOS
+# Contributing to ViCell
 
-Welcome! ViOS is a `no_std` Rust OS built on a **Cellular Single Address Space**
+Welcome! ViCell is a `no_std` Rust OS built on a **Cellular Single Address Space**
 architecture — a different design point from traditional Linux/Windows-style OSes.
 This guide gets you from zero to your first merged PR.
 
@@ -195,6 +195,25 @@ Reviewers check these before approving:
 - [ ] Tests added or reason given
 - [ ] No `mod.rs` files introduced
 - [ ] Law 2 (no `&mut [u8]` across async boundaries) obeyed
+
+---
+
+## UI Subsystem (ViUI)
+
+ViUI v2 is ViCell's native UI toolkit — `no_std`, Reactive Signal Tree, MIT-licensed.
+
+**DSL syntax note**: The `.vi` file format intentionally mirrors [Slint](https://slint.dev)'s
+`.slint` syntax for developer familiarity (migration cost ≈ zero). The ViUI *runtime engine*
+is a cleanroom Rust implementation — Signal<T> reactive cells, CPU/GPU command buffer
+renderer — with no code derived from Slint's GPL-3 codebase. Syntax is not copyrightable
+(EU ECJ: SAS v. WPL 2012; US: Lotus v. Borland 1996).
+
+**GPU renderer note**: `GpuRenderer<E>` uses a command-list pattern (record phase + execute
+phase), not direct GPU hardware calls. `CpuExecutor` replays commands via the CPU framebuffer
+rasterizer. A hardware `HwGpuExecutor` for embedded 2D GPUs (Mali DE, PowerVR) is deferred
+to G2. On QEMU VirtIO GPU, CPU rasterization is the only supported path.
+
+Key files: `libs/viui/` · Spec: `docs/specs/14-viui.md` · Phases: `.agents/260608-*/`
 
 ---
 

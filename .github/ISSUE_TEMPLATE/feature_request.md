@@ -1,6 +1,6 @@
 ---
 name: Feature Request
-about: Propose a new capability for ViOS
+about: Propose a new capability for ViCell
 title: "[FEAT] "
 labels: ["enhancement", "triage"]
 assignees: []

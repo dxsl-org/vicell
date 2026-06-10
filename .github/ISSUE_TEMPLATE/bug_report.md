@@ -1,6 +1,6 @@
 ---
 name: Bug Report
-about: Report a reproducible defect in ViOS
+about: Report a reproducible defect in ViCell
 title: "[BUG] "
 labels: ["bug", "triage"]
 assignees: []
