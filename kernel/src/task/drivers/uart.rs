@@ -30,6 +30,11 @@ impl viUART {
         Self { base_addr }
     }
 
+    /// Update the MMIO base address. Called once by `uart::init` from DTB info.
+    pub fn set_base(&mut self, base: usize) {
+        self.base_addr = base;
+    }
+
     /// Initialize the UART
     pub fn init(&mut self) {
         unsafe {
@@ -98,14 +103,20 @@ impl log::Log for SimpleLogger {
 static LOGGER: SimpleLogger = SimpleLogger;
 
 pub fn init() {
-    // 16550 hardware init only on RISC-V (the base address 0x10000000 is the
-    // RISC-V QEMU UART; on ARM64 the logger uses PL011 via DirectWriter instead).
     #[cfg(target_arch = "riscv64")]
-    SERIAL.lock().init();
-
+    {
+        // Read UART base from DTB (platform::init must have run first).
+        let base = crate::platform::with(|p| p.uart_base);
+        SERIAL.lock().set_base(base);
+        SERIAL.lock().init();
+    }
     // Register the log backend (works on all architectures; DirectWriter routes
     // to the correct UART per target_arch inside write_str).
     let _ = log::set_logger(&LOGGER).map(|()| log::set_max_level(log::LevelFilter::Info));
+    // Logged here (not in platform::init) because the logger only just came up —
+    // platform::init's own log line is emitted before set_logger and is lost.
+    #[cfg(target_arch = "riscv64")]
+    log::info!("[uart] RX/TX base = {:#x}", SERIAL.lock().base_addr);
 }
 
 // --- Input Handling ---

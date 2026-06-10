@@ -68,13 +68,12 @@ const MAX_GRANT_PAGES: usize = 4096;
 
 /// Persistent kernel-managed Grant buffer for a cell's lifetime.
 ///
-/// Unlike `PageGrant`, a `RegGrant` has no `shared_to` field — the owner cell
-/// shares it with peers via the existing `GrantShare` syscall using the `reg_id`
-/// (physical base) as if it were a `grant_id`.
+/// Supports one grantee at a time via `GrantShare`/`GrantSlice` (same as `PageGrant`).
 struct RegGrant {
-    base:  usize,  // physical address of first allocated page
-    size:  usize,  // byte count (multiple of 4096)
-    owner: usize,  // task id — only owner may call GrantUnregister
+    base:      usize,                        // physical address of first allocated page
+    size:      usize,                        // byte count (multiple of 4096)
+    owner:     usize,                        // task id — only owner may call GrantUnregister
+    shared_to: Option<(usize, GrantPerm)>,   // authorized grantee task id + permission
 }
 
 static REG_GRANT_TABLE: Spinlock<Option<BTreeMap<usize, RegGrant>>> = Spinlock::new(None);
@@ -202,6 +201,12 @@ pub(crate) fn reap_grants_for_task(dead_tid: usize) {
     let reg_owned: alloc::vec::Vec<RegGrant> = {
         let mut tbl = reg_grant_table_lock().lock();
         let Some(map) = tbl.as_mut() else { return };
+        // Clear grantee references when the grantee dies.
+        for grant in map.values_mut() {
+            if grant.shared_to.map_or(false, |(tid, _)| tid == dead_tid) {
+                grant.shared_to = None;
+            }
+        }
         let owned_keys: alloc::vec::Vec<usize> = map
             .iter()
             .filter(|(_, g)| g.owner == dead_tid)
@@ -1846,9 +1851,19 @@ pub fn handle_syscall(caller_id: usize, syscall: Syscall) -> SyscallResult {
                 Ok(p) => p,
                 Err(_) => return Err(SyscallError::InvalidInput),
             };
-            let mut tbl = grant_table_lock().lock();
-            if tbl.is_none() { *tbl = Some(BTreeMap::new()); }
-            match tbl.as_mut().and_then(|m| m.get_mut(&grant_id)) {
+            // Check PAGE_GRANT_TABLE first, then fall back to REG_GRANT_TABLE.
+            {
+                let mut tbl = grant_table_lock().lock();
+                if tbl.is_none() { *tbl = Some(BTreeMap::new()); }
+                if let Some(grant) = tbl.as_mut().and_then(|m| m.get_mut(&grant_id)) {
+                    if grant.owner != caller_id { return Err(SyscallError::PermissionDenied); }
+                    grant.shared_to = Some((target_cell, perm));
+                    return Ok(0);
+                }
+            }
+            // Not in PAGE_GRANT_TABLE — try REG_GRANT_TABLE.
+            let mut rtbl = reg_grant_table_lock().lock();
+            match rtbl.as_mut().and_then(|m| m.get_mut(&grant_id)) {
                 None => Err(SyscallError::InvalidInput),
                 Some(grant) if grant.owner != caller_id => Err(SyscallError::PermissionDenied),
                 Some(grant) => {
@@ -1859,13 +1874,23 @@ pub fn handle_syscall(caller_id: usize, syscall: Syscall) -> SyscallResult {
         }
 
         Syscall::GrantSlice { grant_id } => {
-            let tbl = grant_table_lock().lock();
-            match tbl.as_ref().and_then(|m| m.get(&grant_id)) {
+            // Check PAGE_GRANT_TABLE first.
+            {
+                let tbl = grant_table_lock().lock();
+                if let Some(grant) = tbl.as_ref().and_then(|m| m.get(&grant_id)) {
+                    let allowed = grant.owner == caller_id
+                        || grant.shared_to.map_or(false, |(tid, _)| tid == caller_id);
+                    return Ok(if allowed { grant.base } else { usize::MAX });
+                }
+            }
+            // Fall back to REG_GRANT_TABLE.
+            let rtbl = reg_grant_table_lock().lock();
+            match rtbl.as_ref().and_then(|m| m.get(&grant_id)) {
                 None => Ok(usize::MAX),
                 Some(grant) => {
                     let allowed = grant.owner == caller_id
                         || grant.shared_to.map_or(false, |(tid, _)| tid == caller_id);
-                    if allowed { Ok(grant.base) } else { Ok(usize::MAX) }
+                    Ok(if allowed { grant.base } else { usize::MAX })
                 }
             }
         }
@@ -1903,7 +1928,7 @@ pub fn handle_syscall(caller_id: usize, syscall: Syscall) -> SyscallResult {
             let mut tbl = reg_grant_table_lock().lock();
             if tbl.is_none() { *tbl = Some(BTreeMap::new()); }
             if let Some(map) = tbl.as_mut() {
-                map.insert(paddr, RegGrant { base: paddr, size: n_pages * PAGE_SIZE, owner: caller_id });
+                map.insert(paddr, RegGrant { base: paddr, size: n_pages * PAGE_SIZE, owner: caller_id, shared_to: None });
             }
             Ok(paddr) // reg_id == physical base
         }
@@ -2121,27 +2146,50 @@ fn check_allowlist(syscall_id: usize, caller_id: usize) -> Result<(), SyscallErr
     // Bit 36 gates raw block-I/O opcodes (500/501/503) and BlkReadAsync (212).
     let blk_io_bit: Option<u8> = if matches!(syscall_id, 500 | 501 | 503 | 212) { Some(36) } else { None };
 
+    // Raw opcodes with a dedicated `map_syscall` fallback mapping. These are
+    // intentionally absent from `ViSyscall` (Law 1: keeps experimental ids out
+    // of the stable ABI) so they decode as `Unknown` — but they are NOT unknown:
+    // 500/501/503 are gated by bit 36 below + the ZST BlockIoCap at the handler;
+    // 502 and the legacy FD ops (3/100/106/107/108/110/111) predate the bitmap
+    // and stay always-permitted, matching their pre-Phase-31b behavior.
+    let known_raw = matches!(
+        syscall_id,
+        3 | 100 | 106 | 107 | 108 | 110 | 111 | 500 | 501 | 502 | 503
+    );
+
     let allowlist = super::SCHEDULER.lock().as_ref()
         .and_then(|s| s.tasks.get(&caller_id))
         .map(|t| t.syscall_allowlist)
         .unwrap_or(0); // task absent → deny-all for safety
 
-    // Deny unknown opcodes that land in the legacy inner-match fallback — their
-    // allowlist_bit() returns None, so without this guard they bypass the check.
-    // Exit (60) and Yield (104) are always permitted unconditionally.
+    // Deny truly-unknown opcodes that land in the legacy inner-match fallback —
+    // their allowlist_bit() returns None, so without this guard they bypass the
+    // check. Exit (60) and Yield (104) are always permitted unconditionally.
+    // Known-raw ids are exempt: blocking them here made every allowlist-declaring
+    // cell lose raw block I/O (broke the VFS FAT32 mount silently since Phase 31b).
+    // Every deny below logs: a silent dispatch-level denial cost a full day of
+    // triage when the shell's missing `Read` bit bricked serial input with no
+    // kernel output at all.
     if sc == ViSyscall::Unknown
+        && !known_raw
         && !matches!(syscall_id, 60 | 104)
         && allowlist != u64::MAX
     {
+        log::warn!("[kernel] unknown opcode {} denied for tid {} (allowlist={:#018x})",
+            syscall_id, caller_id, allowlist);
         return Err(SyscallError::PermissionDenied);
     }
     if let Some(b) = bit {
         if allowlist & (1u64 << b) == 0 {
+            log::warn!("[kernel] syscall {:?} (bit {}) denied for tid {} (allowlist={:#018x})",
+                sc, b, caller_id, allowlist);
             return Err(SyscallError::PermissionDenied);
         }
     }
     if let Some(b) = blk_io_bit {
         if allowlist & (1u64 << b) == 0 {
+            log::warn!("[kernel] raw block opcode {} denied for tid {} (no bit 36)",
+                syscall_id, caller_id);
             return Err(SyscallError::PermissionDenied);
         }
     }

@@ -1,6 +1,8 @@
 // Minimal EVDEV Scancode to ASCII mapping (US QWERTY)
 
 pub const EV_KEY: u16 = 1;
+pub const EV_REL: u16 = 2;
+pub const EV_ABS: u16 = 3;
 
 pub struct InputState {
     pub shift_pressed: bool,

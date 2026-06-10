@@ -1,5 +1,6 @@
 use crate::sync::Spinlock;
 use alloc::collections::VecDeque;
+use core::sync::atomic::Ordering;
 
 #[allow(non_camel_case_types)]
 pub struct viConsole {
@@ -51,12 +52,24 @@ impl viConsole {
 
         // 2. Poll VirtIO Keyboard — used when a graphical display is attached.
         crate::task::drivers::virtio_input::poll_events();
+        let input_tid = crate::task::drivers::virtio_input::INPUT_CELL_ID
+            .load(Ordering::Relaxed);
         if let Some(drv) = crate::task::drivers::virtio_input::KEYBOARD_DRIVER
             .lock()
             .as_mut()
         {
             while let Some(event) = drv.event_queue.pop_front() {
-                if event.event_type == crate::task::drivers::input_map::EV_KEY {
+                use crate::task::drivers::input_map::{EV_KEY, EV_REL, EV_ABS};
+                if event.event_type == EV_KEY {
+                    // Forward raw event to input service.
+                    // Wire format: [opcode:1=0x00][code:4 LE][value:4 LE]
+                    if input_tid != 0 {
+                        let mut msg = [0u8; 9]; // msg[0]=0 = EV_KEY opcode
+                        msg[1..5].copy_from_slice(&(event.code as u32).to_le_bytes());
+                        msg[5..9].copy_from_slice(&event.value.to_le_bytes());
+                        let _ = crate::task::ipc_send(0, input_tid, msg.as_ptr() as usize, 9);
+                    }
+                    // UART ASCII fallback — keeps shell input working regardless of input service state.
                     if let Some(c) =
                         crate::task::drivers::input_map::scancode_to_ascii(event.code, event.value)
                     {
@@ -66,6 +79,16 @@ impl viConsole {
                             received = true;
                         }
                     }
+                } else if input_tid != 0 {
+                    // EV_REL → opcode 1, EV_ABS → opcode 2; no UART fallback for mouse.
+                    let opcode = if event.event_type == EV_REL { 1u8 }
+                        else if event.event_type == EV_ABS { 2u8 }
+                        else { continue };
+                    let mut msg = [0u8; 9];
+                    msg[0] = opcode;
+                    msg[1..5].copy_from_slice(&(event.code as u32).to_le_bytes());
+                    msg[5..9].copy_from_slice(&event.value.to_le_bytes());
+                    let _ = crate::task::ipc_send(0, input_tid, msg.as_ptr() as usize, 9);
                 }
             }
         }
