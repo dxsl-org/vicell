@@ -28,6 +28,7 @@ pub mod config;
 pub mod driver;
 pub mod display;
 pub mod fs;
+pub mod disk;
 pub mod hotswap;
 pub mod input;
 pub mod manifest;

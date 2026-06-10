@@ -40,15 +40,28 @@ pub const MANIFEST_FLAG_UART: u8 = 1 << 4;
 /// Grants `HypervisorCap` only when the CPU also reports H-ext at boot.
 pub const MANIFEST_FLAG_HYPERVISOR: u8 = 1 << 5;
 
-/// Bitmask of all defined flags for version 1.  Bits 6-7 are reserved.
+/// Block-I/O sector range grant: MBR partition P1 (FAT32, `api::disk`).
+/// Refines `MANIFEST_FLAG_BLOCK_IO` — the cap says a cell MAY issue raw block
+/// syscalls; the PART_* bits say WHICH partition's LBA range they may touch
+/// (kernel `check_block_access`, deny-by-default for manifest-carrying cells).
+/// P2 (cell table) and P3 (snapshot) are kernel-only and never grantable.
+pub const MANIFEST_FLAG_PART_DATA: u8 = 1 << 6;
+
+/// Block-I/O sector range grant: MBR partition P4 (littlefs, `api::disk`).
+pub const MANIFEST_FLAG_PART_LFS: u8 = 1 << 7;
+
+/// Bitmask of all defined flags for version 1.
 ///
 /// `from_bytes` rejects manifests where `flags & !MANIFEST_FLAGS_MASK != 0` —
-/// a stale v1 binary accidentally setting a reserved bit (e.g., from a future
-/// v2 SDK) is rejected and falls back to legacy path grants, preventing a
+/// a stale v1 binary accidentally setting an undefined bit (e.g., from a future
+/// SDK) is rejected and falls back to legacy path grants, preventing a
 /// capability it never intended from silently activating on an older kernel.
+/// (Kernels older than the PART_* bits reject manifests that set them — the
+/// cell then runs on legacy path grants, which is the fail-safe direction.)
 pub const MANIFEST_FLAGS_MASK: u8 =
     MANIFEST_FLAG_BLOCK_IO | MANIFEST_FLAG_NETWORK | MANIFEST_FLAG_SPAWN
-    | MANIFEST_FLAG_GPIO | MANIFEST_FLAG_UART | MANIFEST_FLAG_HYPERVISOR;
+    | MANIFEST_FLAG_GPIO | MANIFEST_FLAG_UART | MANIFEST_FLAG_HYPERVISOR
+    | MANIFEST_FLAG_PART_DATA | MANIFEST_FLAG_PART_LFS;
 
 /// Fixed-layout capability manifest.  ABI-stable — see Law 1.
 ///
@@ -75,6 +88,19 @@ impl CellManifest {
         block_io: bool, network: bool, spawn: bool,
         gpio: bool, uart: bool, hypervisor: bool,
     ) -> Self {
+        Self::with_parts(block_io, network, spawn, gpio, uart, hypervisor, false, false)
+    }
+
+    /// Construct a manifest including block-I/O partition range grants.
+    ///
+    /// `part_data`/`part_lfs` only have effect when `block_io` is also set —
+    /// they scope WHICH partition the raw block syscalls may address.
+    #[allow(clippy::too_many_arguments)] // mirrors the flat flag layout; macro is the public face
+    pub const fn with_parts(
+        block_io: bool, network: bool, spawn: bool,
+        gpio: bool, uart: bool, hypervisor: bool,
+        part_data: bool, part_lfs: bool,
+    ) -> Self {
         Self {
             magic:   MANIFEST_MAGIC,
             version: MANIFEST_VERSION,
@@ -83,7 +109,9 @@ impl CellManifest {
                    | (spawn      as u8 * MANIFEST_FLAG_SPAWN)
                    | (gpio       as u8 * MANIFEST_FLAG_GPIO)
                    | (uart       as u8 * MANIFEST_FLAG_UART)
-                   | (hypervisor as u8 * MANIFEST_FLAG_HYPERVISOR),
+                   | (hypervisor as u8 * MANIFEST_FLAG_HYPERVISOR)
+                   | (part_data  as u8 * MANIFEST_FLAG_PART_DATA)
+                   | (part_lfs   as u8 * MANIFEST_FLAG_PART_LFS),
             _pad:    [0; 2],
         }
     }
@@ -139,6 +167,12 @@ impl CellManifest {
     /// Returns `true` if the cell declared H-extension hypervisor CSR access.
     pub fn has_hypervisor(&self) -> bool { self.flags & MANIFEST_FLAG_HYPERVISOR != 0 }
 
+    /// Returns `true` if the cell's block I/O is granted the P1 (FAT32) range.
+    pub fn has_part_data(&self) -> bool { self.flags & MANIFEST_FLAG_PART_DATA != 0 }
+
+    /// Returns `true` if the cell's block I/O is granted the P4 (littlefs) range.
+    pub fn has_part_lfs(&self) -> bool { self.flags & MANIFEST_FLAG_PART_LFS != 0 }
+
     /// Returns `true` if any privileged capability bit is set.
     ///
     /// Used by `spawn_from_path` to reject over-declaring user Cells (non-`/bin/`
@@ -159,6 +193,17 @@ impl CellManifest {
 /// ```
 #[macro_export]
 macro_rules! declare_manifest {
+    // Full form — includes block-I/O partition range grants (P1 data / P4 lfs).
+    (block_io = $bio:literal, network = $net:literal, spawn = $spawn:literal, gpio = $gpio:literal, uart = $uart:literal, hypervisor = $hv:literal, part_data = $pd:literal, part_lfs = $pl:literal) => {
+        #[used]
+        #[link_section = "__ViCell_manifest"]
+        pub static VICELL_MANIFEST: $crate::manifest::CellManifest =
+            $crate::manifest::CellManifest::with_parts($bio, $net, $spawn, $gpio, $uart, $hv, $pd, $pl);
+    };
+    // Convenience form: block_io with partition scopes, no gpio/uart/hypervisor.
+    (block_io = $bio:literal, network = $net:literal, spawn = $spawn:literal, part_data = $pd:literal, part_lfs = $pl:literal) => {
+        $crate::declare_manifest!(block_io = $bio, network = $net, spawn = $spawn, gpio = false, uart = false, hypervisor = false, part_data = $pd, part_lfs = $pl);
+    };
     // 6-param form — includes hypervisor flag.
     (block_io = $bio:literal, network = $net:literal, spawn = $spawn:literal, gpio = $gpio:literal, uart = $uart:literal, hypervisor = $hv:literal) => {
         #[used]
