@@ -5,7 +5,23 @@ use core::arch::asm;
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CpuContext {
     pub r15: u64, pub r14: u64, pub r13: u64, pub r12: u64,
-    pub rbx: u64, pub rbp: u64, pub rsp: u64, pub rip: u64,
+    pub rbx: u64, pub rbp: u64,
+    /// Kernel stack pointer (mapped to RSP; offset 6*8 in the switch asm).
+    pub sp: u64,
+    /// Resume instruction pointer (mapped to RIP via `jmp`; offset 7*8).
+    pub rip: u64,
+}
+
+impl CpuContext {
+    /// Cooperative context switch — associated-function form used by the kernel.
+    ///
+    /// # Safety
+    /// Both pointers must point to valid, aligned `CpuContext` structs.
+    #[inline(always)]
+    pub unsafe fn switch(old: *mut CpuContext, new: *const CpuContext) {
+        // SAFETY: invariant upheld by caller.
+        unsafe { switch(old, new) }
+    }
 }
 
 /// Cooperative context switch.

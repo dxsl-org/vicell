@@ -28,12 +28,12 @@ pub use hal_riscv::common;
 #[cfg(feature = "riscv32")]
 pub use hal_riscv::rv32::*;
 
-// Hỗ trợ ARM (AArch64)
-#[cfg(feature = "aarch64")]
+// Hỗ trợ ARM (AArch64 + AArch32)
+#[cfg(any(feature = "aarch64", feature = "arm"))]
 pub use hal_arm::*;
 
-// Hỗ trợ x86_64
-#[cfg(feature = "x86_64")]
+// Hỗ trợ x86_64 + x86_32
+#[cfg(any(feature = "x86_64", feature = "x86"))]
 pub use hal_x86::*;
 
 // Chặn lỗi khi quên chọn mục tiêu
@@ -41,8 +41,10 @@ pub use hal_x86::*;
     feature = "riscv64",
     feature = "riscv32",
     feature = "aarch64",
-    feature = "x86_64"
+    feature = "arm",
+    feature = "x86_64",
+    feature = "x86",
 )))]
 compile_error!(
-    "Mày phải chọn 'riscv64', 'riscv32', 'aarch64', hoặc 'x86_64' thì ViCell mới chạy được!"
+    "Mày phải chọn 'riscv64', 'riscv32', 'aarch64', 'arm', 'x86_64', hoặc 'x86' thì ViCell mới chạy được!"
 );

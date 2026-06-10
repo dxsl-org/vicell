@@ -109,5 +109,12 @@ syscall_entry:
     popq  %rcx
     movq  %gs:8, %rsp
     swapgs
+    # CVE-2012-0217: Intel #GP if SYSRET executes with non-canonical RCX.
+    # Check bits [63:47] of RCX are all equal (canonical user address).
+    movq  %rcx, %rax
+    sarq  $47,  %rax     # canonical user → 0; kernel or non-canonical → non-zero
+    jnz   1f             # non-canonical: skip sysretq
     sysretq
+1:  # Non-canonical RCX: trap — caller has a bug or is malicious.
+    ud2
 "#, options(att_syntax));

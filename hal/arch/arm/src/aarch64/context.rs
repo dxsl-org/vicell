@@ -27,11 +27,20 @@ pub struct CpuContext {
     pub spsr_el1: u64,
 }
 
-/// Perform a context switch from `old` to `new`.
+impl CpuContext {
+    /// Perform a context switch from `old` to `new`.
+    ///
+    /// # Safety
+    /// Both pointers must point to valid, aligned `CpuContext` structs.
+    pub unsafe fn switch(old: *mut CpuContext, new: *const CpuContext) {
+        unsafe { __switch(old, new); }
+    }
+}
+
+/// Free-function alias kept for backwards compatibility.
 ///
 /// # Safety
-/// Both pointers must point to valid, aligned `CpuContext` structs that will
-/// not be deallocated before the context switch completes.
+/// Both pointers must point to valid, aligned `CpuContext` structs.
 pub unsafe fn switch(old: *mut CpuContext, new: *const CpuContext) {
     // SAFETY: delegated to the assembly stub below.
     unsafe { __switch(old, new); }

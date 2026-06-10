@@ -10,6 +10,7 @@ use hal_arch_trait::Arch;
 #[cfg(target_arch = "aarch64")] pub mod context;
 #[cfg(target_arch = "aarch64")] pub mod gic;
 #[cfg(target_arch = "aarch64")] pub mod paging;
+#[cfg(target_arch = "aarch64")] pub mod rtc;
 #[cfg(target_arch = "aarch64")] pub mod timer;
 #[cfg(target_arch = "aarch64")] pub mod trap;
 #[cfg(target_arch = "aarch64")] pub mod uart_pl011;
@@ -80,4 +81,43 @@ impl Arch for AArch64Arch {
 pub fn set_kernel_stack(sp: usize) {
     // SAFETY: TPIDR_EL1 is EL1-private; writing from EL1 is safe.
     unsafe { core::arch::asm!("msr tpidr_el1, {}", in(reg) sp, options(nomem, nostack)); }
+}
+
+/// `hal::arch` shim — exposes a RISC-V-compatible API surface so the ViCell
+/// kernel compiles for aarch64 without #[cfg] sprawl in the common scheduler code.
+/// Field-name differences (ra/s0/s1 vs x30/x19/x20) are still cfg-gated at
+/// the call sites in task.rs and scheduler.rs.
+#[cfg(target_arch = "aarch64")]
+pub mod arch {
+    /// Unified abstract trap frame — same field names as the RISC-V ViTrapFrame
+    /// so the kernel's scheduling code compiles without modification.
+    /// `sepc` maps to ELR_EL1, `sstatus` to SPSR_EL1.
+    #[derive(Default, Clone, Copy, Debug)]
+    #[repr(C)]
+    pub struct ViTrapFrame {
+        pub regs:    [usize; 32],
+        pub sstatus: usize,
+        pub sepc:    usize,
+        pub stval:   usize,
+        pub scause:  usize,
+    }
+
+    pub use super::context::CpuContext as Context;
+
+    /// Initialise the ARM64 exception vector table.
+    pub fn init() { super::trap::init(); }
+
+    /// Enable IRQs by clearing DAIF.I.
+    pub fn enable_interrupts() { super::trap::enable_interrupts(); }
+
+    /// ARM64 stores the kernel-stack pointer in TPIDR_EL1.
+    pub fn set_kernel_stack(sp: usize) { super::set_kernel_stack(sp); }
+
+    /// ARM64 has no GP/TP registers; return zeroes for spawn compatibility.
+    pub fn get_gp_tp() -> (usize, usize) { (0, 0) }
+
+    extern "C" {
+        /// Entry trampoline for new tasks (enables IRQs, sets x0=arg, jumps to entry).
+        pub fn thread_trampoline();
+    }
 }
