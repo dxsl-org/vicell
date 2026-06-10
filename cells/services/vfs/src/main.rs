@@ -10,6 +10,7 @@ mod backend_bootfs;
 mod backend_fat;
 mod backend_littlefs;
 mod backend_ramfs;
+mod backend_stub;
 mod block_stream;
 mod lfs_disk;
 mod dispatch;

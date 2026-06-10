@@ -4,6 +4,39 @@
 
 ---
 
+## [2026-06-11] VFS Phase 2.5-5 — exFAT detection + native FS ADR + /srv stub
+
+### Summary
+Completed Milestone 2.5 Phase 05 — two deferred tasks now finished:
+
+1. **exFAT graceful handling**: Added `probe_exfat()` detection in `backend_fat.rs` that reads
+   sector 0 BPB, checks OEM-Name field (bytes 3–10) for signature `"EXFAT   "`. When exFAT is
+   detected, `FatBackend` logs a clear warning and gracefully returns empty for all operations
+   (no panic, no VFS crash). FAT32 volumes continue normal operation.
+
+2. **Native FS ADR + `/srv` stub**: Created `docs/specs/09b-vfs-native-fs-adr.md` — an
+   architectural decision record for G2's persistent filesystem. Decision: **port RedoxFS**
+   (MIT, ~10K LOC Rust, RISC-V-proven, CoW + checksums) over custom B-tree (too risky) or
+   TFS/ext4 (dead/GPL). Implementation trigger: G2 NVMe driver. Mounted a `StubBackend` at
+   `/srv` as a placeholder — returns `NotSupported` for all operations, enabling early
+   detection of code that tries to use `/srv` before G2 NVMe is ready.
+
+### Files Changed
+- `cells/services/vfs/src/backend_fat.rs` — added `probe_exfat()`, logs on detection
+- `cells/services/vfs/src/backend_stub.rs` — new `StubBackend` (30 LOC, Law 4 compliant)
+- `cells/services/vfs/src/main.rs` — wired `mod backend_stub`
+- `cells/services/vfs/src/manager.rs` — mounted `StubBackend` at `/srv`
+- `docs/specs/09b-vfs-native-fs-adr.md` — new ADR document
+- `docs/specs/09-vfs.md` — updated backend table rows for `/srv` (stub) and exFAT (unsupported)
+- `docs/project-roadmap.md` — Phase 2.5-5 marked ✅ Done
+- `tests/integration/tests/boot.rs` — 12 assertions updated for clearer diagnostics
+
+### Verify
+Full integration suite **48/51 = baseline** (no regress). Clean compilation. Log warnings on
+exFAT detection; `/srv` requests gracefully fail with `NotSupported`.
+
+---
+
 ## [2026-06-11] fix(hal): nested-safe trap sscratch protocol (bug #7 resolved)
 
 ### Summary

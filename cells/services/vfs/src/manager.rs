@@ -15,6 +15,7 @@ use crate::backend_bootfs::BootFsProxy;
 use crate::backend_fat::FatBackend;
 use crate::backend_littlefs::LittlefsBackend;
 use crate::backend_ramfs::RamFsBackend;
+use crate::backend_stub::StubBackend;
 use crate::handle_table::HandleTable;
 use crate::mount::MountTable;
 use crate::pending::PendingTable;
@@ -44,6 +45,11 @@ impl VfsManager {
         mounts.mount("/mnt/sd", fat,  true);
         // /bin proxies the kernel initramfs (VIFS1) — no more double-embedded ELFs.
         mounts.mount("/bin",    boot, false);
+        // /srv is reserved for the G2 native filesystem (RedoxFS port, see
+        // docs/specs/09b-vfs-native-fs-adr.md). Stub returns empty/false for
+        // all operations — better than falling through to the / RamFS root.
+        let srv  = mounts.add_backend(Box::new(StubBackend::new()));
+        mounts.mount("/srv",    srv,  false);
 
         Self {
             mounts,

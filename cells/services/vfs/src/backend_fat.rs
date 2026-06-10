@@ -13,7 +13,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::backend::FsBackend;
-use crate::block_stream::CachedBlockStream;
+use crate::block_stream::{BlockStream, CachedBlockStream};
 use ostd::io::println;
 
 /// Concrete `fatfs::FileSystem` type for the VirtIO FAT volume.
@@ -29,19 +29,41 @@ pub struct FatBackend {
     prefix: &'static str,
 }
 
+/// Reads sector 0 of the FAT partition and returns `true` when the volume is
+/// exFAT — identified by OEM-Name `"EXFAT   "` at BPB offset 3 (exFAT spec
+/// §3.1). FAT12/16/32 never use this string.
+///
+/// A temporary `BlockStream` is used so the probe does not interfere with the
+/// `CachedBlockStream` fatfs will create afterwards (positions are per-instance;
+/// both start at offset 0).
+fn probe_exfat() -> bool {
+    use fatfs::Read;
+    let mut bs = BlockStream::new();
+    let mut sec = [0u8; 512];
+    // Guard against short reads — need at least 11 bytes for the OEM-Name field.
+    match bs.read(&mut sec) {
+        Ok(n) if n >= 11 => &sec[3..11] == b"EXFAT   ",
+        _ => false,
+    }
+}
+
 impl FatBackend {
     /// Mount the persistent FAT volume on the VirtIO disk. On failure (no disk
-    /// attached, bad BPB) the backend stays in fallback mode — every operation
-    /// fails cleanly while other mounts keep working.
+    /// attached, bad BPB, or exFAT) the backend stays in fallback mode — every
+    /// operation fails cleanly while other mounts keep working.
     pub fn mount(prefix: &'static str) -> Self {
+        if probe_exfat() {
+            println("[vfs] exFAT volume detected — not supported; reformat to FAT32 or use /data (littlefs)");
+            return Self { fs: None, prefix };
+        }
         let opts = fatfs::FsOptions::new().update_accessed_date(false);
         let fs = match fatfs::FileSystem::new(CachedBlockStream::new(), opts) {
             Ok(fs) => {
-                println("[vfs] FAT32 /data volume mounted");
+                println("[vfs] FAT32 /mnt/sd volume mounted");
                 Some(fs)
             }
             Err(_) => {
-                println("[vfs] WARNING: FAT32 mount failed — /data writes will fail");
+                println("[vfs] WARNING: FAT32 mount failed — /mnt/sd writes will fail");
                 None
             }
         };

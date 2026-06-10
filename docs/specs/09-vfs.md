@@ -47,8 +47,8 @@ VFS service (MountTable, longest-prefix match)
 | **RamFS** | `/tmp` | tmpfs chuẩn — scratch space volatile | Có rồi |
 | **FAT32** (crate `fatfs`, có LFN/VFAT) | `/data` (hiện tại) → `/mnt/sd` | Interop thẻ SD ≤32GB / boot partition RPi / trao đổi dữ liệu với PC. **Không journaling — không dùng làm persistent store chính cho robot** | Có rồi |
 | **littlefs** | `/data` | Persistent store power-loss-resilient cho config/log/model — mất điện giữa chừng ghi không hỏng volume. Bắt buộc trước robot demo trên board thật | G1 tail |
-| **Native FS** | `/srv` | CoW + checksum cho server workload — quyết định RedoxFS port hay tự viết **hoãn đến G2 cùng NVMe** | G2 |
-| **exFAT** | `/mnt/sd` (mở rộng) | Thẻ SDXC >32GB nguyên bản (xuất xưởng exFAT, `fatfs` không đọc được). Chỉ làm khi có nhu cầu thật | Theo nhu cầu |
+| **Native FS** | `/srv` | CoW + checksum cho server workload. **Quyết định: RedoxFS port** (MIT, ~10 K LOC; xem [ADR](09b-vfs-native-fs-adr.md)). Implement tại G2 cùng NVMe. Hiện stub `StubBackend` mounted tại `/srv` — trả empty/false, không crash VFS | G2 |
+| **exFAT** | `/mnt/sd` (mở rộng) | Thẻ SDXC >32GB nguyên bản (xuất xưởng exFAT, `fatfs` không đọc được). `FatBackend::mount()` tự detect OEM-Name `"EXFAT   "` và log cảnh báo rõ thay vì lỗi cryptic. Full support chỉ khi có nhu cầu thật | Theo nhu cầu |
 
 ### Quyết định đã chốt (2026-06-10)
 

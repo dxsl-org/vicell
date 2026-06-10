@@ -893,9 +893,10 @@ Note: QEMU TCG VirtIO throughput ~30 MB/s. Sub-100 ms on QEMU requires memory-ba
 - Verify: vfs 11/11 trên littlefs (kể cả reboot-persistence); /mnt/sd + /data song song; full suite 48/51 (= baseline)
 - Follow-up: throughput benchmark littlefs vs FAT; mount-message rename cùng test
 
-**Phase 2.5-5 — exFAT + Native FS (DEFERRED, decision-only):**
-- [ ] exFAT: chỉ khi cần đọc SDXC >32GB nguyên bản (`fatfs` không hỗ trợ)
-- [ ] Native FS (CoW/checksum): quyết RedoxFS port hay tự viết tại G2 cùng NVMe
+**Phase 2.5-5 — exFAT + Native FS (DONE 2026-06-11):**
+- [x] exFAT: `probe_exfat()` detect OEM-Name `"EXFAT   "` trước `fatfs::FileSystem::new()` → log rõ + fallback graceful (không crash VFS). Full support defer theo nhu cầu
+- [x] Native FS ADR: **RedoxFS port** chốt cho G2 — `docs/specs/09b-vfs-native-fs-adr.md`; `StubBackend` mounted tại `/srv` (trả empty/false, không crash)
+- Verify: suite baseline 48/51 giữ nguyên; stale test message `"FAT32 /data"` → `"FAT32 /mnt/sd"` fixed (12 occurrences)
 
 **Validated 2026-06-10** (`/hc-plan validate`): 6 claims checked, 1 failed đã sửa (LBA 524800→526336); 4 quyết định chốt: littlefs FFI · MBR thật · per-cell block grant · toàn bộ phases làm ngay không chờ ARM64.
 
