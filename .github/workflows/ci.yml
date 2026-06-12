@@ -56,9 +56,8 @@ jobs:
         include:
           - target: riscv64gc-unknown-none-elf
             short: rv64
-          - target: aarch64-unknown-none
+          - target: aarch64-unknown-none-softfloat
             short: aarch64
-            continue-on-error: true
           - target: x86_64-unknown-none
             short: x86_64
             continue-on-error: true
@@ -98,6 +97,14 @@ jobs:
           path: target/riscv64gc-unknown-none-elf/release/vicell-kernel
           if-no-files-found: error
 
+      - name: Upload aarch64 kernel ELF
+        if: matrix.short == 'aarch64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-aarch64
+          path: target/aarch64-unknown-none-softfloat/release/vicell-kernel
+          if-no-files-found: error
+
   qemu-boot:
     name: QEMU Boot Test (512M RAM)
     runs-on: ubuntu-24.04
@@ -121,6 +128,77 @@ jobs:
         # 256M: kernel is now 4.4 MB (kernel_fs.img embedded separately).
         # Checks for FAT32 mount (always present) or full shell prompt.
         run: bash scripts/qemu-boot-test.sh target/riscv64gc-unknown-none-elf/release/vicell-kernel
+
+  aarch64-lint:
+    name: Clippy (aarch64)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-05-01
+          components: rust-src,clippy
+          targets: aarch64-unknown-none-softfloat
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+          key: aarch64-lint
+
+      - name: Clippy (aarch64)
+        run: >
+          cargo clippy
+          -p vicell-kernel
+          --target aarch64-unknown-none-softfloat
+          -Z build-std=core,alloc
+          -- -D warnings
+
+  qemu-aarch64-boot:
+    name: QEMU Boot Test (aarch64)
+    runs-on: ubuntu-24.04
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-05-01
+          components: rust-src
+          targets: aarch64-unknown-none-softfloat
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+          key: aarch64-boot
+
+      - name: Install QEMU and libclang
+        run: sudo apt-get update -q && sudo apt-get install -y -q qemu-system-arm libclang-dev
+
+      - name: Build aarch64 kernel
+        run: >
+          cargo build --release
+          -p vicell-kernel
+          --target aarch64-unknown-none-softfloat
+          -Z build-std=core,alloc
+
+      - name: Build aarch64 cells
+        run: >
+          cargo build --release
+          --target aarch64-unknown-none-softfloat
+          -Z build-std=core,alloc
+          -p app-init -p app-shell -p service-vfs -p service-config
+          -p service-net -p service-input -p service-compositor
+
+      - name: Create aarch64 disk image
+        run: bash scripts/format-disk-arm.sh disk_arm_virt.img
+
+      - name: Boot test (aarch64)
+        run: |
+          chmod +x scripts/qemu-aarch64-test.sh
+          BOOT_WINDOW=90 bash scripts/qemu-aarch64-test.sh
 
   unit-tests:
     name: Host unit tests (types + api)

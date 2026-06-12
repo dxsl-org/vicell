@@ -26,5 +26,9 @@ path = "tests/boot.rs"
 name = "handoff"
 path = "tests/handoff.rs"
 
+[[test]]
+name = "aarch64-boot"
+path = "tests/aarch64-boot.rs"
+
 # Detach from the parent workspace so the riscv64 default target is not inherited.
 [workspace]
