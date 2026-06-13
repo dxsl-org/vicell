@@ -16,6 +16,7 @@ edition = "2021"
 publish = false
 
 [lib]
+name = "vicell_integration_tests"
 path = "src/lib.rs"
 
 [[test]]
@@ -45,6 +46,10 @@ path = "tests/redoxfs-srv.rs"
 [[test]]
 name = "nvme-x86"
 path = "tests/nvme-x86.rs"
+
+[[test]]
+name = "compositor-cursor"
+path = "tests/compositor-cursor.rs"
 
 [dev-dependencies]
 tempfile = "3"

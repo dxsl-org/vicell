@@ -6,6 +6,7 @@ extern crate alloc;
 use alloc::vec;
 use api::display::{Rect, FALLBACK_WIDTH, FALLBACK_HEIGHT};
 use ostd::syscall::sys_gpu_flush;
+use crate::cursor_sprite::{CURSOR_H, CURSOR_W, cursor_pixel};
 use crate::surface_table::SurfaceTable;
 use crate::z_order::ZOrder;
 
@@ -58,6 +59,45 @@ impl ScreenFb {
         }
     }
 
+    /// Alpha-blend the 16×16 cursor sprite at `(cx, cy)` into the FB.
+    ///
+    /// Only pixels that fall inside `dirty` are written — avoids painting outside
+    /// the region that will be flushed to the GPU this frame.
+    /// Clips the sprite to screen bounds so a cursor near an edge is safe.
+    ///
+    /// Pixel format is BGRA8888 (native VirtIO GPU order). Alpha blend formula:
+    ///   out = src * alpha/255 + dst * (255 - alpha)/255
+    fn composite_cursor(&mut self, cx: i32, cy: i32, dirty: Rect) {
+        let stride = self.width as usize * 4;
+        for row in 0..CURSOR_H {
+            let sy = cy + row as i32;
+            if sy < 0 || sy >= self.height as i32 { continue; }
+            for col in 0..CURSOR_W {
+                let sx = cx + col as i32;
+                if sx < 0 || sx >= self.width as i32 { continue; }
+                // Skip pixels outside the dirty region (won't be flushed).
+                if sx < dirty.x || sx >= dirty.x + dirty.w as i32
+                    || sy < dirty.y || sy >= dirty.y + dirty.h as i32
+                {
+                    continue;
+                }
+                let Some(src) = cursor_pixel(row, col) else { continue };
+                let alpha = src[3] as u32;
+                if alpha == 0 { continue; }
+                let dst_off = sy as usize * stride + sx as usize * 4;
+                if dst_off + 4 > self.pixels.len() { continue; }
+                // Straight-alpha blend over destination (BGRA channel order).
+                for ch in 0..3usize {
+                    let d = self.pixels[dst_off + ch] as u32;
+                    let s = src[ch] as u32;
+                    self.pixels[dst_off + ch] =
+                        ((s * alpha + d * (255 - alpha)) / 255) as u8;
+                }
+                self.pixels[dst_off + 3] = 255; // opaque result
+            }
+        }
+    }
+
     /// Flush `dirty_rect` from the screen FB to the GPU.
     ///
     /// Copies the dirty region into the pre-allocated staging buffer (no heap allocation)
@@ -83,7 +123,13 @@ impl ScreenFb {
     }
 }
 
-/// Render one frame: blit all damaged surfaces then flush the combined dirty rect.
+/// Render one frame: blit all damaged surfaces, composite the cursor, then
+/// flush the combined dirty rect to the VirtIO GPU.
+///
+/// `extra_dirty` is a compositor-initiated repaint region (cursor move, surface
+/// destroyed/raised) that is unioned with per-surface damage before blitting.
+/// `cursor_x/cursor_y` is the current logical mouse position used to draw the
+/// 16×16 software cursor sprite on top of all surfaces.
 ///
 /// `extra_dirty` is a compositor-initiated repaint region (e.g. surface just
 /// destroyed or raised) that is unioned with per-surface damage before blitting.
@@ -95,8 +141,10 @@ pub fn render_frame(
     table: &mut SurfaceTable,
     z_order: &ZOrder,
     extra_dirty: Option<Rect>,
+    cursor_x: i32,
+    cursor_y: i32,
 ) -> Option<Rect> {
-    // Seed with compositor-initiated dirty region (destroyed/raised surface area).
+    // Seed with compositor-initiated dirty region (cursor move, surface destroyed/raised).
     let mut dirty: Option<Rect> = extra_dirty;
     for cap in z_order.iter_bottom_to_top() {
         if let Some(s) = table.get(cap) {
@@ -133,6 +181,10 @@ pub fn render_frame(
             s.clear_damage();
         }
     }
+
+    // Composite the cursor sprite on top of all surfaces within the dirty rect.
+    // The cursor is always drawn last so it occludes surface pixels.
+    fb.composite_cursor(cursor_x, cursor_y, dirty);
 
     // Flush the dirty rect to the GPU.
     fb.flush_rect(dirty);

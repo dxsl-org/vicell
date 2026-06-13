@@ -5,12 +5,16 @@
 //! This module:
 //!   - Forwards key events to the focused surface owner's cell.
 //!   - Tracks the logical mouse cursor position.
+//!   - On mouse move, unions the old and new 16×16 cursor rects into
+//!     `pending_dirty` so the compositor repaints both positions (no trail).
 //!   - On left-click, hit-tests the surface z-stack and updates keyboard focus.
 
+use api::display::Rect;
 use api::ipc::{InputRequest, IPC_BUF_SIZE};
 use api::syscall::service;
 use ostd::syscall::{sys_lookup_service, sys_recv, sys_send};
 
+use crate::cursor_sprite::{CURSOR_H, CURSOR_W};
 use crate::surface_table::SurfaceTable;
 use crate::z_order::ZOrder;
 
@@ -75,16 +79,20 @@ pub fn connect_to_input(state: &mut InputState) {
 ///
 /// Only called when `sender == state.input_tid`.
 /// `buf[0]` must equal `INPUT_EVENT_OPCODE`.
+///
+/// On `MouseMove` (discriminant 1), unions the old cursor rect and the new
+/// cursor rect into `pending_dirty` so the compositor repaints both positions.
 pub fn handle_input_event(
     buf: &[u8; 512],
     state: &mut InputState,
     table: &SurfaceTable,
     z_order: &ZOrder,
+    pending_dirty: &mut Option<Rect>,
 ) {
     if buf[0] != INPUT_EVENT_OPCODE { return; }
     match buf[1] {
         0 => forward_key(buf, state),
-        1 => update_cursor(buf, state),
+        1 => update_cursor(buf, state, pending_dirty),
         2 => on_mouse_button(buf, state, table, z_order),
         _ => {}
     }
@@ -97,13 +105,35 @@ fn forward_key(buf: &[u8; 512], state: &InputState) {
     }
 }
 
+/// Build a screen-space rect covering the cursor sprite at `(x, y)`.
+#[inline]
+fn cursor_rect(x: i32, y: i32) -> Rect {
+    Rect { x, y, w: CURSOR_W, h: CURSOR_H }
+}
+
 /// Update logical mouse position from a MouseMove payload.
 ///
 /// MouseMove layout (buf offsets after the opcode byte):
 ///   buf[2..6] = x (i32 LE), buf[6..10] = y (i32 LE)
-fn update_cursor(buf: &[u8; 512], state: &mut InputState) {
+///
+/// Unions old cursor rect + new cursor rect into `pending_dirty` so the
+/// compositor repaints both positions on the next frame (eliminates trail).
+/// Emits `[compositor] cursor at X,Y` for the Phase 04 integration test probe.
+fn update_cursor(buf: &[u8; 512], state: &mut InputState, pending_dirty: &mut Option<Rect>) {
+    let old_rect = cursor_rect(state.mouse_x, state.mouse_y);
+
     state.mouse_x = i32::from_le_bytes([buf[2], buf[3], buf[4], buf[5]]);
     state.mouse_y = i32::from_le_bytes([buf[6], buf[7], buf[8], buf[9]]);
+
+    let new_rect = cursor_rect(state.mouse_x, state.mouse_y);
+    let combined = old_rect.union(&new_rect);
+    *pending_dirty = Some(match pending_dirty.take() {
+        Some(acc) => acc.union(&combined),
+        None => combined,
+    });
+
+    // One-line probe consumed by the Phase 04 integration test.
+    ostd::println!("[compositor] cursor at {},{}", state.mouse_x, state.mouse_y);
 }
 
 /// On left-button press, find the topmost surface under the cursor and update focus.

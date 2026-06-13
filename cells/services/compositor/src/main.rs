@@ -15,12 +15,13 @@
 
 extern crate alloc;
 
+mod cursor_sprite;
 mod input_handler;
 mod render;
 mod surface_table;
 mod z_order;
 
-use api::display::{AttachGrant, DamageNotify, PixelFormat, compositor_ops};
+use api::display::{AttachGrant, DamageNotify, PixelFormat, compositor_ops, Rect};
 use input_handler::{InputState, connect_to_input, handle_input_event};
 use ostd::io::println;
 use ostd::syscall::{sys_grant_slice, sys_recv, sys_send, SyscallResult};
@@ -41,8 +42,9 @@ pub fn main() {
     let mut table   = SurfaceTable::new();
     let mut z_order = ZOrder::new();
     let mut input        = InputState::new();
-    // Compositor-initiated dirty region (surface destroyed/raised, no per-surface damage).
-    let mut pending_dirty: Option<api::display::Rect> = None;
+    // Compositor-initiated repaint region: set by cursor moves, surface destroy/raise.
+    // Consumed (taken) on each render_frame call.
+    let mut pending_dirty: Option<Rect> = None;
 
     // Register as input focus so keyboard + mouse events flow to us.
     connect_to_input(&mut input);
@@ -55,7 +57,11 @@ pub fn main() {
                 if input.input_tid != 0 && sender == input.input_tid
                     && buf[0] == INPUT_EVENT_OPCODE
                 {
-                    handle_input_event(&buf, &mut input, &table, &z_order);
+                    // On MouseMove, update_cursor sets pending_dirty = union(old, new)
+                    // so the frame is repainted at the interval tick.
+                    handle_input_event(
+                        &buf, &mut input, &table, &z_order, &mut pending_dirty,
+                    );
                 } else {
                     handle_message(&buf, sender, &mut table, &mut z_order,
                                    &mut pending_dirty);
@@ -66,11 +72,13 @@ pub fn main() {
             }
         }
 
-        // DamageNotify-driven: render only when a surface reports damage or
-        // the compositor itself needs a repaint (surface destroyed / raised).
+        // Damage-driven: render when a surface reports damage or cursor/compositor dirty.
         if table.has_damage() || pending_dirty.is_some() {
-            let _ = render_frame(&mut fb, &mut table, &z_order,
-                                 pending_dirty.take());
+            let _ = render_frame(
+                &mut fb, &mut table, &z_order,
+                pending_dirty.take(),
+                input.mouse_x, input.mouse_y,
+            );
         }
     }
 }

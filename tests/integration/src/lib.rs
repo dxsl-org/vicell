@@ -171,8 +171,9 @@ pub struct QemuRunner {
     output: Arc<Mutex<String>>,
     /// Temporary disk image path to delete on drop (None when using the shared disk).
     temp_disk: Option<std::path::PathBuf>,
-    /// QEMU monitor TCP connection for sending monitor commands (e.g. `sendkey`).
-    /// Only populated by `boot_with_netdev`; all other constructors set this to None.
+    /// QEMU monitor (QMP) TCP connection for sending monitor commands.
+    /// Populated by `boot_with_netdev` (keyboard injection) and `boot_with_pointer`
+    /// (mouse abs events). `None` in all other constructors.
     monitor: Option<TcpStream>,
 }
 
@@ -694,6 +695,174 @@ impl QemuRunner {
         });
 
         Self { child, writer: Some(writer), output, temp_disk: None, monitor: monitor_stream }
+    }
+
+    /// Boot QEMU with a VirtIO GPU + VirtIO tablet (for absolute mouse events)
+    /// and a QMP monitor socket.
+    ///
+    /// Use this constructor for compositor cursor tests. The tablet device
+    /// (`virtio-tablet-device`) exposes EV_ABS events so `send_qemu_mouse_abs`
+    /// produces deterministic guest cursor coordinates. The QMP socket enables
+    /// `input-send-event` injection without interactive terminal I/O.
+    ///
+    /// The GPU and keyboard are included (same as `boot`). Use `-display none`
+    /// so QEMU creates a graphical console (required for VirtIO input routing)
+    /// while capturing serial via TCP.
+    pub fn boot_with_pointer(kernel: &str, disk: &str) -> Self {
+        // Serial socket: we bind the port; QEMU connects as client.
+        // `-serial tcp:host:port` without `server` flag = QEMU is the client.
+        let serial_listener = TcpListener::bind("127.0.0.1:0").expect("bind serial socket");
+        let serial_port = serial_listener.local_addr().unwrap().port();
+
+        // QMP port: we pick an ephemeral port, release the listener, and let QEMU
+        // bind it as a server (`-qmp tcp:127.0.0.1:port` makes QEMU the server).
+        // We connect to QEMU's QMP port after QEMU has had time to start up.
+        let qmp_listener = TcpListener::bind("127.0.0.1:0").expect("probe qmp port");
+        let qmp_port = qmp_listener.local_addr().unwrap().port();
+        drop(qmp_listener); // release the port so QEMU can bind it
+
+        let child = Command::new(qemu_binary())
+            .args([
+                "-machine", "virt",
+                "-m", "256M",
+                // `-display none` creates a graphical console for VirtIO input
+                // while capturing serial via TCP (see boot_with_netdev comment).
+                "-display", "none",
+                "-bios", "default",
+                "-kernel", kernel,
+                "-drive", &format!("file={disk},format=raw,id=hd0,if=none"),
+                "-device", "virtio-blk-device,drive=hd0",
+                "-netdev", "user,id=net0",
+                "-device", "virtio-net-device,netdev=net0",
+                "-device", "virtio-keyboard-device",
+                "-device", "virtio-gpu-device",
+                // Tablet device: exposes EV_ABS events for absolute cursor positioning.
+                // QMP input-send-event with type "abs" requires a tablet backend.
+                "-device", "virtio-tablet-device",
+                // QMP monitor: QEMU is the server, binds this port.
+                // `nowait` = QEMU does not block for a client connection at startup.
+                "-qmp", &format!("tcp:127.0.0.1:{qmp_port},server,nowait"),
+                "-serial", &format!("tcp:127.0.0.1:{serial_port}"),
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("qemu-system-riscv64 must be on PATH");
+
+        // Accept QEMU's serial connection.
+        serial_listener.set_nonblocking(false).expect("blocking listener");
+        let stream = serial_listener
+            .accept()
+            .expect("QEMU did not connect to serial socket")
+            .0;
+        let writer = stream.try_clone().expect("clone serial stream");
+
+        // Connect to QEMU's QMP server in a background thread.
+        // Allow a few retries — QEMU binds the QMP port after accepting the serial
+        // connection, so there may be a brief startup gap.
+        let monitor_stream = {
+            let (tx, rx) = std::sync::mpsc::channel::<TcpStream>();
+            thread::spawn(move || {
+                for _ in 0..20 {
+                    if let Ok(s) = TcpStream::connect(format!("127.0.0.1:{qmp_port}")) {
+                        let _ = tx.send(s);
+                        return;
+                    }
+                    thread::sleep(Duration::from_millis(200));
+                }
+                // If still not connectable after 4 s, skip QMP gracefully.
+            });
+            rx.recv_timeout(Duration::from_secs(10)).ok()
+        };
+
+        let output = Arc::new(Mutex::new(String::new()));
+        let buf = Arc::clone(&output);
+        thread::spawn(move || {
+            let mut reader = BufReader::new(stream);
+            let mut byte = [0u8; 1];
+            loop {
+                match reader.read(&mut byte) {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => buf.lock().unwrap().push(byte[0] as char),
+                }
+            }
+        });
+
+        Self {
+            child,
+            writer: Some(writer),
+            output,
+            temp_disk: None,
+            monitor: monitor_stream,
+        }
+    }
+
+    /// Inject an absolute mouse-pointer event into the guest via QMP.
+    ///
+    /// `x` and `y` are logical QEMU coordinates in the range 0..=32767.
+    /// QEMU maps these to the display resolution, so the guest's reported
+    /// screen pixel depends on the display size (1024×768 in the default setup).
+    ///
+    /// Both axes are sent in one `input-send-event` call so QEMU coalesces
+    /// them into a single EV_ABS report to the VirtIO tablet device.
+    ///
+    /// Precondition: this `QemuRunner` must have been created by
+    /// `boot_with_pointer`; returns immediately (no-op) if `monitor` is `None`.
+    pub fn send_qemu_mouse_abs(&mut self, x: u32, y: u32) {
+        let Some(m) = self.monitor.as_mut() else {
+            eprintln!("[test] WARNING: QMP monitor is None — send_qemu_mouse_abs({x},{y}) dropped");
+            return;
+        };
+
+        // QMP handshake: drain the greeting then negotiate capabilities.
+        // Idempotent — QEMU ignores duplicate qmp_capabilities.
+        m.set_read_timeout(Some(Duration::from_millis(300))).ok();
+        let mut buf = vec![0u8; 4096];
+        loop {
+            match m.read(&mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(_) => {}
+            }
+        }
+        m.set_read_timeout(None).ok();
+        let _ = m.write_all(b"{\"execute\":\"qmp_capabilities\"}\n");
+        let _ = m.flush();
+        // Drain the {"return": {}} ack.
+        m.set_read_timeout(Some(Duration::from_millis(300))).ok();
+        loop {
+            match m.read(&mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(_) => {}
+            }
+        }
+
+        // Send both X and Y absolute axes in a single input-send-event so QEMU
+        // coalesces them into one VirtIO EV_SYN report to the tablet device.
+        let cmd = format!(
+            concat!(
+                r#"{{"execute":"input-send-event","arguments":{{"events":["#,
+                r#"{{"type":"abs","data":{{"axis":"x","value":{x}}}}},"#,
+                r#"{{"type":"abs","data":{{"axis":"y","value":{y}}}}}"#,
+                r#"]}}}}"#,
+            ),
+            x = x,
+            y = y,
+        );
+        eprintln!("[test] QMP input-send-event abs x={x} y={y}");
+        let _ = m.write_all(cmd.as_bytes());
+        let _ = m.write_all(b"\n");
+        let _ = m.flush();
+
+        // Read response for diagnostics.
+        m.set_read_timeout(Some(Duration::from_millis(500))).ok();
+        let mut resp = vec![0u8; 1024];
+        match m.read(&mut resp) {
+            Ok(n) if n > 0 => eprintln!("[test] QMP response: {:?}", String::from_utf8_lossy(&resp[..n])),
+            Ok(_) => eprintln!("[test] QMP response: empty"),
+            Err(e) => eprintln!("[test] QMP read error: {e}"),
+        }
+        m.set_read_timeout(None).ok();
     }
 
     /// Block until any captured line contains `pattern`, or `timeout_secs`
