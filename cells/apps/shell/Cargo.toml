@@ -3,6 +3,12 @@ name = "app-shell"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+# shell_test: replaces the interactive REPL with a deterministic scenario harness.
+# Build with `cargo build --release -p app-shell --features shell_test` and
+# embed the binary in a shell-test kernel image.  Never enabled in production.
+shell_test = []
+
 [dependencies]
 ostd = { path = "../../../libs/ostd" }
 api = { path = "../../../libs/api" }

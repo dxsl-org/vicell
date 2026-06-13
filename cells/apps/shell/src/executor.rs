@@ -95,10 +95,10 @@ pub fn shell_stdin() -> &'static [u8] {
 
 /// All recognized shell built-in names, used by tab completion.
 pub const BUILTINS: &[&str] = &[
-    "alias", "blktest", "break", "cat", "clear", "continue", "echo", "env",
-    "exec", "exit", "export", "find", "free", "grep", "head", "help", "jobs",
-    "kill", "ls", "mkdir", "ps", "pwd", "read", "rm", "rmdir", "shutdown",
-    "sleep", "snapshot", "sort", "source", "tail", "test", "top", "unalias",
+    "alias", "bg", "blktest", "break", "cat", "clear", "continue", "echo", "env",
+    "exec", "exit", "export", "fg", "find", "free", "grep", "head", "help", "jobs",
+    "kill", "ls", "mkdir", "ps", "pwd", "read", "rm", "rmdir", "sed", "shutdown",
+    "sleep", "snapshot", "sort", "source", "tail", "tee", "test", "top", "unalias",
     "uniq", "unset", "uname", "uptime", "vappend", "vcat", "vwrite", "wc",
 ];
 
@@ -393,6 +393,24 @@ fn expand_token(s: &str) -> String {
     result
 }
 
+/// Parse and execute `line`, capturing all `shell_print` output into a `Vec<u8>`.
+///
+/// Used by the `shell_test` feature harness to assert on command output without
+/// requiring a real serial console.  The `SinkGuard` ensures the sink is restored
+/// even if the command panics or returns early.
+///
+/// Precondition: must be called from the single shell task (same `SingleTaskCell`
+/// invariant as `shell_print`).
+#[cfg(feature = "shell_test")]
+pub fn capture_line(line: &str, jobs: &mut Jobs) -> Vec<u8> {
+    let mut out: Vec<u8> = Vec::new();
+    let _guard = SinkGuard::new(OutputSink::Buffer(&mut out as *mut _));
+    let ast = crate::parser::parse(line);
+    execute(&ast, jobs);
+    drop(_guard);
+    out
+}
+
 /// Execute an `Ast` and return the last command's exit code.
 ///
 /// `stdin_data` is the bytes available on stdin for the first command in a pipeline.
@@ -402,6 +420,11 @@ pub fn execute(ast: &Ast, jobs: &mut Jobs) -> i32 {
         Ast::Simple(cmd) => exec_cmd(cmd, &[], jobs),
         Ast::Pipeline(cmds) => exec_pipeline(cmds, jobs),
         Ast::Background(cmd) => {
+            // Cooperative background: the shell is a single-task executor with no
+            // async spawn capability for built-ins. `cmd &` runs synchronously and
+            // is marked Done before control returns. True async background would
+            // require spawning the command as a separate Cell via SpawnCap — not
+            // in scope for G1. `fg`/`bg` built-ins report this limitation.
             let name = cmd.argv.first().map(String::as_str).unwrap_or("?");
             let jid = jobs.add(name);
             // Background job notification always goes to console, not the sink.
@@ -579,12 +602,21 @@ fn exec_cmd(cmd: &Cmd, _stdin: &[u8], jobs: &mut Jobs) -> i32 {
         _stdin
     };
 
-    // Detect stdout redirect for non-echo commands.
+    // Detect stdout/stderr redirect for non-echo commands.
+    //
+    // ViCell has one output channel (serial console). `2>file` is therefore
+    // semantically equivalent to `>file` — both capture `shell_print` output.
+    // When both `>` and `2>` are present, `>` takes precedence; `2>` is a
+    // documented no-op in that case (single-channel limitation).
     let stdout_redir = cmd.redirects.iter().find_map(|r| match r {
         Redirect::StdoutTo(path)     => Some((path.clone(), false)),
         Redirect::StdoutAppend(path) => Some((path.clone(), true)),
         _ => None,
-    });
+    }).or_else(|| cmd.redirects.iter().find_map(|r| match r {
+        // Fallback: StderrTo reuses the stdout-capture path (one-channel shell).
+        Redirect::StderrTo(path) => Some((path.clone(), false)),
+        _ => None,
+    }));
 
     // Wire the pipe-fed stdin so pipe-aware built-ins can read it.
     // SAFETY: effective_stdin is alive for the duration of dispatch_builtin.
@@ -664,6 +696,8 @@ fn dispatch_builtin(prog: &str, args: &[&str], jobs: &mut Jobs) -> i32 {
         "find"  => crate::cmd_fs::cmd_find(make_parts(args)),
         "uniq"  => crate::cmd_fs::cmd_uniq(make_parts(args)),
         "sort"  => crate::cmd_fs::cmd_sort(make_parts(args)),
+        "tee"   => crate::cmd_fs::cmd_tee(make_parts(args)),
+        "sed"   => crate::cmd_fs::cmd_sed(make_parts(args)),
         "mkdir" => crate::cmd_fs::cmd_mkdir(make_parts(args)),
         "rmdir" => crate::cmd_fs::cmd_rmdir(make_parts(args)),
         "rm"    => crate::cmd_fs::cmd_rm(make_parts(args)),
@@ -699,6 +733,12 @@ fn dispatch_builtin(prog: &str, args: &[&str], jobs: &mut Jobs) -> i32 {
         "exec"   => crate::commands::cmd_exec(make_parts(args)),
         // ── Jobs ────────────────────────────────────────────────────────
         "jobs" => { print_jobs(jobs); Ok(()) }
+        // fg/bg: ViCell background jobs run synchronously (cooperative scheduler,
+        // single-task shell). All &-jobs already completed before fg/bg is called.
+        "fg" | "bg" => {
+            shell_println("fg/bg: no job control — background jobs run synchronously in this shell");
+            Ok(())
+        }
         // ── Scripting ───────────────────────────────────────────────────
         // `.` is the POSIX short form of `source`.
         "source" | "." => cmd_source(args, jobs),

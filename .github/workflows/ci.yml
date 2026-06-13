@@ -405,6 +405,39 @@ jobs:
           print("PASS: cells/ contains zero unsafe blocks")
           PYEOF
 
+  shell-utils:
+    name: Shell Utilities Integration Test (Phase E)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-05-01
+          components: rust-src
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+          key: shell-utils
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q \
+            qemu-system-misc gcc-riscv64-unknown-elf libclang-dev
+
+      - name: Build shell-test kernel
+        run: |
+          chmod +x scripts/build-shell-test-ci.sh
+          bash scripts/build-shell-test-ci.sh
+
+      - name: Run shell utility integration tests
+        run: |
+          cargo test --manifest-path tests/integration/Cargo.toml \
+            --test shell-utils
+
   security:
     name: Security Scan
     runs-on: ubuntu-24.04

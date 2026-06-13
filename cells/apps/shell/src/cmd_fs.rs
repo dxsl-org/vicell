@@ -519,3 +519,138 @@ pub fn cmd_sort<'a>(mut args: core::str::SplitWhitespace<'a>) -> ViResult<()> {
     }
     Ok(())
 }
+
+// ─── tee ─────────────────────────────────────────────────────────────────────
+
+/// `tee [-a] <path>` — read stdin, write to both stdout sink and a VFS file.
+///
+/// `-a` appends to the file instead of overwriting. Data flows through the
+/// shell pipeline (via `shell_print`) AND is written to `path` via VFS IPC.
+pub fn cmd_tee<'a>(mut args: core::str::SplitWhitespace<'a>) -> ViResult<()> {
+    let mut append = false;
+    let path = loop {
+        match args.next() {
+            Some("-a") => append = true,
+            Some(p)    => break p,
+            None       => {
+                crate::executor::shell_println("Usage: tee [-a] <path>");
+                return Ok(());
+            }
+        }
+    };
+    let data = crate::executor::shell_stdin();
+    if data.is_empty() {
+        // No stdin and no pipeline data: nothing to tee.
+        return Ok(());
+    }
+    // Write to the current output sink (console or outer pipeline capture).
+    if let Ok(s) = core::str::from_utf8(data) {
+        crate::executor::shell_print(s);
+    }
+    // Also write the same data to the VFS file.
+    if !vfs_write_chunked(path, data, append) {
+        ostd::io::print("tee: cannot write '");
+        ostd::io::print(path);
+        ostd::io::println("'");
+    }
+    Ok(())
+}
+
+// ─── sed ─────────────────────────────────────────────────────────────────────
+
+/// `sed s/PAT/REP/[g] [file]` — substitute literal pattern with replacement.
+///
+/// Expression must start with `s/`. Without trailing `g`, replaces the first
+/// occurrence per line; with `g`, replaces all occurrences. No regex — literal
+/// string replacement only (matches the existing `grep` v1.0 contract).
+/// Reads from `shell_stdin()` when no file is given (pipeline-friendly).
+pub fn cmd_sed<'a>(mut args: core::str::SplitWhitespace<'a>) -> ViResult<()> {
+    // First arg: the s-expression.
+    let expr = match args.next() {
+        Some(e) => e,
+        None => {
+            crate::executor::shell_println("Usage: sed s/PAT/REP/[g] [file]");
+            return Ok(());
+        }
+    };
+    // Parse: must start with "s/" followed by three '/'-delimited fields.
+    // Accept 3 or 4 parts: s/pat/rep or s/pat/rep/[g].
+    let body = match expr.strip_prefix("s/") {
+        Some(b) => b,
+        None => {
+            crate::executor::shell_print("sed: expression must start with 's/': ");
+            crate::executor::shell_println(expr);
+            return Ok(());
+        }
+    };
+    // Split on '/' into at most 3 parts: [pat, rep, flags?].
+    let mut parts = body.splitn(3, '/');
+    let pat   = parts.next().unwrap_or("");
+    let rep   = parts.next().unwrap_or("");
+    let flags = parts.next().unwrap_or("");
+    let global = flags.contains('g');
+
+    // Optional second arg: file path; else use pipeline stdin.
+    let path = args.next().unwrap_or("");
+    let owned;
+    let data: &[u8] = if path.is_empty() {
+        let s = crate::executor::shell_stdin();
+        if s.is_empty() {
+            crate::executor::shell_println("Usage: sed s/PAT/REP/[g] [file]");
+            return Ok(());
+        }
+        s
+    } else {
+        owned = read_file_bytes(path).map_err(|_| {
+            ostd::io::print("sed: cannot open '");
+            ostd::io::print(path);
+            ostd::io::println("'");
+            ViError::NotFound
+        })?;
+        &owned
+    };
+
+    let text = core::str::from_utf8(data).unwrap_or("");
+    if pat.is_empty() {
+        // Empty pattern: pass through unchanged.
+        crate::executor::shell_print(text);
+        return Ok(());
+    }
+
+    for line in text.lines() {
+        let result = if global {
+            sed_replace_all(line, pat, rep)
+        } else {
+            sed_replace_first(line, pat, rep)
+        };
+        crate::executor::shell_println(&result);
+    }
+    Ok(())
+}
+
+/// Replace the first occurrence of `pat` in `s` with `rep`.
+fn sed_replace_first(s: &str, pat: &str, rep: &str) -> String {
+    match s.find(pat) {
+        Some(i) => {
+            let mut out = String::with_capacity(s.len() + rep.len());
+            out.push_str(&s[..i]);
+            out.push_str(rep);
+            out.push_str(&s[i + pat.len()..]);
+            out
+        }
+        None => String::from(s),
+    }
+}
+
+/// Replace all non-overlapping occurrences of `pat` in `s` with `rep`.
+fn sed_replace_all(s: &str, pat: &str, rep: &str) -> String {
+    let mut out = String::with_capacity(s.len() + rep.len());
+    let mut rest = s;
+    while let Some(i) = rest.find(pat) {
+        out.push_str(&rest[..i]);
+        out.push_str(rep);
+        rest = &rest[i + pat.len()..];
+    }
+    out.push_str(rest);
+    out
+}

@@ -227,3 +227,6 @@
 {"ts":"2026-06-13T22:29:46.225Z","hook":"haily-usage","pid":43924,"event":"PostToolUse","status":"skip","exit":0,"note":"throttled","durationMs":2}
 {"ts":"2026-06-13T22:29:49.399Z","hook":"haily-tracer","pid":43508,"status":"skip","exit":0,"note":"not-agent-or-no-type","durationMs":0}
 {"ts":"2026-06-13T22:29:49.556Z","hook":"haily-subagent","pid":39868,"status":"ok","exit":0,"agentType":"general-purpose","sectionCount":2,"durationMs":1}
+{"ts":"2026-06-13T22:30:14.360Z","hook":"haily-usage","pid":38732,"event":"PostToolUse","status":"skip","exit":0,"note":"throttled","durationMs":0}
+{"ts":"2026-06-13T22:30:22.091Z","hook":"haily-access","pid":41336,"status":"crash","exit":0,"error":"path should be a `path.relative()`d string, but got \"d:/ViCell/tests/integration/Cargo.toml\"","stack":"RangeError: path should be a `path.relative()`d string, but got \"d:/ViCell/tests/integration/Cargo.toml\" |     at throwError (C:\\Users\\Admin\\.claude\\hooks\\haily-guard\\vendor\\ignore.cjs:388:9) |     at checkPath (C:\\Users\\Admin\\.claude\\hooks\\haily-guard\\vendor\\ignore.cjs:407:12)"}
+{"ts":"2026-06-13T22:30:22.198Z","hook":"haily-usage","pid":40620,"event":"PostToolUse","status":"skip","exit":0,"note":"throttled","durationMs":1}

@@ -36,11 +36,20 @@ mod jobs;
 mod parser;
 mod shell;
 
+#[cfg(feature = "shell_test")]
+mod shell_test;
+
 use shell::ViShell;
 
 #[no_mangle]
 pub fn main() {
-    let _ = ostd::syscall::sys_log("DEBUG: Shell Started (Async Mode)\n");
-    let mut shell = ViShell::new();
-    ostd::executor::block_on(shell.run());
+    #[cfg(feature = "shell_test")]
+    shell_test::run();
+
+    #[cfg(not(feature = "shell_test"))]
+    {
+        let _ = ostd::syscall::sys_log("DEBUG: Shell Started (Async Mode)\n");
+        let mut shell = ViShell::new();
+        ostd::executor::block_on(shell.run());
+    }
 }
