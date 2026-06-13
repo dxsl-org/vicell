@@ -76,6 +76,8 @@ impl fmt::Write for DirectWriter {
             { let _ = crate::hal::sbi::console_putchar(c); }
             #[cfg(target_arch = "aarch64")]
             { crate::hal::uart_pl011::putchar(c); }
+            #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
+            { crate::hal::uart_16550::putchar(c); }
         }
         Ok(())
     }
@@ -161,33 +163,70 @@ pub fn poll_rhr() -> Option<u8> {
     }
 }
 
-/// Called from Trap Handler (IRQ 10)
+/// Called from the UART RX IRQ handler.
+///
+/// On RISC-V / AArch64: reads from the MMIO base stored in SERIAL.
+/// On x86_64: reads directly from COM1 port I/O (port 0x3F8).
+/// Handles CR→LF normalisation and pushes bytes into RX_BUFFER for the shell.
 #[no_mangle]
 pub extern "Rust" fn vi_handle_uart_irq() {
     if let Some(buf) = RX_BUFFER.lock().as_mut() {
-        let serial = SERIAL.lock();
-        unsafe {
-             let ptr = serial.base_addr as *mut u8;
-             // Check if data is ready (LSR bit 0)
-             if (ptr.add(LSR).read_volatile() & 1) != 0 {
-                 let c = ptr.add(0).read_volatile(); // RHR
-                 
-                 // Handle Enter (CR -> LF)
-                 let c = if c == b'\r' { b'\n' } else { c };
-                 
-                 // Basic Backspace handling
-                 if c == 0x7F || c == 0x08 {
-                     // In a real line discipline, we would modify a line buffer.
-                     // Here we just push it, assuming the shell handles it.
-                     // Or we can drop the last char?
-                     // Let's just push raw for now.
-                 }
-                 
-                 buf.push_back(c);
-                 
-                 // Optional: Echo back immediately (Half-duplex feeling)
-                 // serial.write_byte(c); 
-             }
+        // Drain the UART receive FIFO; stop when no more data is ready.
+        loop {
+            // Read LSR (offset 5) to check Data Ready (bit 0).
+            let (lsr, rhr_byte): (u8, Option<u8>) = {
+                #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
+                {
+                    // Port I/O path for x86.
+                    let lsr = unsafe {
+                        let v: u8;
+                        core::arch::asm!(
+                            "in al, dx",
+                            in("dx") (0x3F8u16 + LSR as u16),
+                            out("al") v,
+                            options(nomem, nostack)
+                        );
+                        v
+                    };
+                    let byte = if lsr & (_LSR_RX_READY as u8) != 0 {
+                        let c: u8;
+                        unsafe {
+                            core::arch::asm!(
+                                "in al, dx",
+                                in("dx") 0x3F8u16,
+                                out("al") c,
+                                options(nomem, nostack)
+                            );
+                        }
+                        Some(c)
+                    } else {
+                        None
+                    };
+                    (lsr, byte)
+                }
+                #[cfg(not(any(target_arch = "x86_64", target_arch = "x86")))]
+                {
+                    // MMIO path for RISC-V / AArch64.
+                    let serial = SERIAL.lock();
+                    let ptr = serial.base_addr as *mut u8;
+                    // SAFETY: MMIO region is identity-mapped and valid.
+                    let lsr_val = unsafe { ptr.add(LSR).read_volatile() };
+                    let byte = if lsr_val & (_LSR_RX_READY as u8) != 0 {
+                        Some(unsafe { ptr.add(_RHR).read_volatile() })
+                    } else {
+                        None
+                    };
+                    (lsr_val, byte)
+                }
+            };
+            let _ = lsr;
+            match rhr_byte {
+                None => break,
+                Some(c) => {
+                    let c = if c == b'\r' { b'\n' } else { c };
+                    buf.push_back(c);
+                }
+            }
         }
     }
 }

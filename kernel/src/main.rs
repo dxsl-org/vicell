@@ -260,6 +260,18 @@ pub extern "C" fn kmain(hartid: usize, dtb: usize) -> ! {
     // RV32 Nano / x86_64 bring-up: skip VirtIO probing (PCIe transport not yet ported).
     #[cfg(any(target_arch = "riscv64", target_arch = "aarch64"))]
     task::drivers::init();
+    // x86_64: load embedded kernel_fs.img into RAM so EarlyLoader can serve ELFs from it.
+    // VirtIO block device is not set up on q35 yet (no PCIe transport) — ramdisk handles it.
+    #[cfg(target_arch = "x86_64")]
+    {
+        task::drivers::ramdisk::init_driver();
+        // Wire COM1 RX IRQ → IDT vector 0x24 → shell stdin.
+        // Must run after init_timers() (which initialises the LAPIC + IOAPIC).
+        crate::hal::uart_16550::init_input_irq();
+        // Initialise the RX buffer that vi_handle_uart_irq() writes into.
+        task::drivers::uart::init_input();
+        log_info("x86_64: ramdisk + UART RX IRQ initialised");
+    }
 
     // Attempt warm boot from snapshot before any cell initialization.
     // RV32 Nano / x86_64 skip: no VirtIO block in bring-up.
@@ -284,8 +296,9 @@ pub extern "C" fn kmain(hartid: usize, dtb: usize) -> ! {
         Err(_) => puts("[loader] WARN: cell table not found — disk image may lack bootstrap section\n"),
     }
 
-    // RV32 Nano / x86_64: no FAT32 FS in bring-up.
-    #[cfg(any(target_arch = "riscv64", target_arch = "aarch64"))]
+    // RV32 Nano: no FAT32 FS in bring-up.
+    // x86_64 uses the ramdisk-backed embedded FS to serve cell ELFs via VIFS1.
+    #[cfg(any(target_arch = "riscv64", target_arch = "aarch64", target_arch = "x86_64"))]
     fs::init();
 
     // Phase 20: hot-migration state-transfer self-test.

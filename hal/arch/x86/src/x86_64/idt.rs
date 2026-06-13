@@ -4,6 +4,11 @@
 //! caller-saved registers and emits `iretq` (not `ret`) on return.
 //! Without this, a bare `extern "C"` handler would return with `ret`
 //! into the CPU's stacked interrupt frame, causing a triple-fault.
+//!
+//! Per-vector dispatch:
+//!   0x20 — LAPIC periodic timer → `vi_timer_tick()` (kernel scheduler tick)
+//!   0x24 — COM1 / IOAPIC IRQ 4 → `vi_handle_uart_irq()` (shell stdin)
+//!   0x0E — #PF (with error code) → `vi_handle_page_fault()`
 
 use core::arch::asm;
 
@@ -62,12 +67,35 @@ pub fn init() {
         // Vector 0x80: DPL=3 so user code can issue `int 0x80` (legacy, tolerated).
         (*idt_ptr).e[0x80] = IdtEntry::new(handler_addr, 3);
 
+        // Vector 0x20: LAPIC periodic timer → vi_timer_tick().
+        // The LAPIC is programmed to fire at vector 0x20 by apic::init_lapic_calibrated.
+        (*idt_ptr).e[0x20] = IdtEntry::new(x86_64_timer_handler as *const () as u64, 0);
+
+        // Vector 0x24: COM1 UART RX (IOAPIC IRQ 4, redirected to vector 0x24) → vi_handle_uart_irq().
+        (*idt_ptr).e[0x24] = IdtEntry::new(x86_64_uart_handler as *const () as u64, 0);
+
         let ptr = IdtPtr {
             limit: (core::mem::size_of::<Idt>()-1) as u16,
             base: core::ptr::addr_of!((*idt_ptr).e) as u64,
         };
         // SAFETY: ptr points to a valid, aligned IDT; lidt from Ring 0 is safe.
         asm!("lidt [{p}]", p = in(reg) &ptr, options(nomem, nostack));
+    }
+}
+
+/// Install a handler for an arbitrary IDT vector (Ring 0, no error code).
+///
+/// Used by `uart_16550::init_input_irq` to wire COM1 RX after IOAPIC redirect.
+/// Prerequisite: `init()` must have been called first.
+///
+/// # Safety
+/// `handler` must be a valid kernel function; caller ensures it is safe to call
+/// from interrupt context.
+pub unsafe fn install_vector(vec: u8, handler: u64) {
+    let idt_ptr = core::ptr::addr_of_mut!(IDT);
+    // SAFETY: IDT is already loaded; updating an entry is atomic at 64-bit alignment.
+    unsafe {
+        (*idt_ptr).e[vec as usize] = IdtEntry::new(handler, 0);
     }
 }
 
@@ -84,15 +112,41 @@ extern "x86-interrupt" fn x86_64_irq_handler(frame: InterruptFrame) {
     let _ = frame;
 }
 
-// Kernel-provided page-fault handler. Defined in `kernel::memory::paging`
-// with `#[no_mangle]`.  The HAL declares it here as an extern so the IDT
-// handler can call it without creating a crate dependency cycle.
-//
-// Contract: `va` = faulting virtual address (from CR2), `error_code` = CPU
-// error code pushed onto the exception stack. The implementation decides
-// whether to map a demand page or panic.
+// Kernel-provided hooks — defined in kernel::task / kernel::memory.
+// Declared here as externs to let the HAL call them without a crate cycle.
 extern "Rust" {
+    /// LAPIC periodic timer: increment tick counter + run scheduler.
+    /// Defined in `kernel::task` with `#[no_mangle]`.
+    fn vi_timer_tick();
+
+    /// UART RX IRQ: read byte from COM1 into the shared RX buffer.
+    /// Defined in `kernel::task::drivers::uart` with `#[no_mangle]`.
+    fn vi_handle_uart_irq();
+
+    /// #PF handler. Defined in `kernel::memory::paging` with `#[no_mangle]`.
     fn vi_handle_page_fault(va: usize, error_code: u64);
+}
+
+/// LAPIC periodic timer handler (vector 0x20).
+///
+/// Calls `vi_timer_tick()` (kernel scheduler tick), then ACKs the LAPIC.
+/// The LAPIC timer reloads automatically in periodic mode — no re-arm needed.
+#[no_mangle]
+extern "x86-interrupt" fn x86_64_timer_handler(_frame: InterruptFrame) {
+    // SAFETY: vi_timer_tick is #[no_mangle] in kernel/src/task.rs; safe to call
+    // from interrupt context (interrupts disabled by CPU on IRQ entry).
+    unsafe { vi_timer_tick(); }
+    super::apic::eoi();
+}
+
+/// COM1 UART RX handler (vector 0x24 / IOAPIC IRQ 4).
+///
+/// Drains the UART RHR into the kernel RX buffer, then ACKs the LAPIC.
+#[no_mangle]
+extern "x86-interrupt" fn x86_64_uart_handler(_frame: InterruptFrame) {
+    // SAFETY: vi_handle_uart_irq is #[no_mangle] in kernel/src/task/drivers/uart.rs.
+    unsafe { vi_handle_uart_irq(); }
+    super::apic::eoi();
 }
 
 /// Handler for exceptions WITH a CPU-pushed error code (#GP, #PF, etc.).

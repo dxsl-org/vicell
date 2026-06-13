@@ -60,6 +60,17 @@ impl viConsole {
             received = true;
         }
 
+        // 1d. Drain IRQ-filled RX buffer on x86_64.
+        // vi_handle_uart_irq() (fired by IOAPIC IRQ 4 / IDT vector 0x24) pushes
+        // COM1 bytes into uart::RX_BUFFER; we drain it here on every poll call
+        // so the blocking file_read(fd=0) loop eventually finds a byte.
+        #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
+        while self.buffer.len() < Self::MAX_BUFFERED {
+            let Some(c) = crate::task::drivers::uart::getchar() else { break };
+            self.buffer.push_back(c);
+            received = true;
+        }
+
         // NOTE: the SBI DBCN console-read fallback was removed — on this QEMU /
         // OpenSBI build it returns phantom bytes on every call, which (combined
         // with a spinning reader) grew the buffer without bound. The direct RHR
