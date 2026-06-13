@@ -144,8 +144,11 @@ impl ElfLoader {
 
                     // Zero the frame first (simplifies BSS and padding, and
                     // prevents info-leak from previous frame owner).
+                    // Use phys_to_virt: on RISC-V it's a no-op (identity map);
+                    // on x86_64 physical RAM is only accessible via HHDM_BASE+phys.
+                    let frame_virt = crate::memory::frame::phys_to_virt(buf_frame);
                     unsafe {
-                        core::ptr::write_bytes(buf_frame as *mut u8, 0, 4096);
+                        core::ptr::write_bytes(frame_virt as *mut u8, 0, 4096);
                     }
 
                     // Intersection of [page, page+4096) AND [vaddr, vaddr+file_size)
@@ -166,7 +169,7 @@ impl ElfLoader {
                         if src_end <= data.len() {
                             let src = &data[src_offset_in_file..src_end];
                             unsafe {
-                                let dst = (buf_frame as *mut u8).add(dst_offset);
+                                let dst = (frame_virt as *mut u8).add(dst_offset);
                                 core::ptr::copy_nonoverlapping(src.as_ptr(), dst, len);
                             }
                         }

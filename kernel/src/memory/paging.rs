@@ -350,6 +350,28 @@ pub unsafe fn activate_paging(root_phys: PhysAddr) {
     // SAFETY: caller guarantees root_phys is a valid, fully populated PML4 that
     // keeps the kernel alive after the CR3 switch.
     unsafe { hal::paging::write_cr3(root_phys as u64); }
+    // Debug: write 'P' to COM1 via port I/O immediately after CR3 switch.
+    // If this appears in serial output, the CR3 switch succeeded.
+    // SAFETY: port I/O to COM1 (0x3F8) does not affect memory safety.
+    unsafe {
+        let _: () = {
+            let v: u8;
+            // Wait for TX holding register empty (LSR bit 5), then send 'P'.
+            core::arch::asm!(
+                "99: in al, dx",
+                "test al, 0x20",
+                "jz 99b",
+                "mov dx, {thr}",
+                "mov al, 0x50",
+                "out dx, al",
+                thr = const 0x3F8u16,
+                in("dx") 0x3FDu16,
+                out("al") v,
+                options(nomem, nostack)
+            );
+            v;
+        };
+    }
     log::info!("[kernel] paging activated");
 }
 

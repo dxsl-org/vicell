@@ -33,8 +33,20 @@ fn main() {
     fs::create_dir_all(&embedded_out).expect("create embedded OUT_DIR");
 
     // Use arch-specific embedded directory when available, fall back to default.
+    // EMBEDDED_OVERRIDE lets CI test-hooks builds point at a different directory
+    // (e.g. src/embedded-test-hooks/) without touching committed source files.
     let arch_embedded = PathBuf::from(format!("src/embedded-{}", target_arch));
-    let embedded_src = if arch_embedded.exists() {
+    println!("cargo:rerun-if-env-changed=EMBEDDED_OVERRIDE");
+    let embedded_src = if let Ok(ov) = std::env::var("EMBEDDED_OVERRIDE") {
+        let p = PathBuf::from(&ov);
+        if p.exists() {
+            p
+        } else if arch_embedded.exists() {
+            arch_embedded
+        } else {
+            PathBuf::from("src/embedded")
+        }
+    } else if arch_embedded.exists() {
         arch_embedded
     } else {
         PathBuf::from("src/embedded")

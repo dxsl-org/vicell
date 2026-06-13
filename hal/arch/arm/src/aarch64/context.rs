@@ -6,25 +6,32 @@ use core::arch::global_asm;
 ///
 /// Stores the callee-saved registers (x19..x30) plus the stack pointer and
 /// system registers that must survive a context switch in EL1.
+///
+/// `sp_el0` is the user-space stack pointer.  AArch64 banks SP_EL0 separately
+/// from SP_EL1, but the CPU does NOT save/restore it on exception entry/exit.
+/// Without explicit save/restore here every `eret` from EL1→EL0 would use the
+/// last *other* task's user SP — causing the wrong user stack and eventual guard
+/// page faults.
 #[derive(Debug, Clone, Copy, Default)]
 #[repr(C)]
 pub struct CpuContext {
     // Callee-saved per AArch64 ABI.
-    pub x19: u64,
-    pub x20: u64,
-    pub x21: u64,
-    pub x22: u64,
-    pub x23: u64,
-    pub x24: u64,
-    pub x25: u64,
-    pub x26: u64,
-    pub x27: u64,
-    pub x28: u64,
-    pub x29: u64, // frame pointer
-    pub x30: u64, // link register (return address)
-    pub sp:  u64, // stack pointer
-    pub elr_el1:  u64,
-    pub spsr_el1: u64,
+    pub x19: u64,      // offset 0
+    pub x20: u64,      // offset 8
+    pub x21: u64,      // offset 16
+    pub x22: u64,      // offset 24
+    pub x23: u64,      // offset 32
+    pub x24: u64,      // offset 40
+    pub x25: u64,      // offset 48
+    pub x26: u64,      // offset 56
+    pub x27: u64,      // offset 64
+    pub x28: u64,      // offset 72
+    pub x29: u64,      // offset 80  — frame pointer
+    pub x30: u64,      // offset 88  — link register (return address)
+    pub sp:  u64,      // offset 96  — EL1 kernel stack pointer
+    pub elr_el1:  u64, // offset 104
+    pub spsr_el1: u64, // offset 112
+    pub sp_el0: u64,   // offset 120 — EL0 user-space stack pointer (banked, not auto-saved)
 }
 
 impl CpuContext {
@@ -69,6 +76,11 @@ __switch:
     mrs  x9,  elr_el1
     mrs  x10, spsr_el1
     stp  x9,  x10, [x0, #104]
+    // SP_EL0 is banked and NOT saved by the CPU on exception entry.
+    // Save it explicitly so each task's user-space stack pointer survives
+    // across context switches and every eret returns to the correct user SP.
+    mrs  x9,  sp_el0
+    str  x9,       [x0, #120]
 
     // Restore new context.
     ldp  x19, x20, [x1, #0]
@@ -82,6 +94,8 @@ __switch:
     ldp  x9,  x10, [x1, #104]
     msr  elr_el1,  x9
     msr  spsr_el1, x10
+    ldr  x9,       [x1, #120]
+    msr  sp_el0,   x9
 
     ret
     "#

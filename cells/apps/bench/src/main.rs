@@ -29,9 +29,10 @@ const TARGET_IPC_NS:         u64 =  50_000; //   50 µs
 const TARGET_SYSCALL_NS:     u64 =  40_000; //   40 µs (QEMU TCG; real-HW target: 10 µs)
 const TARGET_FOOTPRINT_BYTES: u64 = 10 * 1024 * 1024; // 10 MB
 
-/// Path this binary is spawned from (used to re-spawn itself in load/probe roles).
-/// Populated when the bench cell is embedded into `/bin` (plan phase-05).
-const SELF_PATH: &str = "/bin/bench";
+/// Path for probe/load child cells.  A separate binary (bench-probe) is used
+/// so both orchestrator and children can coexist in the SAS page table without
+/// VA collision (bench @ 0x18000000, bench-probe @ 0x19000000).
+const SELF_PATH: &str = "/bin/bench-probe";
 /// Number of background load cells for RT-under-contention measurement.
 const LOAD_CELLS: usize = 3;
 

@@ -12,11 +12,6 @@ use virtio_drivers::{
     transport::{DeviceType, Transport},
 };
 
-/// Same MMIO base and stride as VirtIO block (QEMU virt machine).
-const VIRTIO0: usize = 0x10001000;
-const VIRTIO_MMIO_INTERVAL: usize = 0x1000;
-const VIRTIO_MAX_DEVICES: usize = 8;
-
 /// RX/TX virtqueue size (frames). Power of two, ≤ the device's advertised
 /// `max_queue_size` (QEMU reports 1024).
 const NET_QUEUE_SIZE: usize = 16;
@@ -37,23 +32,23 @@ unsafe impl Sync for SafeVirtIONet {}
 static NET_DEVICE: Spinlock<Option<SafeVirtIONet>> = Spinlock::new(None);
 static NET_IRQ:    Spinlock<u32>                   = Spinlock::new(0);
 
-/// Probe the MMIO range for a VirtIO NIC and initialise it.
+/// Probe all VirtIO MMIO slots for a NIC and initialise it.
 ///
-/// Should be called once during kernel boot (`drivers::init()`).
+/// Uses `virtio_slots()` for platform-correct slot enumeration (covers all
+/// 32 AArch64 slots at 0x0a000000 and RISC-V DTB-confirmed slots).
+/// Must be called once during kernel boot (`drivers::init()`).
 pub fn init_driver() {
-    for i in 0..VIRTIO_MAX_DEVICES {
-        let addr = VIRTIO0 + i * VIRTIO_MMIO_INTERVAL;
-        // SAFETY: addr is a valid QEMU virt MMIO slot (identity-mapped by init_kernel_paging).
+    use crate::task::drivers::virtio_common::virtio_slots;
+    for slot in virtio_slots() {
+        // SAFETY: slot.base is an identity-mapped VirtIO MMIO address.
         let header = unsafe {
-            core::ptr::NonNull::new_unchecked(addr as *mut VirtIOHeader)
+            core::ptr::NonNull::new_unchecked(slot.base as *mut VirtIOHeader)
         };
-        // SAFETY: same invariant as header; MmioTransport::new validates magic/version.
+        // SAFETY: MmioTransport::new validates magic/version before use.
         let Ok(transport) = (unsafe { MmioTransport::new(header) }) else { continue };
         if transport.device_type() != DeviceType::Network {
-            // Dropping MmioTransport resets the device via set_status(0). This
-            // probe runs after the block driver is initialised, so resetting a
-            // foreign slot (e.g. the block device) would corrupt it. Forget the
-            // transport to skip the Drop, matching the GPU probe's approach.
+            // MmioTransport::drop() resets the device via set_status(0). Forget
+            // the transport to avoid resetting a slot owned by another driver.
             core::mem::forget(transport);
             continue;
         }
@@ -61,12 +56,12 @@ pub fn init_driver() {
         match VirtIONet::<VirtioHal, MmioTransport, NET_QUEUE_SIZE>::new(transport, RX_BUFFER_LEN) {
             Ok(net) => {
                 *NET_DEVICE.lock() = Some(SafeVirtIONet(net));
-                *NET_IRQ.lock() = (i as u32) + 1;
-                log::info!("[virtio_net] NIC found at MMIO slot {}, IRQ {}", i, i + 1);
+                *NET_IRQ.lock() = slot.irq;
+                log::info!("[virtio_net] NIC found at {:#x} irq={}", slot.base, slot.irq);
                 return;
             }
             Err(e) => {
-                log::error!("[virtio_net] VirtIONet::new failed: {:?}", e);
+                log::error!("[virtio_net] VirtIONet::new failed at {:#x}: {:?}", slot.base, e);
             }
         }
     }

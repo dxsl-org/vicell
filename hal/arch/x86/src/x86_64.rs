@@ -49,16 +49,74 @@ pub mod arch {
     }
 }
 
-/// Post-paging timer init: HPET enable + calibrated LAPIC periodic timer.
+/// Post-paging timer init: LAPIC enable + HPET/PIT calibration.
 ///
-/// Must be called AFTER init_kernel_paging so 0xFED0_0000 (HPET) and
-/// 0xFEE0_0000 (LAPIC) are identity-mapped in the working PML4.
+/// Must be called AFTER init_kernel_paging_x86, which identity-maps:
+///   0xFEC0_0000 (IOAPIC), 0xFED0_0000 (HPET), 0xFEE0_0000 (LAPIC).
+///
+/// Resets the APIC HHDM_BASE to 0 so lapic_base() == 0xFEE0_0000 (identity).
+/// Limine does not include MMIO in its HHDM for small RAM machines, so the
+/// HHDM-offset LAPIC address would fault; identity-map is always correct.
 #[cfg(target_arch = "x86_64")]
 pub fn init_timers() {
-    // SAFETY: 0xFED0_0000 is identity-mapped by init_kernel_paging (MMIO block).
+    // Switch LAPIC/IOAPIC accesses to the identity-mapped PAs we set up in our PML4.
+    apic::set_hhdm_base(0);
+
+    // Enable LAPIC (SVR) and set an initial periodic timer config.
+    apic::init_lapic();
+    uart_16550::putchar(b'A'); // LAPIC enabled
+
+    // Init HPET. If hardware absent, HPET_PERIOD_FS stays 0 and calibrate_lapic
+    // falls back to the 8254 PIT path automatically.
+    // SAFETY: 0xFED0_0000 is identity-mapped by init_kernel_paging_x86.
     unsafe { hpet::init(0xFED0_0000); }
+    uart_16550::putchar(b'H'); // after HPET init (H=HPET attempted)
+
     let ticks_per_ms = hpet::calibrate_lapic();
+    uart_16550::putchar(b'C'); // calibration done
+    // '0'=zero (timer disabled!), '1'=ok.
+    uart_16550::putchar(if ticks_per_ms == 0 { b'0' } else { b'1' });
+    // 'O'=overflow (>u32::MAX/10 → count wraps to tiny value → ISR storm), 'o'=ok.
+    uart_16550::putchar(if ticks_per_ms > (u32::MAX as u64 / 10) { b'O' } else { b'o' });
+
     apic::init_lapic_calibrated(ticks_per_ms);
+
+    // Read back LVT_TIMER and initial count to verify LAPIC is armed.
+    // 'K'=unmasked+periodic, 'M'=masked, '?'=unexpected.
+    let lvt = apic::read_lvt_timer();
+    let init_cnt = apic::read_initial_count();
+    let lvt_masked = (lvt >> 16) & 1 != 0;        // bit 16 = mask
+    let lvt_mode   = (lvt >> 17) & 0x3;            // bits 18:17 = timer mode
+    uart_16550::putchar(if lvt_masked { b'M' } else if lvt_mode == 1 { b'K' } else { b'?' });
+    // Print initial count as a range probe:
+    // '!'=0 (stopped), 'l'=<10000, 's'=<100000, 'n'=<1000000, 'b'=>=1000000
+    uart_16550::putchar(match init_cnt {
+        0             => b'!',
+        1..=9_999     => b'l',
+        10_000..=99_999 => b's',
+        100_000..=999_999 => b'n',
+        _ => b'b',
+    });
+
+    // Check IA32_APIC_BASE MSR for x2APIC mode.
+    // 'x' = xAPIC (MMIO works) / 'X' = x2APIC active (MMIO is DISABLED — all lw() calls lost).
+    uart_16550::putchar(if apic::check_x2apic() { b'X' } else { b'x' });
+
+    // Verify the timer fires from ring-0 before entering user mode.
+    // Enable interrupts + halt twice.  'V' probes from x86_64_timer_handler appear
+    // before '~' if the LAPIC is delivering correctly from ring-0.
+    // SAFETY: sti/hlt/cli are Ring-0 instructions; no memory side effects.
+    for _ in 0..2u8 {
+        unsafe {
+            core::arch::asm!(
+                "sti",
+                "hlt",   // sleep until next interrupt (LAPIC timer or other)
+                "cli",
+                options(nomem, nostack)
+            );
+        }
+        uart_16550::putchar(b'~');  // '~' = returned from this hlt iteration
+    }
 }
 
 /// x86_64 architecture implementation.

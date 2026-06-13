@@ -18,7 +18,7 @@ use ostd::syscall::{sys_lookup_service, sys_recv, sys_send, SyscallResult};
 use types::ViError;
 
 declare_manifest!(block_io = false, network = true, spawn = false, gpio = true, uart = false);
-api::declare_syscalls![Send, Recv, Log, LookupService, Heartbeat];
+api::declare_syscalls![Send, Recv, Log, LookupService, Heartbeat, RequestMmio];
 
 const SENSOR_PIN:   u8     = 2;
 const ACTUATOR_PIN: u8     = 3;

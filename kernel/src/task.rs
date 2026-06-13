@@ -57,7 +57,7 @@ static mut BOOT_CONTEXT: crate::hal::arch::Context = crate::hal::arch::Context {
 };
 #[cfg(target_arch = "x86_64")]
 static mut BOOT_CONTEXT: crate::hal::arch::Context = crate::hal::arch::Context {
-    r15: 0, r14: 0, r13: 0, r12: 0, rbx: 0, rbp: 0, sp: 0, rip: 0,
+    r15: 0, r14: 0, r13: 0, r12: 0, rbx: 0, rbp: 0, sp: 0, rip: 0, kernel_trap_sp: 0,
 };
 #[cfg(target_arch = "arm")]
 static mut BOOT_CONTEXT: crate::hal::arch::Context = crate::hal::arch::Context {
@@ -260,6 +260,14 @@ pub fn terminate_current_cell_on_fault(scause: usize, sepc: usize, stval: usize)
 
 /// Core scheduling logic: picks next task and performs switch OUTSIDE of the lock.
 pub fn yield_cpu() {
+    // x86_64: disable interrupts for the entire scheduler critical section.
+    // Without this, the LAPIC timer fires mid-lock and causes a nested
+    // yield_cpu call that deadlocks on the same spinlock (IRQ-in-lock deadlock).
+    // RISC-V/AArch64 automatically clear the interrupt-enable bit on trap entry,
+    // so they don't have this problem when called from vi_timer_tick.
+    #[cfg(target_arch = "x86_64")]
+    unsafe { core::arch::asm!("cli", options(nomem, nostack)); }
+
     // Reap zombies already switched away from. Take them under the lock (cheap
     // pointer moves), then drop OUTSIDE it so Stack::drop's frame-free + unmap
     // (FRAME_ALLOCATOR / KERNEL_ROOT) never run while SCHEDULER is held. This is
@@ -295,17 +303,22 @@ pub fn yield_cpu() {
         None
     };
 
+    #[cfg(target_arch = "x86_64")]
+    if switch_info.is_none() {
+        unsafe {
+            // No switch: re-enable interrupts before returning to the idle loop.
+            core::arch::asm!("sti", options(nomem, nostack));
+        }
+    }
+
     if let Some((curr, next)) = switch_info {
         unsafe {
-            // use crate::arch::context::Context;
-
             let final_curr = if curr.is_null() {
                 &raw mut BOOT_CONTEXT as *mut _
             } else {
                 curr
             };
 
-            // Handle null next as switch to BOOT_CONTEXT (Idle)
             let final_next = if next.is_null() {
                 &raw const BOOT_CONTEXT as *const _
             } else {
@@ -313,23 +326,26 @@ pub fn yield_cpu() {
             };
 
             if !next.is_null() {
-                // Set sscratch / TPIDR_EL1 for next task's kernel stack.
+                // Set TSS.rsp0 / KERNEL_GS_BASE for the next task's syscall path.
+                // On x86_64 use kernel_trap_sp (= kstack_top - TRAP_FRAME_SIZE, fixed
+                // at spawn) so CPU_LOCAL.kernel_rsp never drifts to the deep
+                // cooperative-switch RSP saved inside a blocked yield_cpu frame.
                 let next_ref = &*next;
+                #[cfg(not(target_arch = "x86_64"))]
                 crate::hal::arch::set_kernel_stack(next_ref.sp as usize);
-            }
-            if next.is_null() {
-                // log::info!("yield_cpu: Switching to BOOT_CONTEXT");
+                #[cfg(target_arch = "x86_64")]
+                crate::hal::arch::set_kernel_stack(next_ref.kernel_trap_sp as usize);
             }
 
             // switch(current, next)
             crate::hal::arch::Context::switch(final_curr, final_next);
 
-            // if next.is_null() {
-            //      log::info!("yield_cpu: Resumed execution (BOOT_CONTEXT)");
-            // }
-
-            // NOTE: Code sau Context::switch sẽ KHÔNG chạy vì nó có noreturn!
-            // Khi task được switch về, nó sẽ tiếp tục từ nơi nó đã yield.
+            // Execution resumes here when this context is switched BACK to.
+            // Re-enable interrupts: the cli above masked IRQs for the lock section;
+            // iretq (ring-3 entry) will have re-enabled them on the other CPU path,
+            // but on the resume path here we must restore IF explicitly.
+            #[cfg(target_arch = "x86_64")]
+            core::arch::asm!("sti", options(nomem, nostack));
         }
     }
 }
@@ -466,7 +482,12 @@ pub fn spawn_from_mem(
                 task.context.sp_el0 = user_stack_top as u64;
             }
             #[cfg(target_arch = "x86_64")]
-            { task.context.rip = __trap_exit as *const () as u64; }
+            { task.context.rip = __trap_exit as *const () as u64;
+              // kernel_trap_sp = fixed syscall-entry RSP; never changes after spawn.
+              // yield_cpu uses this (not context.sp) for set_kernel_stack so that
+              // CPU_LOCAL.kernel_rsp stays at the top of a fresh syscall frame even
+              // after the task has blocked and context.sp has moved deeper.
+              task.context.kernel_trap_sp = tf_ptr as u64; }
 
             info!(
                 "Spawned ELF task '{}' (ID {}) from memory at entry 0x{:X}",

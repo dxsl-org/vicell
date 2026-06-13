@@ -32,7 +32,7 @@ SECTIONS
         __bss_end = .;
     }
 
-    .vicell_manifest : ALIGN(4096) {
+    __ViCell_manifest : ALIGN(4096) {
         KEEP(*(__ViCell_manifest))
     }
 }

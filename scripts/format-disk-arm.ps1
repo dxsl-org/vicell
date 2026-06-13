@@ -33,6 +33,7 @@ $buildArgs = @(
     "-p", "service-config",
     "-p", "service-net",
     "-p", "app-robot-demo",
+    "-p", "periph-demo",
     "-p", "sensor-demo",
     "-p", "spi-demo"
 )
@@ -81,8 +82,9 @@ $cells = @(
     @{ Bin = "service-config";    Dst = "config"      },
     @{ Bin = "service-net";       Dst = "net"         },
     @{ Bin = "app-robot-demo";    Dst = "robot-demo"   },
-    @{ Bin = "sensor-demo";       Dst = "sensor-demo" },
-    @{ Bin = "spi-demo";          Dst = "spi-demo"    },
+    @{ Bin = "periph-demo";       Dst = "periph-demo"  },
+    @{ Bin = "sensor-demo";       Dst = "sensor-demo"  },
+    @{ Bin = "spi-demo";          Dst = "spi-demo"     },
     @{ Bin = "service-input";     Dst = "input"       },
     @{ Bin = "service-compositor";Dst = "compositor"  }
 )

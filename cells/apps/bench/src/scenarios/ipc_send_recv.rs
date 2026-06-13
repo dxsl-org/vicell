@@ -8,7 +8,9 @@
 use api::benchmark::ViBenchmark;
 use ostd::syscall::{sys_send, sys_recv, sys_set_spawn_args, sys_spawn_pinned, SyscallResult};
 
-const SELF_PATH: &str = "/bin/bench";
+// Use bench-probe (VA 0x19000000) so the echo peer doesn't collide with the
+// orchestrator's pages (VA 0x18000000) in the shared SAS page table.
+const SELF_PATH: &str = "/bin/bench-probe";
 
 pub struct IpcSendRecvBench {
     echo_tid: usize,

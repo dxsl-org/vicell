@@ -1,11 +1,11 @@
-# ViOS Architecture: Networking Stack
+# ViCell Architecture: Networking Stack
 **Version**: 0.3 (Zero-Copy User-space Stack)
 **Status**: Definitive
 
 ---
 
 ## 1. Triết lý: User-space Stack trong SAS
-Trong ViOS, Network Stack không nằm trong nhân (Kernel) mà là một **Service Cell** (`service-net.o`) chạy trực tiếp trong Single Address Space (SAS).
+Trong ViCell, Network Stack không nằm trong nhân (Kernel) mà là một **Service Cell** (`service-net.o`) chạy trực tiếp trong Single Address Space (SAS).
 
 * **Hiệu năng**: Loại bỏ chi phí chuyển đổi ngữ cảnh (Context Switch) giữa User-space và Kernel-space của OS truyền thống.
 * **Thư viện**: Sử dụng **smoltcp** (Native Rust, `no_std`) — ngăn xếp TCP/IP hướng sự kiện, không cần cấp phát bộ nhớ động (Heap-less).

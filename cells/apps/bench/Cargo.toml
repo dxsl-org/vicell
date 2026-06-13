@@ -11,3 +11,7 @@ api  = { path = "../../../libs/api" }
 [[bin]]
 name = "bench"
 path = "src/main.rs"
+
+[[bin]]
+name = "bench-probe"
+path = "src/bench-probe.rs"

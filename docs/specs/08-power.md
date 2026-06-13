@@ -1,11 +1,11 @@
-# ViOS Architecture: Power Management
+# ViCell Architecture: Power Management
 **Version**: 0.3 (Energy Proportionality & Pointer Swizzling)
 **Status**: Definitive
 
 ---
 
 ## 1. CPU Power Governance
-ViOS không sử dụng "chu kỳ chờ" (Busy-wait). Mọi giây CPU chạy đều phải có mục đích.
+ViCell không sử dụng "chu kỳ chờ" (Busy-wait). Mọi giây CPU chạy đều phải có mục đích.
 
 ### Tickless Idle (Ngủ thông minh)
 1. **Dự báo**: Scheduler kiểm tra thời điểm tác vụ tiếp theo cần chạy.
@@ -41,7 +41,7 @@ Khi Hibernate, hệ thống không thể chỉ "dump" RAM ra đĩa vì khi khở
 **Reflation (Bung)**: Khi Resume, thực hiện The Great Re-linking. Linker vá lại các địa chỉ tương đối thành địa chỉ tuyệt đối mới dựa trên vị trí thực tế của các Cell vừa được nạp lại.
 
 ## 4. Tối ưu cho Robot Nano (RV32)
-Vì các thiết bị RV32 thường không có RAM dự phòng lớn, ViOS áp dụng chính sách Aggressive Suspend:
+Vì các thiết bị RV32 thường không có RAM dự phòng lớn, ViCell áp dụng chính sách Aggressive Suspend:
 
 **Immediate Sleep**: Ngay khi không có tác vụ nào trong RunQueue, CPU vào trạng thái nghỉ ngay lập tức.
 

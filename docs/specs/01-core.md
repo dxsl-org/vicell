@@ -1,14 +1,14 @@
-# ViOS Architecture: Core System
+# ViCell Architecture: Core System
 **Version**: 0.3 (Cellular SAS - Enhanced Integrity)
 **Status**: Definitive
 
 ---
 
 ## 1. System Philosophy
-ViOS dịch chuyển từ cách ly bằng phần cứng sang **Language-Based Isolation (LBI)** để triệt tiêu chi phí IPC.
+ViCell dịch chuyển từ cách ly bằng phần cứng sang **Language-Based Isolation (LBI)** để triệt tiêu chi phí IPC.
 
 ### Key Differentiators
-| Feature | Traditional OS | **ViOS Cellular** |
+| Feature | Traditional OS | **ViCell Cellular** |
 | :--- | :--- | :--- |
 | **Isolation** | Hardware MMU (Slow) | **Compiler/Language (Zero-Cost)** |
 | **IPC** | Message Passing | **Direct Function Call** |
@@ -29,12 +29,12 @@ Kernel tối giản, tập trung vào việc "xây dựng" hệ thống lúc run
 * **Tốc độ**: O(1) lookup, đảm bảo nạp hàng trăm Cell trong < 500ms.
 
 ### Dependency Management (DAG & Weak Refs)
-Để tránh Deadlock khi Unload, ViOS phân loại liên kết:
+Để tránh Deadlock khi Unload, ViCell phân loại liên kết:
 1.  **Strong Ref**: Cell A không thể sống thiếu Cell B. `ref_count` tăng.
 2.  **Weak Ref**: Liên kết tạm thời (như Logging). Không tăng `ref_count`, cho phép Unload Cell đích và trả về lỗi `SymbolNotFound` khi gọi.
 
 ## 4. The Gatekeeper & Security
-1.  **Signature**: Mọi Cell phải có chữ ký Ed25519 từ ViOS Lab.
+1.  **Signature**: Mọi Cell phải có chữ ký Ed25519 từ ViCell Lab.
 2.  **Capabilities (Tokens)**: Sử dụng Zero-Sized Types (ZST). 
     * `fn reboot(_: RebootCap)`.
     * Token chỉ được cấp qua hàm `init()` của Cell và không thể copy trái phép.

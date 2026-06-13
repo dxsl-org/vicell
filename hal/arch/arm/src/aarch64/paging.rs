@@ -95,7 +95,9 @@ impl PageTableTrait for PageTable {
         let l3: &PageTable = unsafe { &*((l2_entry & !0xFFF) as *const PageTable) };
         let l3_entry = l3.entries[l3_idx];
         if l3_entry & PTE_VALID == 0 { return None; }
-        Some(((l3_entry & !0xFFF) as PhysAddr) | (virt & 0xFFF))
+        // AArch64 L3 output address is bits [47:12]; bits [63:52] hold upper
+        // attributes (UXN=54, PXN=53, Contiguous=52) that must be stripped.
+        Some(((l3_entry & 0x0000_FFFF_FFFF_F000) as PhysAddr) | (virt & 0xFFF))
     }
 
     unsafe fn activate(&self) {

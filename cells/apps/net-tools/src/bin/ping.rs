@@ -2,6 +2,8 @@
 #![no_main]
 extern crate ostd;
 
+api::declare_syscalls![Log];
+
 /// ping <host> — ICMP echo (stub; requires network + ICMP socket from Phase 15 data path).
 #[no_mangle]
 pub fn main() {

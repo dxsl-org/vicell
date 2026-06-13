@@ -1,11 +1,11 @@
-# ViOS Architecture: Graphics & Input
+# ViCell Architecture: Graphics & Input
 **Version**: 0.3 (Zero-Cost Compositing & Low-Latency Input)
 **Status**: Definitive
 
 ---
 
 ## 1. Triết lý Đồ họa: Shared Framebuffer
-Trong ViOS SAS, chúng ta loại bỏ hoàn toàn việc copy buffer giữa Client và Server (như X11/Wayland).
+Trong ViCell SAS, chúng ta loại bỏ hoàn toàn việc copy buffer giữa Client và Server (như X11/Wayland).
 
 ### Quy trình hiển thị Zero-Copy
 1. **Compositor Cell**: Nắm giữ con trỏ đến **Physical Framebuffer** do phần cứng cung cấp.
@@ -26,7 +26,7 @@ Trong ViOS SAS, chúng ta loại bỏ hoàn toàn việc copy buffer giữa Clie
 
 
 ## 3. Chế độ vận hành (Profiles)
-ViOS cho phép cấu hình linh hoạt tùy theo mục đích sử dụng:
+ViCell cho phép cấu hình linh hoạt tùy theo mục đích sử dụng:
 
 | Mode | Target | Đồ họa |
 | :--- | :--- | :--- |
@@ -34,10 +34,18 @@ ViOS cho phép cấu hình linh hoạt tùy theo mục đích sử dụng:
 | **Mode 2: Kiosk** | Industrial Panel / ATM | Full-screen cho một App duy nhất. Tối ưu Direct Scanout. |
 | **Mode 3: Desktop** | Workstation | Hỗ trợ nhiều cửa sổ, Taskbar, Start Menu thông qua Slint. |
 
-## 4. UI Toolkit: Slint Standard
-Để tránh phân mảnh và tối ưu tài nguyên, ViOS chuẩn hóa trên **Slint**.
-* **Native Integration**: Slint được tích hợp sâu vào `ostd`, hỗ trợ cả phần cứng không có tăng tốc GPU (Software Rendering).
-* **Resource Friendly**: Phù hợp cho cả các bảng điều khiển robot nhỏ chạy RV64 nhưng RAM hạn chế.
+## 4. UI Toolkit: ViUI (Custom, ViCell-native)
+
+> **Quyết định 2026-06-07**: Slint bị loại do GPL-3 viral / $1+/device commercial license không phù hợp cho một OS platform. iced bị loại do `iced_runtime` cần std. egui bị loại do tessellation pipeline không phù hợp với software renderer. ViUI được xây dựng từ đầu. Xem chi tiết: [specs/14-viui.md](14-viui.md).
+
+ViUI là UI toolkit `no_std`-native của ViCell với:
+* **Dual-facade API**: Immediate mode (egui-compatible) + Elm architecture (iced-compatible) — developer quen egui hoặc iced không cần học API mới.
+* **Direct pixel rendering**: widget → `ViCanvas` → `DrawTarget` → `&mut [u8]` — không có tessellation triangle/path intermediate. Nhanh hơn egui ~3-5x cho software render.
+* **Event-driven**: 0 CPU khi idle (retained mode + DamageNotify, không phải game loop).
+* **Text**: Bitmap 8×8 cho CLI mode + `GlyphAtlas` + fontdue cho scalable Unicode text.
+* **MIT license**: không viral, không per-device fee — safe cho toàn bộ ViCell ecosystem.
+
+Mode 3 (Desktop) dùng ViUI thay vì Slint.
 
 ## 5. Bảo mật đồ họa trong SAS
 Vì các Cell dùng chung bộ nhớ, chúng ta sử dụng **Tokens (Capabilities)** để bảo vệ:

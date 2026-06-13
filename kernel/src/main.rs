@@ -212,6 +212,24 @@ pub extern "C" fn kmain(hartid: usize, dtb: usize) -> ! {
         // (preserving kernel text/data/HHDM) and identity-mapped MMIO, so the kernel
         // continues executing after this CR3 switch without a triple-fault.
         unsafe { memory::paging::activate_paging(root_table_phys); }
+        // Immediate port-I/O probe after activate_paging — if 'Q' appears on serial,
+        // the CR3 switch succeeded and execution reached kmain.  Uses direct out instruction
+        // (no Rust function call) so it cannot be affected by any post-switch state issue.
+        // SAFETY: port I/O to COM1 (0x3F8) is always valid from ring-0.
+        unsafe {
+            core::arch::asm!(
+                "99: in al, dx",
+                "test al, 0x20",
+                "jz 99b",
+                "mov dx, {thr}",
+                "mov al, 0x51",   // 'Q'
+                "out dx, al",
+                thr = const 0x3F8u16,
+                in("dx") 0x3FDu16,
+                out("al") _,
+                options(nomem, nostack)
+            );
+        }
         // HPET + calibrated LAPIC periodic timer: now safe because HPET (0xFED0_0000)
         // and LAPIC (0xFEE0_0000) are identity-mapped in our new PML4.
         crate::hal::init_timers();
@@ -403,11 +421,7 @@ pub extern "C" fn kmain(hartid: usize, dtb: usize) -> ! {
     crate::hal::ARCH.enable_interrupts();
 
     loop {
-        if !crate::task::has_ready_tasks() {
-            // log::info!("kmain: idle loop (no tasks)");
-        }
         crate::task::yield_cpu();
-        // Use global HAL instance
         crate::hal::ARCH.wait_for_interrupt();
     }
 }

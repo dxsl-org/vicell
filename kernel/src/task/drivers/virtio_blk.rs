@@ -24,12 +24,10 @@ pub unsafe fn force_unlock_locks() {
 
 pub fn init_driver() {
     use crate::task::drivers::virtio_common::virtio_slots;
-    log::debug!("VirtIO Block: probing DTB-confirmed MMIO slots...");
+    log::info!("VirtIO Block: probing MMIO slots...");
 
     for slot in virtio_slots() {
-        // SAFETY: slot.base is a DTB-declared VirtIO MMIO address identity-mapped
-        // by init_kernel_paging. MmioTransport::new validates magic/version and
-        // returns Err for any non-VirtIO or unclaimed slot.
+        // SAFETY: slot.base is an identity-mapped VirtIO MMIO address.
         let header = unsafe { core::ptr::NonNull::new_unchecked(slot.base as *mut VirtIOHeader) };
         match unsafe { MmioTransport::new(header) } {
             Ok(transport) => {
@@ -45,12 +43,16 @@ pub fn init_driver() {
                             log::warn!("VirtIO Block: init error at {:#x}: {:?}", slot.base, e);
                         }
                     }
+                } else {
+                    // MmioTransport::drop() resets the device via set_status(0). Forget
+                    // the transport to avoid resetting a slot owned by another driver.
+                    core::mem::forget(transport);
                 }
             }
             Err(_) => {}
         }
     }
-    log::debug!("VirtIO Block: no device found");
+    log::info!("VirtIO Block: no device found");
 }
 
 /// Returns `true` when a VirtIO block device was successfully probed.

@@ -79,7 +79,10 @@ pub fn init() {
             base: core::ptr::addr_of!((*idt_ptr).e) as u64,
         };
         // SAFETY: ptr points to a valid, aligned IDT; lidt from Ring 0 is safe.
-        asm!("lidt [{p}]", p = in(reg) &ptr, options(nomem, nostack));
+        // NOTE: `nomem` must NOT be used here — lidt reads 10 bytes from &ptr.
+        // Without the memory-access annotation, LLVM treats the stores to `ptr`
+        // as dead and eliminates them; `lidt` then reads stale stack bytes.
+        asm!("lidt [{p}]", p = in(reg) &ptr, options(nostack));
     }
 }
 
@@ -129,14 +132,19 @@ extern "Rust" {
 
 /// LAPIC periodic timer handler (vector 0x20).
 ///
-/// Calls `vi_timer_tick()` (kernel scheduler tick), then ACKs the LAPIC.
-/// The LAPIC timer reloads automatically in periodic mode — no re-arm needed.
+/// ACKs the LAPIC *before* calling `vi_timer_tick()` so the LAPIC is no longer
+/// in-service when the first context switch fires inside `vi_timer_tick →
+/// yield_cpu → Context::switch`.  If EOI were after `vi_timer_tick()`, the
+/// switch would bypass the EOI call, leaving the LAPIC stuck with an
+/// in-service interrupt that blocks all future timer delivery.
 #[no_mangle]
 extern "x86-interrupt" fn x86_64_timer_handler(_frame: InterruptFrame) {
+    // ACK first: clear the in-service bit so future timer IRQs are deliverable
+    // even if Context::switch() below never returns to this handler.
+    super::apic::eoi();
     // SAFETY: vi_timer_tick is #[no_mangle] in kernel/src/task.rs; safe to call
     // from interrupt context (interrupts disabled by CPU on IRQ entry).
     unsafe { vi_timer_tick(); }
-    super::apic::eoi();
 }
 
 /// COM1 UART RX handler (vector 0x24 / IOAPIC IRQ 4).

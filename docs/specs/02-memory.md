@@ -1,11 +1,11 @@
-# ViOS Architecture: Memory Model
+# ViCell Architecture: Memory Model
 **Version**: 0.3 (Universal SAS & Resource Governance)
 **Status**: Definitive
 
 ---
 
 ## 1. Universal SAS Layout (Trait-Based)
-Thay vì hardcode địa chỉ 64-bit, ViOS dùng bộ khung **Virtual Memory Layout** trừu tượng thông qua `hal-core`.
+Thay vì hardcode địa chỉ 64-bit, ViCell dùng bộ khung **Virtual Memory Layout** trừu tượng thông qua `hal-core`.
 
 ### Layout Segments
 | Segment | RV32 (Sv32) | RV64 (Sv39/48) | Đặc điểm |

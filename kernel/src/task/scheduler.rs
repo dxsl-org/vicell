@@ -211,7 +211,8 @@ impl Scheduler {
         #[cfg(target_arch = "aarch64")]
         { task.context.x30 = entry as u64; }
         #[cfg(target_arch = "x86_64")]
-        { task.context.rip = entry as u64; }
+        { task.context.rip = entry as u64;
+          task.context.kernel_trap_sp = stack_top as u64; }
         task.kernel_stack = Some(kstack);
         task.user_stack = Some(ustack);
 
@@ -282,6 +283,7 @@ impl Scheduler {
                 task.context.rip = trampoline as u64;
                 task.context.rbx = entry as u64;    // thread body fn ptr
                 task.context.r12 = arg as u64;      // argument
+                task.context.kernel_trap_sp = stack_top as u64;
             }
             task.kernel_stack = Some(kstack);
 
