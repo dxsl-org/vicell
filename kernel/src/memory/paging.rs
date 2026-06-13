@@ -140,6 +140,15 @@ pub fn init_kernel_paging(
             .map_err(|_| PageTableError::OutOfMemory)?;
         root_table.identity_map(uart_region, uart_region + 0x10000, mmio_flags, &mut alloc_fn)
             .map_err(|_| PageTableError::OutOfMemory)?;
+        // PCIe ECAM bus-0 window (1 MiB at 0x3000_0000) for RISC-V virt gpex.
+        // Required before pcie_ecam::init() accesses config space.
+        // Only bus 0 is mapped; extend if a PCIe device lands on bus > 0.
+        root_table.identity_map(
+            crate::task::drivers::pcie_ecam::ECAM_BASE_RISCV,
+            crate::task::drivers::pcie_ecam::ECAM_BASE_RISCV
+                + crate::task::drivers::pcie_ecam::ECAM_BUS0_SIZE,
+            mmio_flags, &mut alloc_fn,
+        ).map_err(|_| PageTableError::OutOfMemory)?;
     }
     #[cfg(target_arch = "aarch64")]
     {
@@ -151,6 +160,14 @@ pub fn init_kernel_paging(
             .map_err(|_| PageTableError::OutOfMemory)?;
         root_table.identity_map(0x1000_0000, 0x1001_0000, mmio_flags, &mut alloc_fn)
             .map_err(|_| PageTableError::OutOfMemory)?;
+        // PCIe ECAM bus-0 window (1 MiB at 0x3F00_0000) for ARM64 virt gpex.
+        // Required before pcie_ecam::init() accesses config space.
+        root_table.identity_map(
+            crate::task::drivers::pcie_ecam::ECAM_BASE_AARCH64,
+            crate::task::drivers::pcie_ecam::ECAM_BASE_AARCH64
+                + crate::task::drivers::pcie_ecam::ECAM_BUS0_SIZE,
+            mmio_flags, &mut alloc_fn,
+        ).map_err(|_| PageTableError::OutOfMemory)?;
     }
 
     *KERNEL_ROOT.lock() = Some(root_frame);

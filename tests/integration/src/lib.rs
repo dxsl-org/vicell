@@ -891,6 +891,86 @@ pub fn spawn_echo_server() -> u16 {
     port
 }
 
+/// Resolve the qemu-system-x86_64 binary.
+///
+/// Order: `$VIOS_QEMU_X86` env override → bare name on PATH → Windows default.
+pub fn qemu_x86_binary() -> String {
+    if let Ok(p) = std::env::var("VIOS_QEMU_X86") {
+        if !p.is_empty() {
+            return p;
+        }
+    }
+    if Command::new("qemu-system-x86_64")
+        .arg("--version")
+        .output()
+        .is_ok()
+    {
+        return "qemu-system-x86_64".to_string();
+    }
+    let win = r"C:\Program Files\qemu\qemu-system-x86_64.exe";
+    if Path::new(win).exists() {
+        return win.to_string();
+    }
+    "qemu-system-x86_64".to_string()
+}
+
+impl QemuRunner {
+    /// Boot an x86_64 q35 guest with an NVMe disk attached.
+    ///
+    /// Uses `qemu-system-x86_64 -machine q35` with a PCIe NVMe controller
+    /// (`-device nvme`) backed by `nvme_disk`. The guest serial (COM1) is
+    /// bridged to a localhost TCP socket the same way as `boot_with_netdev`.
+    ///
+    /// Prerequisites: `qemu-system-x86_64` on PATH (or `$VIOS_QEMU_X86`),
+    /// a built x86_64 kernel, and a raw disk image for the NVMe drive.
+    pub fn boot_x86_nvme(kernel: &str, nvme_disk: &str) -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind serial socket");
+        let port = listener.local_addr().unwrap().port();
+
+        let child = Command::new(qemu_x86_binary())
+            .args([
+                "-machine", "q35",
+                "-cpu",     "qemu64",
+                "-m",       "256M",
+                "-nographic",
+                // NVMe drive: PCIe NVMe controller backed by nvme_disk.
+                "-drive",   &format!("file={nvme_disk},format=raw,if=none,id=nvme0"),
+                "-device",  "nvme,drive=nvme0,serial=deadbeef01",
+                // Serial → TCP socket (same pattern as boot_with_netdev).
+                "-serial",  &format!("tcp:127.0.0.1:{port}"),
+                "-kernel",  kernel,
+                "-monitor", "none",
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("qemu-system-x86_64 must be on PATH or set $VIOS_QEMU_X86");
+
+        listener.set_nonblocking(false).expect("blocking listener");
+        let stream = listener
+            .accept()
+            .expect("QEMU did not connect to the serial socket")
+            .0;
+        let writer = stream.try_clone().expect("clone serial stream");
+
+        let output = Arc::new(Mutex::new(String::new()));
+        let buf = Arc::clone(&output);
+        thread::spawn(move || {
+            let mut reader = BufReader::new(stream);
+            let mut byte = [0u8; 1];
+            loop {
+                match reader.read(&mut byte) {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => buf.lock().unwrap().push(byte[0] as char),
+                }
+            }
+        });
+
+        Self { child, writer: Some(writer), output, temp_disk: None }
+    }
+}
+
 /// Spawn a minimal MQTT 3.1.1 mock broker on an ephemeral port.
 ///
 /// Protocol:

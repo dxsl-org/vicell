@@ -42,6 +42,10 @@ path = "tests/x86_64-boot.rs"
 name = "redoxfs-srv"
 path = "tests/redoxfs-srv.rs"
 
+[[test]]
+name = "nvme-x86"
+path = "tests/nvme-x86.rs"
+
 [dev-dependencies]
 tempfile = "3"
 

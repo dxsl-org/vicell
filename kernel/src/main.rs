@@ -273,6 +273,16 @@ pub extern "C" fn kmain(hartid: usize, dtb: usize) -> ! {
         log_info("x86_64: ramdisk + UART RX IRQ initialised");
     }
 
+    // PCIe ECAM scan + NVMe init — runs on all PCIe-capable arches after paging.
+    // On riscv64/aarch64 the ECAM window is identity-mapped in init_kernel_paging.
+    // On x86_64 the ECAM window (0xB000_0000, 1 MiB) sits below 4 GiB and is
+    // accessible under Limine's PML4 which identity-maps MMIO below 4 GiB.
+    #[cfg(any(target_arch = "riscv64", target_arch = "aarch64", target_arch = "x86_64"))]
+    {
+        task::drivers::pcie_ecam::init();
+        task::drivers::blk_nvme::init_driver();
+    }
+
     // Attempt warm boot from snapshot before any cell initialization.
     // RV32 Nano / x86_64 skip: no VirtIO block in bring-up.
     #[cfg(any(target_arch = "riscv64", target_arch = "aarch64"))]

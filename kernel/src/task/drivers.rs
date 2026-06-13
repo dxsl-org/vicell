@@ -29,6 +29,8 @@ pub mod virtio_gpu;
 pub mod virtio_input;
 pub mod virtio_net;
 pub mod virtio_rng;
+pub mod pcie_ecam; // PCIe ECAM config-space walker (bus 0)
+pub mod blk_nvme;  // NVMe kernel block driver (ViBlockDevice impl)
 
 /// Initialize drivers subsystem
 ///
@@ -51,4 +53,8 @@ pub fn init() {
     // VirtIO RNG init deferred: full MMIO probe hangs on RISC-V when probing
     // already-claimed slots (block/net). The no-op stub is sufficient until a
     // safe probe strategy is implemented (skip slots claimed by other drivers).
+
+    // PCIe ECAM scan (after paging is active — called from main.rs separately
+    // on riscv/arm/x86 via pcie_ecam::init() + blk_nvme::init_driver()).
+    // NVMe init is called from main.rs after drivers::init() on PCIe arches.
 }
