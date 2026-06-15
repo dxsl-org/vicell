@@ -295,7 +295,7 @@ jobs:
           bash scripts/build-test-hooks-ci.sh
 
       - name: Run VFS quota integration test
-        run: cargo test --manifest-path tests/integration/Cargo.toml --test vfs-quota
+        run: cd tests/integration && cargo test --test vfs-quota
 
   redoxfs-srv:
     name: RedoxFS /srv Integration Test
@@ -336,9 +336,7 @@ jobs:
           bash scripts/mksrv-img.sh build/disk_srv.img
 
       - name: Run RedoxFS /srv integration tests
-        run: |
-          cargo test --manifest-path tests/integration/Cargo.toml \
-            --test redoxfs-srv
+        run: cd tests/integration && cargo test --test redoxfs-srv
 
   unit-tests:
     name: Host unit tests (types + api)
@@ -434,9 +432,7 @@ jobs:
           bash scripts/build-shell-test-ci.sh
 
       - name: Run shell utility integration tests
-        run: |
-          cargo test --manifest-path tests/integration/Cargo.toml \
-            --test shell-utils
+        run: cd tests/integration && cargo test --test shell-utils
 
   security:
     name: Security Scan

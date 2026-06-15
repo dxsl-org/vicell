@@ -37,6 +37,9 @@ test_error*.txt
 .agents/
 .claude/
 .cargo/
+# Integration tests need their own target override; include their config.
+!tests/integration/.cargo/
+!tests/integration/.cargo/config.toml
 
 # Disk Images
 *.img
