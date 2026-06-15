@@ -7,7 +7,7 @@ extern crate alloc;
 
 use alloc::collections::BTreeMap;
 use api::ipc::{self, IPC_BUF_SIZE, NetRequest, NetResponse};
-use ostd::syscall::{sys_send, sys_heartbeat};
+use ostd::syscall::{sys_send, sys_heartbeat, sys_net_tx};
 use smoltcp::{
     iface::{Interface, SocketHandle, SocketSet},
     socket::{tcp, udp},
@@ -310,6 +310,26 @@ fn handle_typed(
 
         NetRequest::Resolve { .. } => {
             send_typed(sender, R::Err(0xFF));  // DNS resolver not yet implemented
+        }
+
+        NetRequest::L2Send { data } => {
+            // Bypass smoltcp: forward raw Ethernet frame directly to the kernel NIC TX.
+            sys_net_tx(data);
+            send_typed(sender, R::Ok);
+        }
+
+        NetRequest::L2Recv { guest_mac } => {
+            // Register guest MAC (idempotent) then pump the NIC for fresh frames.
+            device.set_guest_mac(guest_mac);
+            device.pump_rx_split();
+            if let Some(frame) = device.pop_guest_rx() {
+                let mut rb = [0u8; IPC_BUF_SIZE];
+                if let Ok(s) = ipc::encode(&R::Data(&frame), &mut rb) {
+                    sys_send(sender, s);
+                }
+            } else {
+                send_typed(sender, R::Ok);
+            }
         }
     }
 }

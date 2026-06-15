@@ -105,6 +105,13 @@ pub enum NetRequest<'a> {
     MulticastJoin   { cap_id: u32, group: [u8; 4] },
     /// Leave a previously joined IPv4 multicast group.
     MulticastLeave  { cap_id: u32, group: [u8; 4] },
+    /// Forward a raw L2 Ethernet frame to the NIC TX.
+    /// `data` is the raw frame bytes (up to 1514 B, no virtio_net_hdr prefix).
+    /// The Net Cell calls `sys_net_tx(data)` directly — smoltcp is bypassed.
+    L2Send { data: &'a [u8] },
+    /// Poll for one inbound L2 frame from the NIC addressed to `guest_mac`.
+    /// The Net Cell splits RX frames by dst MAC; returns `Data(frame)` or `Ok` (empty).
+    L2Recv { guest_mac: [u8; 6] },
 }
 
 /// Responses from the network service.

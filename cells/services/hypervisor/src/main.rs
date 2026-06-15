@@ -34,6 +34,7 @@ api::declare_syscalls![
 mod dtb;
 mod gicd;
 mod loader_image;
+mod net_backend;
 mod pl011;
 mod psci;
 mod run_loop;
@@ -41,6 +42,7 @@ mod timer;
 mod virtio_blk;
 mod virtio_console;
 mod virtio_mmio;
+mod virtio_net;
 mod virtqueue;
 mod vmm;
 

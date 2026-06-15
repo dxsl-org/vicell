@@ -6,12 +6,15 @@
 extern crate alloc;
 
 use api::hypervisor::ViVmExit;
+use api::syscall::service;
 use ostd::io::println;
+use ostd::syscall::sys_lookup_service;
 use crate::{
-    gicd::Gicd, pl011::Pl011, psci, timer, vmm,
+    gicd::Gicd, net_backend, pl011::Pl011, psci, timer, vmm,
     virtio_blk::BlkDisk,
     virtio_console::Console,
     virtio_mmio::{self, VirtioMmio},
+    virtio_net::NetDev,
 };
 
 pub enum RunOutcome {
@@ -20,13 +23,18 @@ pub enum RunOutcome {
 
 /// Main VMM run loop. Runs until the guest PSCI SYSTEM_OFF or an unrecoverable exit.
 pub fn run(vm_id: usize, vcpu_id: usize) -> RunOutcome {
+    // Resolve Net Cell TID for L2 frame bridging (0 = unavailable, bridging disabled).
+    let net_tid = sys_lookup_service(service::NET).unwrap_or(0);
+
     let mut pl011    = Pl011::new();
     let mut gicd     = Gicd::new();
     let mut console  = Console::new();
     let mut vmio     = VirtioMmio::default();
     let mut blk      = BlkDisk::new();
     let mut blk_vmio = VirtioMmio::default();
-    let mut exit    = ViVmExit::Unknown { ec: 0, iss: 0 };
+    let mut net      = NetDev::new(net_tid);
+    let mut net_vmio = VirtioMmio::default();
+    let mut exit     = ViVmExit::Unknown { ec: 0, iss: 0 };
 
     loop {
         let ret = vmm::run_vcpu(vm_id, vcpu_id, &mut exit);
@@ -73,6 +81,7 @@ pub fn run(vm_id: usize, vcpu_id: usize) -> RunOutcome {
                     match slot {
                         0 => vmio.mmio_write(off, val as u32, &mut console, vm_id, vcpu_id),
                         1 => blk_vmio.mmio_write(off, val as u32, &mut blk, vm_id, vcpu_id),
+                        2 => net_vmio.mmio_write(off, val as u32, &mut net, vm_id, vcpu_id),
                         _ => {}
                     }
                 } else {
@@ -94,6 +103,7 @@ pub fn run(vm_id: usize, vcpu_id: usize) -> RunOutcome {
                     match slot {
                         0 => vmio.mmio_read(off, &console),
                         1 => blk_vmio.mmio_read(off, &blk),
+                        2 => net_vmio.mmio_read(off, &net),
                         _ => 0,
                     }
                 } else {
@@ -109,17 +119,19 @@ pub fn run(vm_id: usize, vcpu_id: usize) -> RunOutcome {
                 advance_pc(vm_id, vcpu_id);
             }
 
-            // ── WFI — inject virtual timer ───────────────────────────────────
+            // ── WFI — inject virtual timer; poll for guest RX frames ─────────
             ViVmExit::Wfi => {
-                // P05: inject timer unconditionally on WFI to avoid guest stall.
-                // P09 will properly read CNTV_CTL/CVAL from vcpu sysreg shadows.
                 timer::inject_timer_irq(vm_id, vcpu_id);
+                if let Some(frame) = net_backend::try_receive(net_tid) {
+                    net.push_rx_frame(&frame, vm_id, vcpu_id, &net_vmio);
+                }
             }
 
-            // ── Preemption budget expired (C2 yield) ─────────────────────────
+            // ── Preemption budget expired (C2 yield) — poll RX before re-enter
             ViVmExit::Preempted => {
-                // Re-enter immediately; P07/P08 will poll pending IPC here.
-                continue;
+                if let Some(frame) = net_backend::try_receive(net_tid) {
+                    net.push_rx_frame(&frame, vm_id, vcpu_id, &net_vmio);
+                }
             }
 
             // ── Guest shutdown ────────────────────────────────────────────────

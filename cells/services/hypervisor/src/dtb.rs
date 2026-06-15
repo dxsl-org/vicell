@@ -154,6 +154,15 @@ pub fn build_dtb(
     fdt.property_array_u32("reg", &[0x0, 0x0a00_0200, 0x0, 0x200])?;
     fdt.end_node(vio_blk)?;
 
+    // ── 10. /virtio_mmio@a000400 — network device (slot 2, SPI 18) ───────────
+    let vio_net = fdt.begin_node("virtio_mmio@a000400")?;
+    fdt.property_string("compatible", "virtio,mmio")?;
+    fdt.property_u32("interrupt-parent", 1)?;
+    // SPI 18, IRQ_TYPE_EDGE_RISING=1: <GIC_SPI=0, irq=18, flags=1>
+    fdt.property_array_u32("interrupts", &[0, 18, 1])?;
+    fdt.property_array_u32("reg", &[0x0, 0x0a00_0400, 0x0, 0x200])?;
+    fdt.end_node(vio_net)?;
+
     fdt.end_node(root)?;
     fdt.finish()
 }

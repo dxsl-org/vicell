@@ -45,8 +45,8 @@ use smoltcp::{
 use socket_table::{SocketTable, MAX_SOCKETS};
 use crate::tls::socket::TlsSocketEntry;
 
-/// Fixed IPC receive buffer size; mirrors api::ipc::IPC_BUF_SIZE.
-const IPC_BUF_SIZE: usize = 512;
+/// IPC receive buffer — must hold the largest request, including L2Send (1514-byte frame).
+const IPC_BUF_SIZE: usize = 4096;
 
 /// Fixed MAC address for QEMU VirtIO NIC (locally administered, unicast).
 const MAC: EthernetAddress = EthernetAddress([0x52, 0x54, 0x00, 0x12, 0x34, 0x56]);
@@ -96,7 +96,7 @@ pub fn main() {
 
     loop {
         ostd::syscall::sys_heartbeat(500);
-        device.pump_rx();
+        device.pump_rx_split();
 
         if dhcp_state == DhcpState::Pending {
             dhcp_state =

@@ -110,6 +110,11 @@ impl VirtioMmio {
             _ => {}
         }
     }
+
+    /// Return a copy of the queue configuration for queue `q`.
+    pub fn queue_cfg(&self, q: usize) -> QueueCfg {
+        if q < MAX_QUEUES { self.queues[q] } else { QueueCfg::default() }
+    }
 }
 
 #[inline] fn set_lo(v: &mut u64, lo: u32) { *v = (*v & 0xFFFF_FFFF_0000_0000) | lo as u64; }
