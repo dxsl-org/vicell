@@ -18,6 +18,7 @@ pub mod stage2_regs; // non-AArch64 builds get ENOSYS stubs; no cfg gate needed
 #[cfg(target_arch = "aarch64")] pub mod trap_el2;
 #[cfg(target_arch = "aarch64")] pub mod uart_pl011;
 #[cfg(target_arch = "aarch64")] pub mod vcpu;
+#[cfg(target_arch = "aarch64")] pub mod vgic;
 
 #[cfg(target_arch = "aarch64")] pub use context::CpuContext as Context;
 #[cfg(target_arch = "aarch64")] pub use paging::PageTable;

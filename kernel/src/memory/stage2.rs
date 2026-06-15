@@ -95,6 +95,13 @@ fn page_desc(pa: u64, writable: bool) -> u64 {
     (pa & PA_MASK) | base | DESC_TABLE | DESC_VALID
 }
 
+#[inline]
+fn page_desc_device(pa: u64, writable: bool) -> u64 {
+    // Device-nGnRnE: MemAttr[5:2]=0b0000, SH[9:8]=non-shareable=0b00, AF=1.
+    let ap = if writable { S2_S2AP_RW } else { S2_S2AP_RO };
+    (pa & PA_MASK) | ap | S2_AF | DESC_TABLE | DESC_VALID
+}
+
 // ── Error type ───────────────────────────────────────────────────────────────
 
 #[derive(Debug, PartialEq)]
@@ -269,6 +276,36 @@ impl Stage2Table {
         }
     }
 
+    /// Map MMIO HPA directly into guest IPA space for hardware passthrough.
+    ///
+    /// Bypasses both the MMIO-hole guard and the SAS-isolation guard.  Use only for
+    /// legitimate hardware passthrough (e.g., GICV HPA → GICC IPA for vGIC).
+    /// Uses Device-nGnRnE memory attributes.
+    ///
+    /// # Errors
+    /// Returns `Overflow` on wraparound; `OutOfBounds` if range exceeds 40-bit IPA limit.
+    pub fn map_mmio_passthrough(
+        &mut self,
+        ipa: u64,
+        hpa: u64,
+        n_pages: usize,
+        writable: bool,
+    ) -> Result<(), S2MapError> {
+        let page_bytes = n_pages as u64 * PAGE_SIZE as u64;
+        let ipa_end = ipa.checked_add(page_bytes).ok_or(S2MapError::Overflow)?;
+        let hpa_end = hpa.checked_add(page_bytes).ok_or(S2MapError::Overflow)?;
+        if ipa_end > IPA_LIMIT { return Err(S2MapError::OutOfBounds); }
+        if hpa_end > IPA_LIMIT { return Err(S2MapError::OutOfBounds); }
+        let mut cur_ipa = ipa;
+        let mut cur_hpa = hpa;
+        for _ in 0..n_pages {
+            self.map_single_device(cur_ipa, cur_hpa, writable)?;
+            cur_ipa += PAGE_SIZE as u64;
+            cur_hpa += PAGE_SIZE as u64;
+        }
+        Ok(())
+    }
+
     // ── Single-page walk helpers ─────────────────────────────────────────────
 
     fn map_single(&mut self, ipa: u64, hpa: u64, writable: bool) -> Result<(), S2MapError> {
@@ -315,6 +352,36 @@ impl Stage2Table {
         // SAFETY: writing a well-formed page descriptor.
         unsafe { *l3_ptr = page_desc(hpa, writable); }
 
+        Ok(())
+    }
+
+    /// Same L1→L2→L3 walk as `map_single`, but writes a Device-nGnRnE L3 descriptor.
+    fn map_single_device(&mut self, ipa: u64, hpa: u64, writable: bool) -> Result<(), S2MapError> {
+        let l1_ptr: *mut u64 = unsafe { self.root_va.add(l1_idx(ipa)) };
+        let l1e = unsafe { *l1_ptr };
+        let l2_va: *mut u64 = if l1e & (DESC_VALID | DESC_TABLE) == (DESC_VALID | DESC_TABLE) {
+            phys_to_virt(desc_pa(l1e)) as *mut u64
+        } else if l1e & DESC_VALID == 0 {
+            let (va, pa) = self.alloc_subtable().ok_or(S2MapError::OutOfMemory)?;
+            unsafe { *l1_ptr = table_desc(pa); }
+            va
+        } else {
+            return Err(S2MapError::BlockConflict);
+        };
+        let l2_ptr: *mut u64 = unsafe { l2_va.add(l2_idx(ipa)) };
+        let l2e = unsafe { *l2_ptr };
+        let l3_va: *mut u64 = if l2e & (DESC_VALID | DESC_TABLE) == (DESC_VALID | DESC_TABLE) {
+            phys_to_virt(desc_pa(l2e)) as *mut u64
+        } else if l2e & DESC_VALID == 0 {
+            let (va, pa) = self.alloc_subtable().ok_or(S2MapError::OutOfMemory)?;
+            unsafe { *l2_ptr = table_desc(pa); }
+            va
+        } else {
+            return Err(S2MapError::BlockConflict);
+        };
+        let l3_ptr: *mut u64 = unsafe { l3_va.add(l3_idx(ipa)) };
+        // SAFETY: writing a Device-nGnRnE page descriptor for MMIO passthrough.
+        unsafe { *l3_ptr = page_desc_device(hpa, writable); }
         Ok(())
     }
 

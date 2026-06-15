@@ -8,7 +8,7 @@
 //! produces a complete match for the hypervisor Syscall arms on every target.
 
 extern crate alloc;
-use alloc::{collections::BTreeMap, vec::Vec};
+use alloc::{collections::{BTreeMap, VecDeque}, vec::Vec};
 use types::{ViError, ViResult};
 use crate::sync::Spinlock;
 
@@ -17,7 +17,7 @@ use crate::sync::Spinlock;
 #[cfg(target_arch = "aarch64")]
 use crate::memory::stage2::Stage2Table;
 #[cfg(target_arch = "aarch64")]
-use hal::aarch64::{stage2_regs::{enable_stage2, disable_stage2}, vcpu::{AArch64Vcpu, run_vcpu_impl}};
+use hal::aarch64::{stage2_regs::{enable_stage2, disable_stage2}, vcpu::{AArch64Vcpu, run_vcpu_impl}, vgic};
 #[cfg(target_arch = "aarch64")]
 use api::hypervisor::ViVmExit as ApiVmExit;
 #[cfg(target_arch = "aarch64")]
@@ -31,6 +31,9 @@ struct Vm {
     guest_pa: u64,
     guest_pages: usize,
     vcpus:   Vec<AArch64Vcpu>,
+    /// Per-vCPU pending virtual IRQ queue; intids written by inject_irq, drained
+    /// into GICH LRs just before each run_vcpu_impl call (Phase 09).
+    vcpu_irqs: Vec<VecDeque<u32>>,
     vmid:    u16,
 }
 
@@ -73,17 +76,29 @@ pub fn create_vm(owner: usize, guest_pages: usize) -> ViResult<usize> {
         // Map all guest RAM at IPA 0x40000000.
         table.map(0x4000_0000, guest_pa, guest_pages, true)
              .map_err(|_| ViError::OutOfMemory)?;
+        // Phase 09: GICV Stage-2 passthrough — map GICC IPA (0x0801_0000) → GICV HPA
+        // (0x0804_0000) so guest GICC accesses hit real GICV hardware, removing the
+        // GICC trap path.  64 KiB = 16 pages.  Read-only from guest (CPU interface
+        // writes go via GICC_EOIR which GICV handles natively).
+        table.map_mmio_passthrough(0x0801_0000, 0x0804_0000, 16, false)
+             .map_err(|_| ViError::OutOfMemory)?;
 
         let vmid = NEXT_VMID.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
         // SAFETY: table built and flushed; vmid ≥ 1; not yet active (enable later).
         unsafe { enable_stage2(vmid, table.root_pa()); }
+        // Phase 09: enable GICH (virtual CPU interface control) for LR-based injection.
+        // SAFETY: kernel runs at EL2; GICH MMIO at 0x0803_0000 is EL2-accessible.
+        unsafe { vgic::enable(); }
 
         let vm_id = {
             let mut guard = registry_lock().lock();
             if guard.is_none() { *guard = Some(BTreeMap::new()); }
             let map = guard.as_mut().unwrap();
             let id = map.keys().filter(|(o, _)| *o == owner).count() + 1;
-            map.insert((owner, id), Vm { stage2: table, guest_pa, guest_pages, vcpus: Vec::new(), vmid });
+            map.insert((owner, id), Vm {
+                stage2: table, guest_pa, guest_pages,
+                vcpus: Vec::new(), vcpu_irqs: Vec::new(), vmid,
+            });
             let _ = PAGE_SIZE; // suppress unused warning
             id
         };
@@ -128,6 +143,7 @@ pub fn create_vcpu(owner: usize, vm_id: usize, entry_pc: u64) -> ViResult<usize>
         }
 
         vm.vcpus.push(AArch64Vcpu::new(entry_pc));
+        vm.vcpu_irqs.push(VecDeque::new());
         Ok(vcpu_id)
     }
     #[cfg(not(target_arch = "aarch64"))]
@@ -171,9 +187,55 @@ pub fn run_vcpu(owner: usize, vm_id: usize, vcpu_id: usize, _budget_ns: u64,
             let mut guard = registry_lock().lock();
             let map = guard.as_mut().ok_or(ViError::NotFound)?;
             let vm = map.get_mut(&(owner, vm_id)).ok_or(ViError::NotFound)?;
-            let vcpu = vm.vcpus.get_mut(vcpu_id.saturating_sub(1)).ok_or(ViError::NotFound)?;
-            // SAFETY: Stage-2 is enabled for this VMID; vcpu exclusively owned under lock.
-            unsafe { run_vcpu_impl(vcpu) }
+            let vcpu_idx = vcpu_id.saturating_sub(1);
+
+            // ── Phase 09: drain IRQ queue → load into GICH LRs ──────────────────
+            // Collect pending intids (borrow of vcpu_irqs ends after collect()).
+            let pending: Vec<u32> = vm.vcpu_irqs
+                .get_mut(vcpu_idx)
+                .map(|q| q.drain(..).collect())
+                .unwrap_or_default();
+            let num_loaded = pending.len().min(vgic::MAX_LRS);
+            // Re-queue IRQs that overflow the LR count.
+            if pending.len() > vgic::MAX_LRS {
+                if let Some(q) = vm.vcpu_irqs.get_mut(vcpu_idx) {
+                    for &intid in &pending[vgic::MAX_LRS..] { q.push_back(intid); }
+                }
+            }
+            // Load up to MAX_LRS pending IRQs into GICH list registers.
+            for (n, &intid) in pending[..num_loaded].iter().enumerate() {
+                // SAFETY: EL2; GICH MMIO at 0x0803_0000; n < MAX_LRS.
+                unsafe { vgic::load_lr(n, intid); }
+            }
+
+            // ── World-switch into guest ──────────────────────────────────────────
+            let exit = {
+                let vcpu = vm.vcpus.get_mut(vcpu_idx).ok_or(ViError::NotFound)?;
+                // SAFETY: Stage-2 is enabled for this VMID; vcpu exclusively owned.
+                unsafe { run_vcpu_impl(vcpu) }
+                // vcpu borrow ends here (NLL + nested block)
+            };
+
+            // ── Phase 09: drain GICH LRs after exit ─────────────────────────────
+            // Re-queue any LRs still in Active state (guest was preempted mid-handling).
+            // SAFETY: no vCPU running; EL2; GICH MMIO accessible.
+            if num_loaded > 0 {
+                let elrsr = unsafe { vgic::read_elrsr() };
+                for n in 0..num_loaded {
+                    if (elrsr >> n) & 1 == 0 {
+                        // LR occupied — re-queue if Active or Pending+Active.
+                        let lr_val = unsafe { vgic::read_lr(n) };
+                        if (lr_val >> 28) & 3 != 0 {
+                            if let Some(q) = vm.vcpu_irqs.get_mut(vcpu_idx) {
+                                q.push_front(lr_val & 0x3FF);
+                            }
+                        }
+                    }
+                    unsafe { vgic::clear_lr(n); }
+                }
+            }
+
+            exit
         };
 
         // Convert HAL ViVmExit → API ViVmExit (same fields, different crate paths).
@@ -320,12 +382,28 @@ pub fn read_guest_memory(owner: usize, vm_id: usize, gpa: u64, dst_ptr: usize, l
     }
 }
 
-/// Inject GICv2 virtual interrupt into vCPU (intid ≤ 1019, validated by caller).
+/// Enqueue a GICv2 virtual interrupt for delivery into vCPU via GICH LR on next entry.
+///
+/// `intid` must be ≤ 1019 (validated by the syscall layer, m3).
+/// The intid is dequeued and loaded into a GICH List Register in `run_vcpu` before the
+/// next `run_vcpu_impl` call (Phase 09 GICH LR injection path).
 pub fn inject_irq(owner: usize, vm_id: usize, vcpu_id: usize, intid: u32) -> ViResult<usize> {
-    // P05+ will write to GICH_LR registers here.  For P04 stub, record in vcpu state.
-    let _ = (owner, vm_id, vcpu_id, intid);
-    // TODO(P05): route intid through GICH LR via HCR_EL2.VI or LR injection.
-    Ok(0)
+    #[cfg(target_arch = "aarch64")]
+    {
+        let mut guard = registry_lock().lock();
+        let map = guard.as_mut().ok_or(ViError::NotFound)?;
+        let vm = map.get_mut(&(owner, vm_id)).ok_or(ViError::NotFound)?;
+        let idx = vcpu_id.saturating_sub(1);
+        if let Some(q) = vm.vcpu_irqs.get_mut(idx) {
+            q.push_back(intid);
+        }
+        Ok(0)
+    }
+    #[cfg(not(target_arch = "aarch64"))]
+    {
+        let _ = (owner, vm_id, vcpu_id, intid);
+        Ok(0)
+    }
 }
 
 // ── Teardown — called on every task-exit path ─────────────────────────────────
