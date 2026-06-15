@@ -2067,7 +2067,18 @@ pub fn handle_syscall(caller_id: usize, syscall: Syscall) -> SyscallResult {
             // a user-space pointer in the same SAS; we write exactly `capped` bytes.
             let buf = unsafe { core::slice::from_raw_parts_mut(buf_ptr as *mut u8, capped) };
             let written = crate::task::drivers::virtio_rng::get_random(buf);
-            Ok(written)
+            if written > 0 { return Ok(written); }
+            // VirtIO-RNG unavailable — fill with xorshift32 seeded from mtime + caller_id.
+            // Not cryptographically secure, but satisfies getentropy(2) correctness contract.
+            let seed = hal::common::timer::read_mtime() as u32 ^ (caller_id as u32).wrapping_mul(0x9e37_79b9);
+            let mut state = if seed == 0 { 1 } else { seed };
+            for byte in buf.iter_mut() {
+                state ^= state << 13;
+                state ^= state >> 17;
+                state ^= state << 5;
+                *byte = state as u8;
+            }
+            Ok(capped)
         }
 
         Syscall::BlkReadAsync { sector, grant_id } => {

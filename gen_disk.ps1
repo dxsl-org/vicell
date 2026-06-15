@@ -127,7 +127,16 @@ Remove-Item -Recurse -Force $tmpDir
 $kfs_mb = [Math]::Round((Get-Item "kernel\src\embedded\kernel_fs.img").Length/1MB,1)
 Write-Host "  kernel_fs.img: ${kfs_mb} MB"
 
-# 3b. Create a blank disk image for VirtIO block — MBR layout (Milestone 2.5 P03).
+# 3b. Rebuild the kernel binary (embeds the new kernel_fs.img via include_bytes!).
+#     Must be done before creating disk_v3.img so the test runner picks up the latest kernel.
+Write-Host "Rebuilding kernel (embedding updated kernel_fs.img)..."
+$env:RUSTFLAGS = "-C relocation-model=pic"
+cargo build --release -p vicell-kernel `
+    --target riscv64gc-unknown-none-elf `
+    -Z build-std=core,alloc 2>&1 | Select-Object -Last 3
+Remove-Item Env:\RUSTFLAGS
+
+# 3c. Create a blank disk image for VirtIO block — MBR layout (Milestone 2.5 P03).
 #     P1 FAT32 @2048+524288 · P2 cell-table @526336 · P3 snapshot @560000 · P4 littlefs @800000
 #     Must match tools/write-mbr.py and kernel/src/loader/disk_layout.rs.
 Write-Host "Creating blank disk image (disk_v3.img, MBR, ~455 MB)..."
