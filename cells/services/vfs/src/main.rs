@@ -3,6 +3,8 @@
 
 extern crate alloc;
 extern crate driver_disk;
+// redox_syscall's [lib] name is "syscall"; alias so our code can use redox_syscall:: paths.
+extern crate syscall as redox_syscall;
 
 mod access;
 mod backend;

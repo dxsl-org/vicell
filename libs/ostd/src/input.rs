@@ -22,8 +22,11 @@
 extern crate alloc;
 use alloc::vec::Vec;
 
+// Re-export api::input types so consumers can use `ostd::input::KeyState` etc.
+pub use api::input::{InputEvent, KeyEvent, KeyState, KeySym, Modifiers, MouseButton};
+
 use api::{
-    input::{InputEvent, INPUT_EVENT_OPCODE, decode_event},
+    input::{INPUT_EVENT_OPCODE, decode_event},
     ipc::{InputRequest, InputResponse, IPC_BUF_SIZE},
     syscall::service,
 };
