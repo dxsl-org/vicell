@@ -8,6 +8,7 @@
 //! and, in debug builds, emits a warning about the implicit close.
 
 use crate::syscall;
+use alloc::string::String;
 use alloc::vec::Vec;
 use types::*;
 use api::ipc::{VfsRequest, VfsResponse};
@@ -53,21 +54,34 @@ pub fn read_dir(path: &str) -> ViResult<ReadDir> {
 /// Moving `File` transfers ownership of the underlying capability.  Dropping
 /// calls `close()` implicitly; in debug builds a warning is emitted when this
 /// happens without an explicit `close()` call (handle-leak detection).
+///
+/// `path` and `vfs_tid` are cached at `open()` time to support `write_all` via
+/// `VfsRequest::Append` IPC. Reads still use the faster cap-based kernel path.
 pub struct File {
     cap_id: u64,
     /// Set to `true` by `close()` to suppress the drop warning.
     closed: bool,
+    /// Owned copy of the path, needed for VFS Append IPC.
+    path: String,
+    /// Cached VFS service tid; 0 means VFS was unavailable at open time.
+    vfs_tid: usize,
 }
 
 impl File {
-    /// Open a file at `path` in read-only mode.
+    /// Open a file at `path`.
+    ///
+    /// Caches the VFS tid at open time for use by `write_all`. If the VFS
+    /// service is temporarily unavailable, `write_all` will return `NotFound`
+    /// until the file is re-opened after VFS restarts.
     ///
     /// # Errors
     /// Returns `ViError::NotFound` if the path does not exist in the kernel FS.
     pub fn open(path: &str) -> ViResult<Self> {
-        syscall::sys_open_cap(path)
-            .map(|cap_id| Self { cap_id, closed: false })
-            .map_err(|_| ViError::NotFound)
+        let cap_id = syscall::sys_open_cap(path)
+            .map_err(|_| ViError::NotFound)?;
+        let vfs_tid = crate::service::lookup(crate::service::service::VFS)
+            .unwrap_or(0);
+        Ok(Self { cap_id, closed: false, path: String::from(path), vfs_tid })
     }
 
     /// Read all bytes until EOF into `buf`.
@@ -101,11 +115,37 @@ impl File {
         alloc::string::String::from_utf8(bytes).map_err(|_| ViError::IO)
     }
 
-    /// Write all bytes from `buf` to the file (stub — writable VFS requires VirtIO-FAT).
+    /// Append `buf` to the file via VFS IPC.
     ///
-    /// Currently always returns `Err(NotSupported)` until Phase 13 write path is complete.
-    pub fn write_all(&mut self, _buf: &[u8]) -> ViResult<()> {
-        Err(ViError::NotSupported)
+    /// **Append semantics:** each call extends the file at its current end.
+    /// Multiple `write_all` calls accumulate — correct for `embedded_io::Write`.
+    /// For overwrite / truncate semantics, that is future work.
+    ///
+    /// Large buffers are chunked into ≤400-byte pieces to fit the 512-byte
+    /// `vfs_call` send buffer (path + content + postcard framing ≤ 512 bytes).
+    /// Not atomic across chunks — a quota failure mid-write leaves a partial append.
+    ///
+    /// # Errors
+    /// - `NotFound` if VFS is unavailable (re-open after VFS restarts to refresh tid).
+    /// - `InvalidInput` if `path.len() > 96` (postcard frame would overflow send buffer).
+    /// - `IO` on VFS error response (permission denied, quota exceeded, backend failure).
+    pub fn write_all(&mut self, buf: &[u8]) -> ViResult<()> {
+        if self.vfs_tid == 0 {
+            return Err(ViError::NotFound);
+        }
+        if self.path.len() > 96 {
+            // postcard: discriminant(1) + path_len(2) + path(≤96) + content_len(2) + content(≤400) = ≤501 < 512
+            return Err(ViError::InvalidInput);
+        }
+        for chunk in buf.chunks(CHUNK_CONTENT) {
+            let req = VfsRequest::Append { path: &self.path, content: chunk };
+            let mut resp_buf = [0u8; 512];
+            match vfs_call(self.vfs_tid, &req, &mut resp_buf)? {
+                VfsResponse::Ok => {}
+                _ => return Err(ViError::IO),
+            }
+        }
+        Ok(())
     }
 
     /// Explicitly close the file and revoke its capability.
@@ -130,6 +170,45 @@ impl Drop for File {
             // but this implicit close is always safe.
             syscall::sys_close_cap(self.cap_id);
         }
+    }
+}
+
+// ─── embedded-io trait impls ─────────────────────────────────────────────────
+
+/// Max content bytes per `VfsRequest::Append` IPC call.
+///
+/// Bound by `vfs_call`'s 512-byte send buffer: discriminant(1) + path_len(1,
+/// since ≤96 < 128 → 1-byte postcard varint) + path(≤96) + content_len(2,
+/// since 400 ≥ 128 → 2-byte varint) + content(≤400) + slack(12) = 512.
+/// Changing this constant requires re-verifying that budget.
+const CHUNK_CONTENT: usize = 400;
+
+impl embedded_io::ErrorType for File {
+    type Error = crate::io::OstdError;
+}
+
+impl embedded_io::Read for File {
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize, crate::io::OstdError> {
+        // Explicit path to avoid ambiguity with the trait method of the same name.
+        // Inherent methods win in Rust method resolution, but this is clearer.
+        File::read(self, buf).map_err(crate::io::OstdError)
+    }
+}
+
+impl embedded_io::Write for File {
+    /// Write `buf` by appending it to the file (see `File::write_all` semantics).
+    ///
+    /// Returns `Ok(buf.len())` on success.  Not atomic across IPC chunks —
+    /// if a quota failure occurs mid-write, bytes already flushed to VFS are
+    /// committed and `Err` is returned; partial writes are observable.
+    fn write(&mut self, buf: &[u8]) -> Result<usize, crate::io::OstdError> {
+        self.write_all(buf)
+            .map(|_| buf.len())
+            .map_err(crate::io::OstdError)
+    }
+
+    fn flush(&mut self) -> Result<(), crate::io::OstdError> {
+        Ok(()) // VFS writes are synchronous; no client-side buffer to flush
     }
 }
 

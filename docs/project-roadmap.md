@@ -169,10 +169,16 @@ SMP scales across N cores · windowed desktop + mouse · hot migration with no d
 - 🆕 **Large-buffer IPC / scatter-gather** `[shared, G3 prerequisite]` — 📋 512-byte IPC buffer → 6000 round-trips for a 3MB tensor (unusable for video, file transfer, NPU inference). Recommended: `sys_grant_pages(tid, vaddr, len, perms)` — page-table remap, no memcpy, ~1K LOC. Extends existing Lease/GrantEntry pattern. **G3 cannot start without this.**
 
 ### D. App SDK / ergonomics `[shared]`
+
+> **Decision (2026-06-14):** `ostd` IS ViCell's std — do NOT build a `std` facade (std assumes Unix process model, contradicts SAS/LBI). The three gaps below are what unlock real native apps without false familiarity. See brainstorm `.agents/brainstorms/260614-native-app-std.md` (to be written).
+
 - 🆕 **Name service** `[shared]` — 📋 service endpoint ids are spawn-order constants (vfs=3, net=6…), hard-coded everywhere. Replace with a registry/lookup.
 - 🆕 **High-level cell libraries** `[shared]` — 📋 HTTP/JSON/TLS client helpers so apps don't hand-roll protocol bytes + manual encode/decode.
 - 🆕 **Python/scripting story** `[G2]` — Python R&D users: full CPython via Tier 3 Linux VM (`apt install python3 pip numpy torch` → works). Lua/MicroPython native runtimes **dropped** (half-measure). WASM Tier 2 dropped — no `micropython.wasm` path. Robot code stays Rust (Tier 1). Milestones 3.3/3.4 marked complete but runtimes not actively maintained.
 - 🆕 **Async runtime exposed to apps** `[shared]` — 📋 no app-facing async executor for concurrent I/O.
+- ✅ **`embedded-io` traits for ostd** `[shared, COMPLETE 2026-06-15]` — `embedded_io::Read` impl'd for `ostd::fs::File` + `Stdin`; `embedded_io::Write` impl'd for `Stdout` + `File` (via `VfsRequest::Append` IPC, chunked at 400B). Opens the no_std embedded-crate ecosystem. **Gate for high-level cell libraries: cleared.**
+- ✅ **`HashMap` in ostd prelude** `[shared, COMPLETE 2026-06-15]` — `hashbrown` already in `libs/ostd/Cargo.toml`; `ostd::collections::HashMap`/`HashSet` exported; re-exported in `ostd::prelude`. Was already shipped — roadmap was stale.
+- 🆕 **ViCell App SDK** `[shared, G1-tail]` — 📋 Apps today write raw syscall boilerplate (declare_manifest, sys_recv dispatch loop, manual service lookup). Need a structured application framework layer on top of `ostd`: `AppContext` (unified entry, service discovery, lifecycle), typed event loop (`AppEvent::Message/Shutdown`), ergonomic IPC patterns. The threading model (Cell spawn = Actor, not `std::thread`) must be documented clearly. This is the primary unlock for "real native apps" — equivalent to what SwiftUI/Android lifecycle did for mobile. Effort: ~2 weeks. Depends on: Name service (registry/lookup) + embedded-io traits.
 
 ### E. Ecosystem / distribution `[G2]`
 - ✅ **Tier 1b C library integration** `[shared, COMPLETE 2026-06-13]` — link vendor C/C++ libraries (NPU SDK, mbedTLS, SQLite, legacy firmware) into Rust cells via `vicell-libc` (Newlib + POSIX shim). Shim in `libs/api/src/posix.rs`: malloc/free, strings, file I/O, time → ViSyscall, getentropy → `ViSyscall::GetRandom` (op 214), socket/connect/send/recv/close → typed Net IPC (postcard). ARM64 `svc #0` ABI added; send() postcard decode bug fixed; `_time()` op code fixed (op=3 = epoch seconds). Integration tests: `posix_shim_getentropy` + `posix_shim_net` in `tests/integration/tests/boot.rs`. No `fork` by design. Primary use case: hardware NPU SDKs (RKNN/Hailo/K230). Plan: `.agents/260613-0520-tier1b-posix-shims/`. See [specs/05-application.md §3](specs/05-application.md).
@@ -305,6 +311,33 @@ G3 Level C  →  sys_grant_tensor + TensorBuffer       — needs sys_grant_pages
 
 ---
 
+### H. G2 Application Platform Layers `[G2 — post-G1 foundation]`
+
+> **Context (2026-06-14):** Setelah G1 graduation, ViCell sẽ có kernel rất solid nhưng application platform gần như trống. Chỉ kernel team mới viết được app hiệu quả. G2 không chỉ là thêm tính năng kernel — mà là xây dựng toàn bộ platform layer, giống hành trình Linux từ 1991 (kernel) đến 2000 (LAMP stack).
+>
+> **Rule:** Không có L1 → không ai viết được app. Không có L2 → chỉ toy apps. Không có L3 → không distribute/maintain được. Không có L4 → không operate production được. **Không skip layer.**
+
+| Layer | Cần xây | Tương đương Linux | Phụ thuộc | Status |
+|-------|---------|-------------------|-----------|--------|
+| **L0 — Mental model** | Docs dạy Cell/Actor thinking; migration patterns từ Linux (`thread→cell`, `blocking→async/IPC`) | Unix philosophy, man pages | — | 📋 |
+| **L1 — App Framework** | `AppContext` (service discovery, lifecycle, typed events), ergonomic IPC patterns, ViCell App SDK | glibc + POSIX | Name service (205/206 done), embedded-io traits | 📋 |
+| **L2 — Middleware** | HTTP server native ViCell (zero-copy từ đầu), auth/JWT, pub-sub, DB access (SQLite via Tier 1b) | Express, Django, Spring | L1 |📋 |
+| **L3 — Tooling** | Package manager, cell image format, cell-aware debugger, `cargo-vicell` | apt/cargo, gdb, strace | L1 | 📋 |
+| **L4 — Observability** | Cell metrics, distributed tracing cross-cells, kernel audit ring integration, Prometheus-compatible export | Prometheus, OpenTelemetry | L1 + L3 | 📋 |
+
+**Lợi thế thiết kế ViCell có thể tận dụng (không có ở Linux):**
+- HTTP server zero-copy ngay từ đầu — Grant API đã có; không phải patch sau như nginx
+- Service discovery type-safe qua cap system — không cần consul/etcd bolt-on
+- Observability baked-in — audit ring buffer đã có trong kernel; không retrofit như eBPF
+- Security by default — capability manifests; không phải patch lên Unix DAC sau 30 năm
+
+**Dependency chain cho G2 native app development:**
+```
+✅ embedded-io traits → ✅ HashMap in prelude → App SDK (L1) → Middleware libs (L2) → real G2 apps
+```
+
+---
+
 ### Minimal unlock sets (by use-case)
 | To write… | Needs (leverage order) |
 |---|---|
@@ -313,6 +346,7 @@ G3 Level C  →  sys_grant_tensor + TensorBuffer       — needs sys_grant_pages
 | **Hardware NPU inference (RKNN/Hailo)** | ✅ Tier 1b entropy + net shims DONE — next: RKNN runtime FFI cell |
 | **Python R&D** | Tier 3: full CPython in Linux VM (`apt install python3 pip numpy`) |
 | **Rich apps / ecosystem (G2)** | Tier 1b SDK libs → name service → display → Tier 3 Linux VM |
+| **Real native Rust apps (non-toy)** | ✅ `embedded-io` traits → ✅ `HashMap` in prelude → ViCell App SDK |
 
 ---
 
