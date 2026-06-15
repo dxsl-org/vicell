@@ -19,7 +19,7 @@ use vm_fdt::{FdtWriter, FdtWriterResult};
 
 /// Boot arguments passed to the Linux kernel command line.
 pub const BOOTARGS: &str =
-    "console=ttyAMA0 earlycon=pl011,0x9000000 rdinit=/bin/sh panic=1 loglevel=8";
+    "console=hvc0 console=ttyAMA0 earlycon=pl011,0x9000000 rdinit=/bin/sh panic=1 loglevel=8";
 
 /// Build a minimal DTB for a single-CPU Alpine guest.
 ///
@@ -135,6 +135,15 @@ pub fn build_dtb(
     fdt.property_array_u32("reg", &[0x0, 0x0900_0000, 0x0, 0x1000])?;
     fdt.property_u32("clock-frequency", 0x16E360)?; // 1.5 MHz (QEMU default)
     fdt.end_node(uart)?;
+
+    // ── 8. /virtio_mmio@a000000 — console (slot 0, SPI 16) ──────────────────
+    let vio = fdt.begin_node("virtio_mmio@a000000")?;
+    fdt.property_string("compatible", "virtio,mmio")?;
+    fdt.property_u32("interrupt-parent", 1)?;
+    // SPI 16, IRQ_TYPE_EDGE_RISING=1: <GIC_SPI=0, irq=16, flags=1>
+    fdt.property_array_u32("interrupts", &[0, 16, 1])?;
+    fdt.property_array_u32("reg", &[0x0, 0x0a00_0000, 0x0, 0x200])?;
+    fdt.end_node(vio)?;
 
     fdt.end_node(root)?;
     fdt.finish()

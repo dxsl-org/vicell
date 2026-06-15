@@ -182,6 +182,16 @@ pub enum ViSyscall {
     /// Inject a GICv2 virtual interrupt into vCPU (0 ≤ intid ≤ 1019).
     /// ABI: a0 = vm_id, a1 = vcpu_id, a2 = intid → 0.
     InjectIrq      = 225,
+    /// Copy `len` bytes from caller's `src_ptr` into guest physical RAM at `gpa`.
+    /// Kernel validates `src_ptr + len` lies within the caller's mapped address space
+    /// and `gpa + len` lies within the VM's carved guest-RAM region.
+    /// ABI: a0 = vm_id, a1 = gpa, a2 = src_ptr, a3 = len → bytes_written.
+    WriteGuestMemory = 226,
+    /// Copy `len` bytes from guest physical RAM at `gpa` into caller's `dst_ptr`.
+    /// Kernel bounds-checks both sides: `dst_ptr + len` within caller's address space
+    /// and `gpa + len` within the VM's carved guest-RAM region.
+    /// ABI: a0 = vm_id, a1 = gpa, a2 = dst_ptr, a3 = len → bytes_read.
+    ReadGuestMemory = 227,
 
     // === Hot-swap (Phase 20) ===
     /// Live-replace a running Cell without message loss.
@@ -355,7 +365,8 @@ impl ViSyscall {
             // HypervisorCap (bit 44): all 6 VMM syscalls share one bit.
             // Bit 43 is already assigned to GpuCursor; 44 is the next free slot.
             Self::CreateVm | Self::CreateVcpu | Self::MapGuestMemory
-            | Self::RunVcpu | Self::VcpuRegs | Self::InjectIrq => Some(44),
+            | Self::RunVcpu | Self::VcpuRegs | Self::InjectIrq
+            | Self::WriteGuestMemory | Self::ReadGuestMemory => Some(44),
             // Yield, Exit, and ForceExit are always permitted — a Cell must be able
             // to yield the CPU, exit cleanly, and force-terminate unresponsive tasks
             // regardless of its allowlist.  SpawnCap is the authority gate for ForceExit.
@@ -425,6 +436,8 @@ impl From<usize> for ViSyscall {
             223 => ViSyscall::RunVcpu,
             224 => ViSyscall::VcpuRegs,
             225 => ViSyscall::InjectIrq,
+            226 => ViSyscall::WriteGuestMemory,
+            227 => ViSyscall::ReadGuestMemory,
             300 => ViSyscall::GpuFlush,
             301 => ViSyscall::GpuCursor,
             310 => ViSyscall::NetTx,

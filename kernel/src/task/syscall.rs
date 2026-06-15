@@ -553,6 +553,10 @@ pub enum Syscall {
     VcpuRegs        { vm_id: usize, vcpu_id: usize, buf_ptr: usize, write: bool },
     /// 225: InjectIrq — inject GICv2 virtual interrupt (0 ≤ intid ≤ 1019).
     InjectIrq       { vm_id: usize, vcpu_id: usize, intid: u32 },
+    /// 226: WriteGuestMemory — copy `len` bytes from `src_ptr` to guest GPA.
+    WriteGuestMemory { vm_id: usize, gpa: u64, src_ptr: usize, len: usize },
+    /// 227: ReadGuestMemory — copy `len` bytes from guest GPA into `dst_ptr`.
+    ReadGuestMemory  { vm_id: usize, gpa: u64, dst_ptr: usize, len: usize },
 }
 
 /// Read the per-Cell syscall allowlist from the TCB.
@@ -633,6 +637,8 @@ fn syscall_to_vi(syscall: &Syscall) -> Option<api::syscall::ViSyscall> {
         Syscall::RunVcpu { .. }        => V::RunVcpu,
         Syscall::VcpuRegs { .. }       => V::VcpuRegs,
         Syscall::InjectIrq { .. }      => V::InjectIrq,
+        Syscall::WriteGuestMemory { .. } => V::WriteGuestMemory,
+        Syscall::ReadGuestMemory  { .. } => V::ReadGuestMemory,
         // Always-permitted; allowlist_bit() returns None → filter is a no-op.
         Syscall::Yield
         | Syscall::Exit { .. }
@@ -2193,6 +2199,27 @@ pub fn handle_syscall(caller_id: usize, syscall: Syscall) -> SyscallResult {
             crate::hypervisor::registry::inject_irq(caller_id, vm_id, vcpu_id, intid)
                 .map_err(|_| SyscallError::NotSupported)
         }
+
+        Syscall::WriteGuestMemory { vm_id, gpa, src_ptr, len } => {
+            if !caller_has_hypervisor(caller_id) {
+                return Err(SyscallError::PermissionDenied);
+            }
+            // Overflow guard: gpa+len and src_ptr+len must not wrap.
+            gpa.checked_add(len as u64).ok_or(SyscallError::InvalidInput)?;
+            validate_user_buf(src_ptr, len, MAX_USER_BUF)?;
+            crate::hypervisor::registry::write_guest_memory(caller_id, vm_id, gpa, src_ptr, len)
+                .map_err(|_| SyscallError::InvalidInput)
+        }
+
+        Syscall::ReadGuestMemory { vm_id, gpa, dst_ptr, len } => {
+            if !caller_has_hypervisor(caller_id) {
+                return Err(SyscallError::PermissionDenied);
+            }
+            gpa.checked_add(len as u64).ok_or(SyscallError::InvalidInput)?;
+            validate_user_buf(dst_ptr, len, MAX_USER_BUF)?;
+            crate::hypervisor::registry::read_guest_memory(caller_id, vm_id, gpa, dst_ptr, len)
+                .map_err(|_| SyscallError::InvalidInput)
+        }
     }
 }
 
@@ -2289,6 +2316,12 @@ fn map_syscall(syscall_id: usize, a0: usize, a1: usize, a2: usize, a3: usize) ->
         },
         ViSyscall::InjectIrq      => Syscall::InjectIrq {
             vm_id: a0, vcpu_id: a1, intid: a2 as u32,
+        },
+        ViSyscall::WriteGuestMemory => Syscall::WriteGuestMemory {
+            vm_id: a0, gpa: a1 as u64, src_ptr: a2, len: a3,
+        },
+        ViSyscall::ReadGuestMemory  => Syscall::ReadGuestMemory {
+            vm_id: a0, gpa: a1 as u64, dst_ptr: a2, len: a3,
         },
         _ => match syscall_id {
             3   => Syscall::SetTimer { deadline: a0 },

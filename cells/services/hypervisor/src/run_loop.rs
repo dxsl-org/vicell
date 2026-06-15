@@ -7,7 +7,11 @@ extern crate alloc;
 
 use api::hypervisor::ViVmExit;
 use ostd::io::println;
-use crate::{gicd::Gicd, pl011::Pl011, psci, timer, vmm};
+use crate::{
+    gicd::Gicd, pl011::Pl011, psci, timer, vmm,
+    virtio_console::Console,
+    virtio_mmio::{self, VirtioMmio},
+};
 
 pub enum RunOutcome {
     Shutdown,
@@ -15,9 +19,11 @@ pub enum RunOutcome {
 
 /// Main VMM run loop. Runs until the guest PSCI SYSTEM_OFF or an unrecoverable exit.
 pub fn run(vm_id: usize, vcpu_id: usize) -> RunOutcome {
-    let mut pl011 = Pl011::new();
-    let mut gicd  = Gicd::new();
-    let mut exit  = ViVmExit::Unknown { ec: 0, iss: 0 };
+    let mut pl011   = Pl011::new();
+    let mut gicd    = Gicd::new();
+    let mut console = Console::new();
+    let mut vmio    = VirtioMmio::default();
+    let mut exit    = ViVmExit::Unknown { ec: 0, iss: 0 };
 
     loop {
         let ret = vmm::run_vcpu(vm_id, vcpu_id, &mut exit);
@@ -59,6 +65,11 @@ pub fn run(vm_id: usize, vcpu_id: usize) -> RunOutcome {
                     gicd.write(ipa - crate::gicd::GICD_BASE_IPA, val, size);
                 } else if Gicd::owns_gicc(ipa) {
                     // GICC writes: EOI / priority drop — safe to ignore with VI model.
+                } else if virtio_mmio::owns(ipa) {
+                    let (slot, off) = virtio_mmio::slot_and_offset(ipa);
+                    if slot == 0 {
+                        vmio.mmio_write(off, val as u32, &mut console, vm_id, vcpu_id);
+                    }
                 } else {
                     println(&alloc::format!("[hv] unknown MMIO write ipa=0x{:x} val=0x{:x}", ipa, val));
                 }
@@ -73,6 +84,9 @@ pub fn run(vm_id: usize, vcpu_id: usize) -> RunOutcome {
                     gicd.read(ipa - crate::gicd::GICD_BASE_IPA, size)
                 } else if Gicd::owns_gicc(ipa) {
                     0u64
+                } else if virtio_mmio::owns(ipa) {
+                    let (slot, off) = virtio_mmio::slot_and_offset(ipa);
+                    if slot == 0 { vmio.mmio_read(off, &console) } else { 0 }
                 } else {
                     println(&alloc::format!("[hv] unknown MMIO read ipa=0x{:x}", ipa));
                     0u64

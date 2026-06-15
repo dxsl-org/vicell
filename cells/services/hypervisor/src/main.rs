@@ -26,8 +26,9 @@ api::declare_syscalls![
     OpenCap, ReadCap, CloseCap,
     // Timer emulation
     GetTime,
-    // VMM syscalls 220-226
+    // VMM syscalls 220-227
     CreateVm, CreateVcpu, MapGuestMemory, WriteGuestMemory, RunVcpu, VcpuRegs, InjectIrq,
+    ReadGuestMemory,
 ];
 
 mod dtb;
@@ -37,6 +38,9 @@ mod pl011;
 mod psci;
 mod run_loop;
 mod timer;
+mod virtio_console;
+mod virtio_mmio;
+mod virtqueue;
 mod vmm;
 
 use ostd::io::println;

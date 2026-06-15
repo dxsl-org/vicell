@@ -55,6 +55,19 @@ pub fn write_guest_memory(vm_id: usize, gpa: u64, src: &[u8]) -> usize {
     }
 }
 
+/// Copy `len` bytes from guest RAM at `gpa` into `dst`; returns bytes read or ERR.
+pub fn read_guest_memory(vm_id: usize, gpa: u64, dst: &mut [u8]) -> usize {
+    unsafe {
+        syscall4(
+            ViSyscall::ReadGuestMemory,
+            vm_id,
+            gpa as usize,
+            dst.as_mut_ptr() as usize,
+            dst.len(),
+        )
+    }
+}
+
 /// World-switch into `vcpu_id`; writes exit reason to `*exit`. Returns 0 or ERR.
 pub fn run_vcpu(vm_id: usize, vcpu_id: usize, exit: &mut ViVmExit) -> usize {
     unsafe {
