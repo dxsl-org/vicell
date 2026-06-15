@@ -1,6 +1,6 @@
 # ViCell Architecture: Application Tiers
-**Version**: 0.7 (Drop WASM Tier 2; Minimal VMM for Tier 3)
-**Status**: Definitive — updated 2026-06-06 after brainstorm session
+**Version**: 0.8 (Tier 3b ARM64 EL2 VMM shipped — Alpine boots + apt works)
+**Status**: Definitive — updated 2026-06-16 after Tier 3b Phase 10 completion
 
 ---
 
@@ -196,20 +196,25 @@ ViCell tự viết VMM tối giản thay vì fork crosvm (~75K LOC thực tế, 
 **Tại sao không QEMU:** ~1M LOC C, cần JIT/mmap/fork — không fit Tier 1 cell.
 **Tại sao không Firecracker:** thiếu GPU/display backend — chỉ cho serverless, không G2 desktop.
 
-**Cấu trúc `cells/services/hypervisor/` (~9K LOC):**
+**Cấu trúc `cells/services/hypervisor/` (shipped, ~9K LOC):**
 ```
 src/
-  vcpu.rs       (~1K) — vCPU struct, run loop, VM exit dispatch
-  vm.rs         (~1K) — VM lifecycle, Stage-2 page tables
-  mmio.rs       (~500) — MMIO bus, device dispatch
-  virtio/
-    blk.rs      (~1.5K) — virtio-blk → VFS IPC
-    net.rs      (~1.5K) — virtio-net → Net IPC
-    console.rs  (~500) — virtio-console → serial
-  arch/
-    riscv.rs    (~1K) — H-extension vCPU ops
-    arm64.rs    (~1K) — EL2 vCPU ops [G2]
-    x86.rs      (~1K) — VT-x vCPU ops [G2]
+  run_loop.rs       — VmExit dispatch loop (MMIO/HVC/WFI/Preempted/Shutdown)
+  vmm.rs            — create_vm / create_vcpu / map_guest / run_vcpu wrappers
+  loader_image.rs   — ARM64 Image header parser + guest RAM placement
+  dtb.rs            — FDT builder (9 nodes: RAM/CPU/PSCI/GIC/timer/chosen/UART/virtio×3)
+  pl011.rs          — PL011 UART emulator
+  gicd.rs           — GICv2 GICD shadow-register emulator
+  psci.rs           — PSCI 1.0 handler (SYSTEM_OFF/CPU_ON/…)
+  timer.rs          — armv8-timer virtual IRQ injection
+  virtio_mmio.rs    — virtio-mmio transport (QueueNotify, feature negotiation)
+  virtqueue.rs      — split virtqueue (avail/used ring, descriptor chain walk)
+  virtio_console.rs — virtio-console (slot 0, SPI 16)
+  virtio_blk.rs     — virtio-blk → VFS IPC (slot 1, SPI 17)
+  virtio_net.rs     — virtio-net → Net IPC, MAC demux (slot 2, SPI 18)
+  net_backend.rs    — L2Send/L2Recv IPC helpers to Net Cell
+  vgic.rs           — GICH/GICV hardware vGIC (Phase 09)
+  loader_image.rs   — guest image placement helper
 ```
 
 ### 4.4 Kernel H-extension requirements (RISC-V)
@@ -245,38 +250,54 @@ kernel/src/syscall/hypervisor.rs  (~300 LOC)
 ### 4.5 Multi-arch HAL trait
 
 ```rust
-/// Hardware virtualization interface — one impl per arch.
+/// Hardware virtualization interface — one impl per arch (hal/traits/hypervisor/).
 pub trait ViHypervisor {
-    fn detect() -> bool;
-    fn create_stage2_table() -> Stage2Table;
-    fn map_guest_region(table: &mut Stage2Table, gpa: PAddr, hpa: PAddr, size: usize, flags: MapFlags);
-    fn run_vcpu(vcpu: &mut Vcpu) -> VmExit;
-    fn inject_irq(vcpu: &mut Vcpu, irq: u32);
+    type Vm; type Vcpu; type Stage2Table;
+    fn create_vm(&self) -> ViResult<Self::Vm>;
+    fn create_vcpu(&self, vm: &mut Self::Vm) -> ViResult<Self::Vcpu>;
+    fn map_guest(&self, table: &mut Self::Stage2Table,
+                 ipa: u64, hpa: u64, pages: usize, writable: bool) -> ViResult<()>;
+    fn run_vcpu(&self, vcpu: &mut Self::Vcpu) -> ViResult<ViVmExit>;
+    fn inject_irq(&self, vcpu: &mut Self::Vcpu, intid: u32) -> ViResult<()>;
 }
 ```
 
-| Arch | Mechanism | Status |
-|---|---|---|
-| RISC-V | H-extension (HS-mode, hgatp Stage-2) | G1 prep + G2 impl |
-| ARM64 | EL2 (HCR_EL2, VTTBR_EL2, Stage-2) | G2 |
-| x86_64 | VT-x/AMD-V (VMCS, EPT) | G2 |
+| Arch | Mechanism | HAL crate | Status |
+|---|---|---|---|
+| **ARM64** | EL2 non-VHE (HCR_EL2, VTTBR_EL2, Stage-2, GICH) | `hal-arm` | **✅ G1 shipped** (P01–P10) |
+| RISC-V | H-extension (HS-mode, hgatp Stage-2) | `hal-riscv` (ENOSYS stub) | ⏳ G2 — H-ext absent on current boards |
+| x86_64 | VT-x (VMCS, EPT) | `hal-x86` (ENOSYS stub) | ⏳ G2 |
 
-### 4.6 Implementation phases
+Kernel syscall dispatch (`kernel/src/hypervisor/registry.rs`) is `#[cfg(target_arch = "aarch64")]` for the real impl and returns `NotSupported` on riscv64/x86_64 — matching the HAL stubs. No kernel change needed when future RISC-V/x86 impls land.
 
+### 4.6 Implementation status
+
+**ARM64 EL2 VMM — ✅ COMPLETE (G1, 2026-06-16)**
 ```
-G1 prep (khi H-extension đã stable, non-breaking):
-  hal/arch/riscv/hypervisor.rs — H-ext detect + HS-mode boot
-  → Test: kernel boots identically with/without H-ext
-  → Viết hypervisor syscall stubs (return ENOSYS nếu Tier 3 not enabled)
+Phases 01–10 shipped in cells/services/hypervisor/:
+  P01: HAL ViHypervisor trait + ARM64 stay-at-EL2 boot + EL2 MMU/vectors
+  P02: Stage-2 builder + guest-RAM carve (128 MiB) + VTTBR/VTCR
+  P03: vCPU world-switch + trap decode + bare-metal guest smoke
+  P04: Syscalls 220-227 (CreateVm/CreateVcpu/MapGuest/RunVcpu/VcpuRegs/InjectIrq/WriteGuest/ReadGuest)
+  P05: Hypervisor cell: guest-load + DTB + PSCI + PL011 + GICD emul → BOOTS ALPINE
+  P06: virtio-mmio transport + split virtqueue + virtio-console
+  P07: virtio-blk → VFS Cell → mounts rootfs
+  P08: virtio-net → Net Cell (L2 MAC-bridge, DHCP → 10.0.2.15, apt works)
+  P09: Full GICH/GICV hardware vGIC upgrade (IRQ throughput)
+  P10: CI smoke + ENOSYS stubs (riscv64/x86_64) + this docs update
+```
 
-G2 Phase 31+:
-  Step 1: Build vicell_hv/ minimal VMM from scratch (~9K LOC)
-          vcpu + vm + mmio bus + virtio-blk/net/console
-  Step 2: VirtIO backends → ViCell IPC (VFS Cell, Net Cell)
-  Step 3: Boot Alpine Linux guest in QEMU (minimal test)
-  Step 4: Security Silo implementation (reuse Stage-2 primitives)
-  Step 5: ARM64 EL2 + x86 VT-x ports
-  Step 6: Android guest (requires GPU passthrough — G2+)
+**RISC-V H-extension — ⏳ Pending**
+```
+Current RISC-V boards (SG2042, SG2044, K230) lack H-extension.
+ENOSYS stubs in hal-riscv/src/hypervisor.rs + registry.rs are in place.
+Impl unblocks when H-ext hardware is available.
+```
+
+**x86_64 VT-x — ⏳ Pending (G2)**
+```
+ENOSYS stubs in hal-x86/src/hypervisor.rs + registry.rs are in place.
+VT-x impl deferred to G2.
 ```
 
 ---
@@ -293,11 +314,11 @@ G2 Phase 31+:
 
 ## 6. Những đường sai cần tránh (Wrong Paths)
 
-1. **Type-1 hypervisor**: Tier 3 phải chạy ON TOP of ViCell, không phải thay thế kernel. ViCell kernel = Type-2 host.
+1. **Type-1 hypervisor**: Tier 3 phải chạy ON TOP of ViCell, không phải thay thế kernel. ViCell kernel = Type-2 host. ✅ Xác nhận: hypervisor cell là Tier 1 cell bình thường với HypervisorCap.
 2. **Port QEMU**: Quá lớn (~1M LOC C, cần JIT/mmap) — không fit Tier 1 cell.
-3. **Fork crosvm**: ~75K LOC thực tế (không phải ~20K), kéo theo tokio + mmap — không fit SAS cell. Build minimal VMM từ scratch (~9K LOC) thay thế.
+3. **Fork crosvm**: ~75K LOC thực tế (không phải ~20K), kéo theo tokio + mmap — không fit SAS cell. ✅ Build minimal VMM từ scratch (~9K LOC) — đã shipped ARM64 EL2 (P01-P10).
 4. **Gộp Security Silo và Linux VM**: Hai use case khác nhau — implement riêng, reuse Stage-2 primitives.
-5. **Assume H-ext mọi nơi**: RV32 không có H-ext. ARM dùng EL2. x86 dùng VT-x. Phải per-arch HAL.
+5. **Assume H-ext mọi nơi**: RV32 không có H-ext. ARM dùng EL2. x86 dùng VT-x. Phải per-arch HAL. ✅ ENOSYS stubs cho riscv64/x86_64 landed P10; ARM64 EL2 shipped.
 6. **Android G1**: Android cần GPU passthrough + camera HAL + binder IPC — G2+ only, đừng để Android shape G2 design sớm.
 7. **WASM Tier 2 (wasmi / WAMR / WASI)**: Semi-trusted zone giả định không tồn tại trong thực tế:
    - G1 (robot/embedded): code đều là trusted Rust — R&D/thử nghiệm diễn ra trên PC không phải thiết bị

@@ -206,6 +206,74 @@ jobs:
           chmod +x scripts/qemu-aarch64-test.sh
           BOOT_WINDOW=90 bash scripts/qemu-aarch64-test.sh
 
+  qemu-hypervisor-smoke:
+    name: QEMU Hypervisor Smoke (Alpine / # in 180s)
+    runs-on: ubuntu-24.04
+    # continue-on-error: alpine fetch or TCG timeout should not block other CI jobs.
+    continue-on-error: true
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-05-01
+          components: rust-src
+          targets: aarch64-unknown-none-softfloat
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+          key: hypervisor-smoke
+
+      - name: Install QEMU
+        run: sudo apt-get update -q && sudo apt-get install -y -q qemu-system-arm
+
+      - name: Cache Alpine artifacts
+        uses: actions/cache@v4
+        with:
+          path: .alpine-cache
+          key: alpine-netboot-aarch64-3.21.3
+
+      - name: Fetch Alpine aarch64 netboot artifacts
+        run: |
+          chmod +x scripts/fetch-alpine-artifacts.sh
+          bash scripts/fetch-alpine-artifacts.sh .alpine-cache
+
+      - name: Build aarch64 cells (core + hypervisor)
+        run: >
+          cargo build --release
+          --target aarch64-unknown-none-softfloat
+          -Z build-std=core,alloc
+          -p app-init -p app-shell -p service-vfs -p service-config
+          -p service-net -p service-hypervisor
+
+      - name: Build hypervisor kernel_fs.img (embeds Alpine)
+        run: |
+          chmod +x scripts/make-hypervisor-fs.sh
+          bash scripts/make-hypervisor-fs.sh --skip-fetch
+
+      - name: Build aarch64 hypervisor kernel (EMBEDDED_OVERRIDE)
+        env:
+          RUSTFLAGS: "-D warnings -C relocation-model=pic"
+          EMBEDDED_OVERRIDE: "kernel/src/embedded-hv"
+        run: >
+          cargo build --release
+          -p vicell-kernel
+          --target aarch64-unknown-none-softfloat
+          -Z build-std=core,alloc
+
+      - name: Create hypervisor disk image
+        run: |
+          chmod +x scripts/format-disk-hv-arm.sh
+          bash scripts/format-disk-hv-arm.sh disk_hv_arm.img
+
+      - name: Run hypervisor smoke test (Alpine / # within 180s)
+        run: |
+          chmod +x scripts/qemu-hypervisor-smoke.sh
+          BOOT_WINDOW=180 bash scripts/qemu-hypervisor-smoke.sh
+
   x86_64-lint:
     name: Clippy (x86_64)
     runs-on: ubuntu-24.04

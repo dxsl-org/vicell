@@ -1,7 +1,6 @@
 pub mod boot;
 
 // Re-export common modules for convenience or trait impls
-// Re-export common modules for convenience or trait impls
 pub use crate::common::sbi;
 pub use crate::common::timer;
 pub use crate::common::uart_ns16550a as uart;

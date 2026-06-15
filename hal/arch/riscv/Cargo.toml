@@ -4,11 +4,12 @@ version = "0.2.0"
 edition = "2021"
 
 [dependencies]
-hal-arch-trait = { path = "../../traits/arch" }
-hal-uart = { path = "../../traits/uart" }
-hal-timer = { path = "../../traits/timer" }
-hal-interrupt = { path = "../../traits/interrupt" }
-hal-paging = { path = "../../traits/paging" }
+hal-arch-trait  = { path = "../../traits/arch" }
+hal-uart        = { path = "../../traits/uart" }
+hal-timer       = { path = "../../traits/timer" }
+hal-interrupt   = { path = "../../traits/interrupt" }
+hal-paging      = { path = "../../traits/paging" }
+hal-hypervisor  = { path = "../../traits/hypervisor" }
 types = { path = "../../../libs/types" }
 riscv = "0.10.1" # Standard RISC-V crate
 

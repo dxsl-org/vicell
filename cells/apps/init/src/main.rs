@@ -150,6 +150,9 @@ pub extern "C" fn main() {
     let _ = sys_spawn_from_path("/bin/adc-demo");
     // Optional CAN loopback demo (in-memory loopback, no hardware) — all arches.
     let _ = sys_spawn_from_path("/bin/can-demo");
+    // Optional hypervisor service — auto-starts when /bin/hypervisor is present in
+    // the disk image (aarch64 + virtualization=on kernel builds only).
+    let _ = sys_spawn_from_path("/bin/hypervisor");
     // VFS integration test suite: only present in test-hooks kernel images.
     let _ = sys_spawn_from_path("/bin/vfs-test");
     // Bare-cell input delivery test — ostd::input focus + event loop, no viui.
