@@ -1,0 +1,19 @@
+# Host-side unit tests for boot.rs data structures and logic.
+#
+# Tests the pure-Rust logic in kernel/src/boot.rs without QEMU or no_std:
+# - Limine entry_type → MemoryType conversion (all 8 types + unknown)
+# - SimpleBootInfo trait method correctness
+# - FALLBACK_BOOT_INFO address ranges per arch
+# - MAX_MEMORY_MAP_ENTRIES truncation contract
+#
+# Run with (explicit host target required — root .cargo/config.toml defaults to riscv64):
+#   cargo test --manifest-path tests/boot-unit/Cargo.toml --target x86_64-pc-windows-msvc
+
+[package]
+name = "vicell-boot-unit"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Detach from the parent workspace (riscv64 default target).
+[workspace]

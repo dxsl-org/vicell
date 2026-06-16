@@ -1,7 +1,7 @@
 ---
 title: "Phase 32: SMP Multi-Core Scheduler"
 description: "Per-hart run queues + work stealing + RT-pinned hart + IRQ-driven net waker on 2-hart QEMU virt"
-status: active
+status: complete
 priority: P3
 effort: ~4 weeks
 branch: main
@@ -30,8 +30,8 @@ waker so the net cell stops busy-polling. Roadmap: `docs/project-roadmap.md` §P
 |---|-------|--------|-----------|--------|-------------|
 | 01 | [SBI HSM + per-hart boot](phase-01-sbi-hsm-hart-boot.md) | ✅ Done | — | ~1 wk | Add `hart_start`/`send_ipi` to sbi.rs; bring hart 1 up to an idle park loop. No scheduler change. |
 | 02 | [Per-hart local state](phase-02-per-hart-local-state.md) | ✅ Done | — | ~1 wk | `ViHartLocal` struct via `tp` CSR; `CURRENT_CELL_ID` → per-hart array. No queue change. |
-| 03 | [Per-hart queues + work stealing](phase-03-per-hart-queues-work-stealing.md) | pending | 01✅, 02✅ | ~1.5 wk | Split global lock into per-hart spinlocks; idle hart steals half of busiest Normal backlog. |
-| 04 | [RT pinning + IPI preempt + waker](phase-04-rt-pinning-ipi-waker.md) | pending | 03 | ~1 wk | RT→hart 1 (no steal); cross-hart IPI preempt; IRQ-driven net waker. Smoke: RT + Normal concurrently. |
+| 03 | [Per-hart queues + work stealing](phase-03-per-hart-queues-work-stealing.md) | ✅ Done | 01✅, 02✅ | ~1.5 wk | Split global lock into per-hart spinlocks; idle hart steals half of busiest Normal backlog. |
+| 04 | [RT pinning + IPI preempt + waker](phase-04-rt-pinning-ipi-waker.md) | ✅ Done | 03✅ | ~1 wk | RT→hart 1 (no steal); cross-hart IPI preempt; IRQ-driven net waker. Smoke: RT + Normal concurrently. |
 
 Phases 01 and 02 are independent (different files, no shared symbol mutation) and run in PARALLEL.
 03 merges both. 04 builds on 03.

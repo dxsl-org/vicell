@@ -78,6 +78,11 @@ pub extern "Rust" fn vi_handle_virtio_irq(irq: u32) {
         return;
     }
 
+    // --- Net device ---
+    if crate::task::drivers::virtio_net::ack_irq(irq) {
+        return;
+    }
+
     // --- Input (keyboard) device ---
     // ack_irq clears InterruptStatus; without this an input IRQ becomes a storm.
     // After ACKing, call poll_events() to drain pending events into event_queue so

@@ -48,6 +48,9 @@ fn map_element(name: &str) -> Option<(&'static str, &'static str)> {
         "TouchArea"                          => Some(("TouchArea",   "touch_area")),
         "ListView" | "List"                  => Some(("ListView",    "list_view")),
         "ScrollArea" | "ScrollView"          => Some(("ScrollArea",  "scroll_area")),
+        // Overlay widgets — constructed imperatively; codegen emits a placeholder.
+        "Dialog"                             => Some(("Dialog",      "dialog")),
+        "DropDown" | "Dropdown"              => Some(("DropDown",    "dropdown")),
         _ => None,
     }
 }

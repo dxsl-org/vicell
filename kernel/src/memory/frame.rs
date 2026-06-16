@@ -240,6 +240,21 @@ impl FrameAllocator {
         self.frame_index_to_addr(idx)
     }
 
+    /// Mark `n` consecutive frames starting at `start_idx` as allocated.
+    ///
+    /// Used by `allocate_guest_ram` after locating a free run so the final
+    /// allocation is a single, atomic lock hold rather than n individual calls.
+    pub fn mark_range_used(&mut self, start_idx: usize, n: usize) {
+        debug_assert!(
+            start_idx + n <= self.total_frames,
+            "mark_range_used: frame range [{}, {}) out of bounds (total={})",
+            start_idx, start_idx + n, self.total_frames,
+        );
+        for i in 0..n {
+            self.mark_used(start_idx + i);
+        }
+    }
+
     /// Find `n` consecutive free frames and mark them all allocated.
     ///
     /// Returns the physical address of the first frame, or `None` when no
@@ -269,3 +284,76 @@ impl FrameAllocator {
 /// Global frame allocator
 pub static FRAME_ALLOCATOR: crate::sync::Spinlock<Option<FrameAllocator>> =
     crate::sync::Spinlock::new(None);
+
+/// Allocate N contiguous physical frames for guest VM RAM using a chunked scan.
+///
+/// Releases `FRAME_ALLOCATOR` every `PROBE_CHUNK` frames during the search phase
+/// to keep lock-hold time bounded and prevent the RT watchdog from firing during
+/// a 512 MiB (131 072-frame) contiguous search (Red-Team M2).
+///
+/// # TOCTOU
+/// After locating a candidate run, the lock is re-acquired to re-verify and mark
+/// all frames atomically.  Transparent on QEMU TCG (single CPU).  A production
+/// SMP build would use a buddy allocator with a free-run index.
+pub fn allocate_guest_ram(n_pages: usize) -> Option<PhysAddr> {
+    const PROBE_CHUNK: usize = 256;
+
+    let total = FRAME_ALLOCATOR.lock().as_ref()?.total_frames;
+    let limit = total.saturating_sub(n_pages);
+    let mut candidate = 0usize; // current candidate run start (frame index)
+    let mut run_len = 0usize;   // confirmed free frames from candidate onward
+
+    while candidate <= limit {
+        let probe_from = candidate + run_len;
+        if probe_from >= total {
+            break;
+        }
+
+        // Probe up to PROBE_CHUNK frames under a bounded lock hold.
+        let (chunk_free, first_used) = {
+            let g = FRAME_ALLOCATOR.lock();
+            let a = g.as_ref()?;
+            let probe_end = (probe_from + PROBE_CHUNK).min(total);
+            let mut free_cnt = 0usize;
+            let mut used_at = None;
+            for idx in probe_from..probe_end {
+                if a.is_frame_allocated(idx) {
+                    used_at = Some(idx);
+                    break;
+                }
+                free_cnt += 1;
+            }
+            (free_cnt, used_at)
+        }; // lock dropped — other kernel tasks may run
+
+        run_len += chunk_free;
+
+        if run_len >= n_pages {
+            // Candidate run is long enough — re-verify and allocate under lock.
+            let result = {
+                let mut g = FRAME_ALLOCATOR.lock();
+                let a = g.as_mut()?;
+                let all_free = (0..n_pages).all(|i| !a.is_frame_allocated(candidate + i));
+                if all_free {
+                    a.mark_range_used(candidate, n_pages);
+                    Some(a.frame_addr(candidate))
+                } else {
+                    None // race: another CPU grabbed a frame; restart
+                }
+            };
+            if let Some(pa) = result {
+                return Some(pa);
+            }
+            candidate += 1;
+            run_len = 0;
+            continue;
+        }
+
+        if let Some(used_idx) = first_used {
+            candidate = used_idx + 1;
+            run_len = 0;
+        }
+        // If chunk was all free but run_len < n_pages: loop to probe next chunk.
+    }
+    None
+}

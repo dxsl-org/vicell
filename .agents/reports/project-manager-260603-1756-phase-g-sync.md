@@ -22,7 +22,7 @@ Phase G (FAT16 Completion) closed all remaining filesystem feature gaps and hard
 - ✅ Helper `caller_has_block_io()` added (`syscall.rs:70-82`)
 - ✅ All 3 block-I/O gates updated (BlkFlush, BlkRead, BlkWrite at lines 1082, 1109, 1130)
 - ✅ `VFS_TASK_ID` constant fully removed (0 grep hits)
-- **Compile**: `cargo build -p vios-kernel -r` ✅ (stripe warning expected)
+- **Compile**: `cargo build -p ViCell-kernel -r` ✅ (stripe warning expected)
 
 ### Phase 2: OP_RMDIR for FAT16
 - ✅ OP_RMDIR arm refactored (`main.rs:425-436`) to branch on path prefix
@@ -98,7 +98,7 @@ Phase G (FAT16 Completion) closed all remaining filesystem feature gaps and hard
 ## Compile Verification
 
 ```
-✅ cargo build -p vios-kernel -r        (0 errors, 1 expected warning)
+✅ cargo build -p ViCell-kernel -r        (0 errors, 1 expected warning)
 ✅ cargo build -p service-vfs -r        (0 errors)
 ✅ cargo build -p app-shell -r          (0 errors, 1 pre-existing dead_code warn)
 ```

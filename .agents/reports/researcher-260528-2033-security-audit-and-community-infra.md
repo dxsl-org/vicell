@@ -1,15 +1,15 @@
-# Research Report: Security Audit & Community Infrastructure for ViOS
-**Date**: 2026-05-28 | **Scope**: ViOS — no_std nightly, RISC-V 64-bit, ~12,600 LOC, 21 crates
+# Research Report: Security Audit & Community Infrastructure for ViCell
+**Date**: 2026-05-28 | **Scope**: ViCell — no_std nightly, RISC-V 64-bit, ~12,600 LOC, 21 crates
 
 ---
 
 ## TOPIC 1: SECURITY AUDIT FOR CAPABILITY-BASED OS
 
-### 1.1 STRIDE Threat Matrix — ViOS Specific
+### 1.1 STRIDE Threat Matrix — ViCell Specific
 
-ViOS's SAS + LBI model shifts threat surfaces significantly vs. MMU-based OS. Map each STRIDE category to ViOS's architecture:
+ViCell's SAS + LBI model shifts threat surfaces significantly vs. MMU-based OS. Map each STRIDE category to ViCell's architecture:
 
-| STRIDE | Traditional OS | ViOS-Specific Vector | Mitigation |
+| STRIDE | Traditional OS | ViCell-Specific Vector | Mitigation |
 |--------|---------------|----------------------|------------|
 | **Spoofing** | Forged process identity | Cell forging a capability token / cell ID in IPC dispatch | Capability tokens must be unforgeable `Arc<CapToken>` — never pass raw IDs across cell boundary |
 | **Tampering** | Write to other process memory | Safe-Rust Cell calling `unsafe` via transitive dependency (unsoundness in dep) | `cargo-geiger` gate on unsafe dep count; Rudra scan on every dep |
@@ -18,7 +18,7 @@ ViOS's SAS + LBI model shifts threat surfaces significantly vs. MMU-based OS. Ma
 | **DoS** | Fork bomb | Cell monopolizing async executor (no yield point, busy-loop) | Task deadline / yield-point enforcement; Memory Quota Cell (already in testing doc) |
 | **EoP** | Kernel exploit | Unsound `unsafe` in kernel or HAL transitively callable from Cell; confused deputy via capability delegation chain | Minimize unsafe TCB (Asterinas model); audit every `unsafe` block with MIRI + Rudra; forbid ambient authority |
 
-**Highest-risk area for ViOS**: Elevation of Privilege via transitive unsoundness. A Cell marked `#![forbid(unsafe_code)]` can still be exploited if a safe API it calls has unsoundness in its `unsafe` implementation (Rudra's primary target). This is the #1 priority audit item.
+**Highest-risk area for ViCell**: Elevation of Privilege via transitive unsoundness. A Cell marked `#![forbid(unsafe_code)]` can still be exploited if a safe API it calls has unsoundness in its `unsafe` implementation (Rudra's primary target). This is the #1 priority audit item.
 
 ### 1.2 SAS-Specific Threat Vectors
 
@@ -32,7 +32,7 @@ Hardware MMU is absent between Cells. This means:
 
 4. **TOCTOU on Lease Revocation** — Between lease validity check and actual use, async suspension could change the lease state. Mitigation: lease check-then-use must be in the same sync block, or use atomic revocation flags.
 
-5. **Panic-Unwind Leaking State** — If a Cell panics mid-IPC, partial state can be left in shared kernel structures. ViOS testing doc already calls this out (Fault Injection Cell). Ensure `catch_unwind` on all Cell entry points.
+5. **Panic-Unwind Leaking State** — If a Cell panics mid-IPC, partial state can be left in shared kernel structures. ViCell testing doc already calls this out (Fault Injection Cell). Ensure `catch_unwind` on all Cell entry points.
 
 ### 1.3 Unsafe Code Audit Toolchain
 
@@ -70,7 +70,7 @@ MIRIFLAGS="-Zmiri-disable-isolation" cargo miri test --lib -p kernel
 cargo kani --harness verify_lease_revocation_invariant
 ```
 
-**Kani example harness for ViOS:**
+**Kani example harness for ViCell:**
 
 ```rust
 #[cfg(kani)]
@@ -88,7 +88,7 @@ mod verification {
 }
 ```
 
-**Tool Ranking for ViOS (priority order):**
+**Tool Ranking for ViCell (priority order):**
 
 | Rank | Tool | Purpose | Run Frequency | Limitation |
 |------|------|---------|--------------|-----------|
@@ -100,7 +100,7 @@ mod verification {
 
 ### 1.4 Fuzzing Strategy
 
-**Problem**: cargo-fuzz / libFuzzer requires std and x86-64. ViOS is no_std + RISC-V target. Cannot fuzz the kernel binary directly with cargo-fuzz.
+**Problem**: cargo-fuzz / libFuzzer requires std and x86-64. ViCell is no_std + RISC-V target. Cannot fuzz the kernel binary directly with cargo-fuzz.
 
 **Solution — Two-track fuzzing:**
 
@@ -128,22 +128,22 @@ cargo add libafl libafl_qemu --dev
 
 **Track C: Syzkaller-style grammar fuzzing** (longer term)
 
-Write a syscall grammar description for ViOS's `ViSyscall` enum. syzkaller can generate semantically valid syscall sequences. Requires a syz-description file per syscall.
+Write a syscall grammar description for ViCell's `ViSyscall` enum. syzkaller can generate semantically valid syscall sequences. Requires a syz-description file per syscall.
 
 **Recommended start**: Track A (immediate, low cost). Track B after stabilizing syscall interface.
 
 ### 1.5 Lessons from Comparable OSes
 
-| OS | Unsafe % of codebase | Approach | Lesson for ViOS |
+| OS | Unsafe % of codebase | Approach | Lesson for ViCell |
 |----|---------------------|----------|-----------------|
 | Tock OS | 93% of crates have unsafe | Scattered, no strict boundary | Anti-pattern — do NOT follow |
 | Theseus | 62% | Better but still broad | Borderline acceptable |
 | RedLeaf | 32% | Isolated unsafe | Acceptable |
-| **Asterinas** | **14% (OSTD only)** | Unsafe confined to one framework crate (OSTD), rest is safe Rust | **Target model for ViOS** |
+| **Asterinas** | **14% (OSTD only)** | Unsafe confined to one framework crate (OSTD), rest is safe Rust | **Target model for ViCell** |
 
-**ViOS goal**: Confine all `unsafe` to `hal/` + `kernel/src/` core. Every unsafe block has a `// SAFETY:` comment. Target: unsafe-containing files < 20% of total codebase.
+**ViCell goal**: Confine all `unsafe` to `hal/` + `kernel/src/` core. Every unsafe block has a `// SAFETY:` comment. Target: unsafe-containing files < 20% of total codebase.
 
-Asterinas uses CertiK + Verus for formal verification of page management. ViOS equivalent: use Kani for lease/capability invariants (simpler to adopt than Verus).
+Asterinas uses CertiK + Verus for formal verification of page management. ViCell equivalent: use Kani for lease/capability invariants (simpler to adopt than Verus).
 
 ### 1.6 Practical 5-Step Security Checklist
 
@@ -179,10 +179,10 @@ Step 5 — Formal Verification of Critical Invariants (Quarterly)
 
 ### 2.1 CONTRIBUTING.md — Required Sections
 
-ViOS already has `ONBOARDING.md` (detailed, well-structured). CONTRIBUTING.md should be the **short entry point** that links to it, not duplicate it. Recommended structure (< 150 lines):
+ViCell already has `ONBOARDING.md` (detailed, well-structured). CONTRIBUTING.md should be the **short entry point** that links to it, not duplicate it. Recommended structure (< 150 lines):
 
 ```markdown
-# Contributing to ViOS
+# Contributing to ViCell
 
 ## Quick Links
 - [Code of Conduct](CODE_OF_CONDUCT.md)
@@ -215,7 +215,7 @@ Types: feat | fix | docs | refactor | test | chore
 Maintainers aim to respond within 7 days.
 ```
 
-**Missing from current ViOS docs**: CODE_OF_CONDUCT.md — add it (use Contributor Covenant v2.1, 5 min to set up).
+**Missing from current ViCell docs**: CODE_OF_CONDUCT.md — add it (use Contributor Covenant v2.1, 5 min to set up).
 
 ### 2.2 Good-First-Issue Labeling Strategy
 
@@ -226,7 +226,7 @@ Kernel projects are intimidating. Structure labels to create a clear on-ramp:
 - `help-wanted` — medium complexity, maintainer available for guidance (1-3 days)
 - `good-second-issue` — custom label: issues requiring understanding of one subsystem
 
-**Area labels (ViOS-specific):**
+**Area labels (ViCell-specific):**
 - `area:docs` — documentation only (safest for newcomers)
 - `area:shell` — cells/apps/shell — self-contained, no unsafe
 - `area:hal-traits` — adding traits, no hardware code
@@ -247,7 +247,7 @@ Kernel projects are intimidating. Structure labels to create a clear on-ramp:
 
 **Recommendation**: Three-tier model (not either/or).
 
-| Channel | Purpose | ViOS Use Case |
+| Channel | Purpose | ViCell Use Case |
 |---------|---------|--------------|
 | **GitHub Issues** | Bug reports, feature requests with clear acceptance criteria | "Kernel panics on QEMU virt board when X", "Implement VirtIO block driver" |
 | **GitHub Discussions** | Design questions, architecture Q&A, community announcements, FAQ | "Why SAS instead of microkernel with separate address spaces?", "Roadmap discussion" |
@@ -257,7 +257,7 @@ Kernel projects are intimidating. Structure labels to create a clear on-ramp:
 
 **Rule**: Any Discord answer that takes > 5 min to write should be copied to a GitHub Discussion.
 
-ViOS's existing ONBOARDING.md already points to both — this is correct. Add GitHub Discussions as the primary async channel, Discord as secondary real-time.
+ViCell's existing ONBOARDING.md already points to both — this is correct. Add GitHub Discussions as the primary async channel, Discord as secondary real-time.
 
 ### 2.4 Changelog Automation: git-cliff + Conventional Commits
 
@@ -274,11 +274,11 @@ git cliff --init
 # Generates cliff.toml
 ```
 
-**cliff.toml for ViOS:**
+**cliff.toml for ViCell:**
 
 ```toml
 [changelog]
-header = "# ViOS Changelog\n\n"
+header = "# ViCell Changelog\n\n"
 body = """
 ## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
 {% for group, commits in commits | group_by(attribute="group") %}
@@ -329,7 +329,7 @@ jobs:
           body_path: CHANGES.md
 ```
 
-**Commit type → CHANGELOG section mapping for ViOS:**
+**Commit type → CHANGELOG section mapping for ViCell:**
 
 | Commit prefix | CHANGELOG group |
 |--------------|-----------------|
@@ -342,7 +342,7 @@ jobs:
 
 ### 2.5 Release Tagging Strategy
 
-ViOS uses a hybrid CalVer + SemVer already noted in CHANGELOG.md. Recommended formalization:
+ViCell uses a hybrid CalVer + SemVer already noted in CHANGELOG.md. Recommended formalization:
 
 **Tag format**: `v0.MINOR.PATCH` for pre-1.0, e.g., `v0.3.0`
 
@@ -363,7 +363,7 @@ tags: v0.3.0 on main at milestone
 **Tag commands:**
 ```bash
 # Create annotated tag (git-cliff reads these)
-git tag -a v0.3.0 -m "ViOS Mycelium Alpha - v0.3.0"
+git tag -a v0.3.0 -m "ViCell Mycelium Alpha - v0.3.0"
 git push origin v0.3.0
 # GitHub Actions triggers, git-cliff generates release notes automatically
 ```
@@ -372,7 +372,7 @@ git push origin v0.3.0
 
 ### 2.6 Developer Onboarding Assessment
 
-ViOS's existing `docs/ONBOARDING.md` is already strong (240+ lines, well-structured). Gaps and improvements:
+ViCell's existing `docs/ONBOARDING.md` is already strong (240+ lines, well-structured). Gaps and improvements:
 
 **What's good:**
 - 20-minute codebase tour
@@ -423,9 +423,9 @@ ViOS's existing `docs/ONBOARDING.md` is already strong (240+ lines, well-structu
 
 ## UNRESOLVED QUESTIONS
 
-1. **MIRI on no_std kernel**: MIRI requires a host target to run. ViOS unit tests likely need a `[dev-dependencies]` std-enabled shim or feature flag to run under MIRI. The exact approach (conditional compilation vs. separate test crate) is unverified — needs a spike.
+1. **MIRI on no_std kernel**: MIRI requires a host target to run. ViCell unit tests likely need a `[dev-dependencies]` std-enabled shim or feature flag to run under MIRI. The exact approach (conditional compilation vs. separate test crate) is unverified — needs a spike.
 
-2. **Kani + no_std**: The Merlin OS case confirms Kani works with no_std kernels under RISC-V constraints, but ViOS uses alloc + custom allocator. Whether Kani can model the custom allocator's invariants is untested.
+2. **Kani + no_std**: The Merlin OS case confirms Kani works with no_std kernels under RISC-V constraints, but ViCell uses alloc + custom allocator. Whether Kani can model the custom allocator's invariants is untested.
 
 3. **LibAFL QEMU mode maturity**: LibAFL's QEMU bridge (`libafl_qemu`) is documented as stable for user-mode ELF fuzzing but kernel-mode syscall fuzzing requires custom harness work. Effort estimate is uncertain (2 weeks to 2 months depending on QEMU integration complexity).
 

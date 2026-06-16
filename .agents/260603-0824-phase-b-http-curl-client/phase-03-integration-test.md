@@ -149,7 +149,7 @@ pub fn spawn_http_server() -> (u16, std::thread::JoinHandle<()>) {
        if !prerequisites_ok() { return; }
        let (port, _server) = spawn_http_server();
        let mut qemu = QemuRunner::boot(&kernel_path(), &disk_path());
-       qemu.wait_for("ViOS >", BOOT_TIMEOUT)
+       qemu.wait_for("ViCell >", BOOT_TIMEOUT)
            .unwrap_or_else(|e| panic!("shell not reached: {e}\n{}", qemu.dump()));
        qemu.wait_for("DHCP acquired", 40)
            .unwrap_or_else(|e| panic!("DHCP failed: {e}\n{}", qemu.dump()));
@@ -165,7 +165,7 @@ pub fn spawn_http_server() -> (u16, std::thread::JoinHandle<()>) {
 
 6. **Rebuild + run.**
    ```
-   cargo build --release -p vios-kernel -p app-net-tools
+   cargo build --release -p ViCell-kernel -p app-net-tools
    ./gen_disk.ps1
    cargo check --manifest-path tests/integration/Cargo.toml
    cargo test --manifest-path tests/integration/Cargo.toml network_curl_http_get -- --nocapture

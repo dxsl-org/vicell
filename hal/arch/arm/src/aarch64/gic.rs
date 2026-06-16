@@ -40,6 +40,14 @@ pub fn init() {
     // Enable distributor.
     wr(gicd(GICD_CTLR), 1);
 
+    // Enable VirtIO MMIO IRQs: QEMU virt assigns SPI 16..47 (GIC IDs 48..79)
+    // to the 32 VirtIO MMIO slots.  Without this, GICD_ISENABLER bit is 0 and
+    // the GIC never delivers VirtIO interrupts even after claim/complete.
+    // NIC is at slot 30 (SPI 46, GIC ID 78); Block at slot 31 (SPI 47, GIC ID 79).
+    for i in 48u32..80 {
+        enable_irq(i);
+    }
+
     // CPU interface: allow all priorities, enable.
     wr(gicc(GICC_PMR), 0xFF);
     wr(gicc(GICC_CTLR), 1);

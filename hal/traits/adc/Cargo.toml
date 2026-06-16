@@ -1,0 +1,4 @@
+[package]
+name = "hal-adc"
+version = "0.1.0"
+edition = "2021"

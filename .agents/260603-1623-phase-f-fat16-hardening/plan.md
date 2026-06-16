@@ -50,7 +50,7 @@ disjoint regions; do them sequentially to avoid merge churn.
   `/data/`, call `root.create_file(name)` / `root.open_file(name)`.
 - `OP_UNLINK` arm routes only to `vfs.unlink` (RamFS) — no FAT16 branch
   (vfs/main.rs:383-388).
-- Block syscalls: `vios_syscall_dispatch` constructs the enum in the numeric
+- Block syscalls: `ViCell_syscall_dispatch` constructs the enum in the numeric
   fallback (syscall.rs:1237-1240); **`caller_id` is computed AFTER the match
   at syscall.rs:1249** and is the first param of `handle_syscall`. The actual
   dispatch arms are `BlkRead`/`BlkWrite`/`BlkFlush` at syscall.rs:1095/1112/1072.

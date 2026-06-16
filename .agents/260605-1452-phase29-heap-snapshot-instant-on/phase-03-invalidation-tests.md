@@ -1,6 +1,6 @@
 # Phase 03 — Snapshot Invalidation + Integration Tests
 
-**Status**: 📋 PLANNED  
+**Status**: ✅ DONE  
 **Priority**: P1  
 **Effort**: 2 days  
 **Depends on**: Phase 01 + Phase 02

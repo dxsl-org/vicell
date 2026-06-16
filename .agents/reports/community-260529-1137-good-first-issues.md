@@ -185,7 +185,7 @@ a README would lower the barrier for contributors exploring the Lua runtime.
 **Acceptance criteria:**
 - [ ] New directory `examples/lua/`
 - [ ] At least 3 `.lua` scripts with comments explaining what they demonstrate
-- [ ] `examples/lua/README.md` explaining how to run them via the ViOS Lua Cell
+- [ ] `examples/lua/README.md` explaining how to run them via the ViCell Lua Cell
 
 **Files of interest:**
 - `cells/runtimes/lua/src/`

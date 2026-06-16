@@ -1,0 +1,7 @@
+[package]
+name = "driver-can-loopback"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+hal-can = { path = "../../../hal/traits/can" }

@@ -4,8 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-hal-arch-trait = { path = "../../traits/arch" }
-hal-paging     = { path = "../../traits/paging" }
+hal-arch-trait  = { path = "../../traits/arch" }
+hal-paging      = { path = "../../traits/paging" }
+hal-hypervisor  = { path = "../../traits/hypervisor" }
 types = { path = "../../../libs/types" }
 
 [features]

@@ -8,15 +8,20 @@ use types::*;
 
 pub const PAGE_SIZE: usize = 4096;
 
-const PTE_VALID:  u64 = 1 << 0;
-const PTE_TABLE:  u64 = 1 << 1;
-const PTE_PAGE:   u64 = 1 << 1;
-const PTE_AF:     u64 = 1 << 10;
-const PTE_SH_IS:  u64 = 3 << 8;
-const PTE_AP_EL0: u64 = 1 << 6;
-const PTE_UXN:    u64 = 1 << 54;
-const PTE_PXN:    u64 = 1 << 53;
+const PTE_VALID:   u64 = 1 << 0;
+const PTE_TABLE:   u64 = 1 << 1;
+const PTE_PAGE:    u64 = 1 << 1;
+const PTE_AF:      u64 = 1 << 10;
+const PTE_SH_IS:   u64 = 3 << 8;
+const PTE_AP_EL0:  u64 = 1 << 6;
+const PTE_UXN:     u64 = 1 << 54;
+const PTE_PXN:     u64 = 1 << 53;
+/// MAIR index 1 = Normal WB-WA-RA — for RAM regions.
 const ATTR_NORMAL: u64 = 1 << 2;
+/// MAIR index 0 = Device-nGnRnE — for MMIO device registers.
+/// Non-cacheable, non-speculative, strictly-ordered; Inner-shareable (PTE_SH_IS) must NOT
+/// be set for Device memory (it has no shareable concept — leave SH=0b00).
+const ATTR_DEVICE: u64 = 0;
 
 fn phys_to_pte_addr(phys: PhysAddr) -> u64 {
     ((phys as u64) >> 12) << 12
@@ -51,7 +56,15 @@ impl PageTableTrait for PageTable {
         let l2_table = self.get_or_alloc(l1_idx, alloc_fn)?;
         let l3_table = l2_table.get_or_alloc(l2_idx, alloc_fn)?;
 
-        let mut entry = phys_to_pte_addr(phys) | PTE_VALID | PTE_PAGE | PTE_AF | PTE_SH_IS | ATTR_NORMAL;
+        // Device MMIO: Device-nGnRnE (MAIR index 0, no SH).
+        // Normal RAM:  Normal WB-WA-RA (MAIR index 1, Inner-shareable).
+        let is_device = flags.bits() & PageFlags::DEVICE != 0;
+        let (attr, sh) = if is_device {
+            (ATTR_DEVICE, 0u64)
+        } else {
+            (ATTR_NORMAL, PTE_SH_IS)
+        };
+        let mut entry = phys_to_pte_addr(phys) | PTE_VALID | PTE_PAGE | PTE_AF | sh | attr;
 
         if flags.bits() & PageFlags::USER != 0 {
             entry |= PTE_AP_EL0 | PTE_PXN;
@@ -102,6 +115,15 @@ impl PageTableTrait for PageTable {
 
     unsafe fn activate(&self) {
         let ttbr0 = self as *const _ as u64;
+
+        // Dispatch to the EL2 MMU activation path when booted with virtualization=on.
+        if super::el2::is_el2() {
+            // SAFETY: identity-covering table required; EL2_ACTIVE guarantees EL2.
+            unsafe { super::el2::el2_mmu_init(ttbr0); }
+            return;
+        }
+
+        // ── EL1 path (unchanged) ─────────────────────────────────────────────
         let mair: u64 = 0x0000_0000_0000_FF00; // index0=Device-nGnRnE(0x00), index1=Normal-WB-WA(0xFF)
         let tcr: u64 = 25      // T0SZ=25 (39-bit VA)
                      | (1 << 8)  // IRGN0=WB-WA
@@ -120,11 +142,11 @@ impl PageTableTrait for PageTable {
                 "dsb sy",
                 "isb",
                 // Invalidate all TLB entries before enabling the MMU so stale entries
-            // do not cause faults on real hardware (per ARM ARM DDI 0487 D13.2.118).
-            "tlbi vmalle1",   // invalidate all EL1 TLB entries
-            "dsb nsh",        // ensure invalidation visible across inner-shareable domain
-            "isb",
-            "mrs x9, sctlr_el1",
+                // do not cause faults on real hardware (per ARM ARM DDI 0487 D13.2.118).
+                "tlbi vmalle1",   // invalidate all EL1 TLB entries
+                "dsb nsh",        // ensure invalidation visible across inner-shareable domain
+                "isb",
+                "mrs x9, sctlr_el1",
                 "orr x9, x9, #(1 << 0)",
                 "orr x9, x9, #(1 << 2)",
                 "orr x9, x9, #(1 << 12)",

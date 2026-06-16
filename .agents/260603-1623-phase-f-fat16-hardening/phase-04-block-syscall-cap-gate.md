@@ -29,7 +29,7 @@
 ## Data Flow
 ```
 cell ecall (a7=500, a0=sector, a1=buf_ptr)
-  └ vios_syscall_dispatch: fallback builds Syscall::BlkRead{..}
+  └ ViCell_syscall_dispatch: fallback builds Syscall::BlkRead{..}
        └ caller_id = current_task_id()        (syscall.rs:1249)
             └ handle_syscall(caller_id, BlkRead{..})
                  └ NEW: if caller_id != VFS_TASK_ID { warn + return Err }   ← gate

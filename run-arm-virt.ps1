@@ -59,7 +59,7 @@ Write-Host "Press Ctrl-a x to quit QEMU."
 Write-Host ""
 
 & $qemu `
-    -machine virt `
+    -machine virt,gic-version=2 `
     -cpu cortex-a57 `
     -m 256M `
     -nographic `

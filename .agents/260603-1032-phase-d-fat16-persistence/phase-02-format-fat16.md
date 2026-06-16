@@ -118,7 +118,7 @@ def main():
     boot[36]    = 0x80                       # drive num
     boot[38]    = 0x29                       # boot sig
     struct.pack_into('<I', boot, 39, 0x56494F44)  # vol id
-    boot[43:54] = b'ViOS DATA  '            # 11-byte label
+    boot[43:54] = b'ViCell DATA  '            # 11-byte label
     boot[54:62] = b'FAT16   '               # 8-byte fs type
     boot[510:512] = b'\x55\xAA'
 

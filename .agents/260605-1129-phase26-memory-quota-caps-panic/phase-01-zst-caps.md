@@ -1,6 +1,6 @@
 # Phase 01 — ZST Capability Tokens
 
-**Status**: 📋 PLANNED  
+**Status**: ✅ COMPLETE (2026-06-07 audit)  
 **Priority**: P0 (security hole)  
 **Effort**: 3 days
 

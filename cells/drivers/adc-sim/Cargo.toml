@@ -1,0 +1,7 @@
+[package]
+name = "driver-adc-sim"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+hal-adc = { path = "../../../hal/traits/adc" }

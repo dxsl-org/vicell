@@ -72,9 +72,9 @@ regions but must not run truly concurrently (Edit needs a fresh Read). Run Phase
 
 ## Success criteria (whole phase)
 
-- `cargo check` clean for: `-p vios-kernel -p service-vfs -p ostd -p app-shell --target riscv64gc-unknown-none-elf`
+- `cargo check` clean for: `-p ViCell-kernel -p service-vfs -p ostd -p app-shell --target riscv64gc-unknown-none-elf`
 - `cargo check --manifest-path tests/integration/Cargo.toml` clean.
-- `cargo test -p vios-integration-tests vfs_fat16_reboot_persistence` passes
+- `cargo test -p ViCell-integration-tests vfs_fat16_reboot_persistence` passes
   (writes `REBOOT_OK`, shuts down, reboots, reads `REBOOT_OK` back).
 - Existing `vfs_fat16_write_read` still passes (no regression).
 - `shutdown` shell built-in cleanly terminates QEMU within 15s.

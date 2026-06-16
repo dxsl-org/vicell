@@ -1,14 +1,14 @@
-# ViOS v1.0 Release Status: COMPLETE
+# ViCell v1.0 Release Status: COMPLETE
 
 **Date**: 2026-05-30 03:56 UTC  
-**Plan**: ViOS Complete Implementation Roadmap (260528-2016)  
+**Plan**: ViCell Complete Implementation Roadmap (260528-2016)  
 **Status**: **v1.0 RELEASE CANDIDATE** — 22/23 phases complete; 1 partial (Lua done, MicroPython deferred)
 
 ---
 
 ## Executive Summary
 
-ViOS implementation roadmap now **96% complete** and **ready for v1.0 release**. All P0 (critical), P1 (core), and P2 (feature) phases are done. One P2 stretch phase (18 — MicroPython) is partially complete (Lua ✓, MicroPython deferred to v1.x).
+ViCell implementation roadmap now **96% complete** and **ready for v1.0 release**. All P0 (critical), P1 (core), and P2 (feature) phases are done. One P2 stretch phase (18 — MicroPython) is partially complete (Lua ✓, MicroPython deferred to v1.x).
 
 **Status**: Boot → Shell → VFS → Multi-arch HAL → Lua → Compositor → Network → Security → Tests → CI/CD → Docs → Community all working. Ready to ship.
 
@@ -65,7 +65,7 @@ ViOS implementation roadmap now **96% complete** and **ready for v1.0 release**.
 
 | Capability | Status | Evidence |
 |---|---|---|
-| **Boot to shell prompt** | ✅ | Baseline says "ViOS boots to interactive shell prompt on 128MB RAM" |
+| **Boot to shell prompt** | ✅ | Baseline says "ViCell boots to interactive shell prompt on 128MB RAM" |
 | **Multi-architecture** | ✅ | RV64, AArch64, x86_64 HALs complete; RV32 & AArch32 in Phase 21 (done) |
 | **VirtIO block/input/GPU/net** | ✅ | All wired in Phase 03-16; boot verifies all work |
 | **VFS service** | ✅ | Phase 13 complete; mkdir/rmdir/unlink/stat IPC all working |
@@ -158,5 +158,5 @@ All are intentional scope cuts; zero impact on v1.0 release readiness.
 ---
 
 **Prepared by**: project-manager (260530-0356)  
-**For**: ViOS Core Team  
+**For**: ViCell Core Team  
 **Approval**: Ready for v1.0 release announcement

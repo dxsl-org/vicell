@@ -1,7 +1,7 @@
 # 13 — Peripheral Driver Bus (HAL + Driver Cells)
 
-**Version**: 1.1 (Updated 2026-06-13 — I2C + SPI bit-bang implemented)
-**Status**: 🚧 PARTIAL — GPIO+UART+I2C+SPI bit-bang done (QEMU ARM virt); hardware controllers deferred
+**Version**: 1.2 (Updated 2026-06-15 — CAN loopback + PWM bit-bang + ADC simulation added)
+**Status**: 🚧 PARTIAL — GPIO+UART+I2C+SPI+PWM bit-bang + ADC sim + CAN loopback done (QEMU ARM virt); hardware controllers deferred
 **Stage**: G1 (Robot & Embedded) — defining requirement for "complete for robots"
 **Design source**: `.agents/reports/brainstorm-260606-0730-peripheral-driver-track.md`
 **Roadmap**: [project-roadmap.md](../project-roadmap.md) → "Peripheral Driver Track `[G1]`"
@@ -69,7 +69,10 @@ pub trait ViUart: SerialPort {
 ```
 - ✅ **`ViI2c`** (`hal/traits/i2c/src/lib.rs`) — synchronous master, `write`/`read`/`write_read`. Implemented 2026-06.
 - ✅ **`ViSpi`** (`hal/traits/spi/src/lib.rs`) — synchronous master Mode 0, `cs_select`/`cs_deselect`/`transfer`/`write`. Implemented 2026-06-13.
-- 📋 Defer: `ViCan`, `ViPwm`, `ViAdc` (v2+).
+- ✅ **`ViPwm`** (`hal/traits/pwm/src/lib.rs`) — `set_frequency`/`set_duty`/`enable`/`disable`/`tick`. Bit-bang over GPIO. Implemented 2026-06-15.
+- ✅ **`ViAdc`** (`hal/traits/adc/src/lib.rs`) — `read_raw`/`max_value`/`num_channels`/`to_millivolts`. Simulation driver. Implemented 2026-06-15.
+- ✅ **`ViCan`** (`hal/traits/can/src/lib.rs`) — `configure`/`send_frame`/`recv_frame` + `CanFrame` type. Loopback driver. Implemented 2026-06-15.
+- 📋 Defer: MMIO hardware controllers for CAN/ADC (require manifest v2 for new flags — see §8).
 - ⚠️ Traits live in `hal/traits/` (NOT `libs/api`) → no Law 1 change. Driver Cells dep on the trait crate directly.
 
 ---
@@ -165,8 +168,13 @@ pub enum PeriphResponse { Ok, Level(bool), Data(Box<[u8]>), Err(ViError) }
 8. ✅ **SPI bit-bang** (`hal/traits/spi`, `cells/drivers/spi-gpio`, `cells/apps/spi-demo`) — gated by `gpio` manifest cap; pins 2=MOSI/3=MISO/4=SCK/5=CS; Mode 0 MSB-first.
    - QEMU note: MISO floats → `transfer()` reads 0x00 (expected); `write()` fully validates TX path.
 9. ✅ Integration test `tests/integration/tests/periph-i2c-spi.rs` — asserts SPI TX probe + I2C banner.
+10. ✅ **PWM bit-bang** (`hal/traits/pwm`, `cells/drivers/pwm-gpio`, `cells/apps/pwm-demo`) — gated by `gpio` manifest cap; channel N = pin N; counter-based tick(); sweeps duty 0→100% on pin 6.
+11. ✅ **ADC simulation** (`hal/traits/adc`, `cells/drivers/adc-sim`, `cells/apps/adc-demo`) — no MMIO, no cap; triangle-wave ramp with optional deterministic noise; 3 channels, 5 iterations.
+12. ✅ **CAN loopback** (`hal/traits/can`, `cells/drivers/can-loopback`, `cells/apps/can-demo`) — no MMIO, no cap; fixed 32-frame ring buffer; `CanFrame` (11/29-bit); validates round-trip TX→RX of 5 frames at 500 kbps.
+13. ✅ Integration test `tests/integration/tests/periph-can-pwm-adc.rs` — asserts PWM duty + ADC ch0 + CAN RX probes.
 
-**Defer (v2+, real board)**: hardware SPI controller (PL022), hardware I2C controller (DW I2C); CAN/PWM/ADC; SSIP-preempt; ZST cap; DTB discovery; per-pin granularity; multi-Cell shared-bus IPC broker.
+**Defer (v2+, real board)**: hardware SPI controller (PL022), hardware I2C controller (DW I2C); MMIO CAN controller (SJA1000/STM32 bxCAN); hardware ADC (SAR); SSIP-preempt; ZST cap; DTB discovery; per-pin granularity; multi-Cell shared-bus IPC broker.
+**Manifest v2 needed for MMIO CAN/ADC**: `flags: u8 → u16` (Law 1 ABI bump — separate plan, requires 2× confirmation).
 
 ---
 

@@ -128,14 +128,14 @@ table (`"vfs" => 3`, syscall.rs:671) is a SEPARATE concern (IPC routing, not blo
 it untouched.
 
 ### 1e. Compile
-`cargo check -p vios-kernel`
+`cargo check -p ViCell-kernel`
 
 ## Todo
 - [ ] 1a: add `can_block_io` field + `Task::new` default
 - [ ] 1b: grant flag in `loader.rs:spawn_from_path`
 - [ ] 1c: add `caller_has_block_io`, replace 3 gates
 - [ ] 1d: remove `VFS_TASK_ID` constant + doc block
-- [ ] 1e: `cargo check -p vios-kernel` passes
+- [ ] 1e: `cargo check -p ViCell-kernel` passes
 
 ## Success Criteria
 - Kernel compiles with no `VFS_TASK_ID` references (`rg VFS_TASK_ID kernel/` → 0 hits).
@@ -164,7 +164,7 @@ it untouched.
 - `kernel/src/task/syscall.rs:70-82` — `caller_has_block_io()` helper added (replaces constant)
 - `kernel/src/task/syscall.rs:1082,1109,1130` — all 3 block-I/O gates (BlkFlush, BlkRead, BlkWrite) updated
 - `VFS_TASK_ID` constant removed entirely (0 grep hits in `kernel/`)
-- `cargo build -p vios-kernel -r` passes with 0 errors (stripe warning is expected)
+- `cargo build -p ViCell-kernel -r` passes with 0 errors (stripe warning is expected)
 
 ## Next Steps
 Phase 3's negative test (`block_io_denied_non_vfs`) validates this gate from userspace.

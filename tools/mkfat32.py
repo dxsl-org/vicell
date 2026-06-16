@@ -284,13 +284,35 @@ def create_fat32_image(output_path: str, files: list):
         for i in range(len(parts) - 1):
             dirs.add('/'.join(parts[:i+1]))
 
+    def entry_slots(name: str) -> int:
+        """32-byte directory slots consumed by this name (LFN entries + 1 SFN)."""
+        if not needs_lfn(name):
+            return 1
+        return (len(name) + 1 + 12) // 13 + 1
+
+    def dir_slot_count(d: str) -> int:
+        """Total 32-byte slots needed for directory d."""
+        count = 2 if d != '' else 0   # . and .. for non-root dirs
+        for sub in sorted(dirs):
+            if sub == '': continue
+            p = sub.rsplit('/', 1)[0] if '/' in sub else ''
+            if p == d:
+                count += entry_slots(sub.rsplit('/', 1)[-1])
+        for dst in file_data:
+            p = dst.rsplit('/', 1)[0] if '/' in dst else ''
+            if p == d:
+                count += entry_slots(dst.rsplit('/', 1)[-1])
+        return count
+
     # Root lives in the fixed root-dir region (no cluster).  Subdirectories get
-    # one cluster each in the data region.
+    # enough clusters to hold all their directory entries.
     dir_cluster = {'': 0}
     for d in sorted(dirs):
         if d == '':
             continue
-        dir_cluster[d] = alloc_chain(1)
+        slots = dir_slot_count(d)
+        n_clusters = max(1, (slots * 32 + CLUSTER_SIZE - 1) // CLUSTER_SIZE)
+        dir_cluster[d] = alloc_chain(n_clusters)
 
     # Register subdirectories in their parent dirs.
     for d in sorted(dirs):

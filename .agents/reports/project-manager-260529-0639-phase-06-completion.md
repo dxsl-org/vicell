@@ -126,7 +126,7 @@ After VFS Cell loads, subsequent spawns route through VFS IPC (not implemented y
 | Check | Status | Notes |
 |---|---|---|
 | Code compiles (no syntax errors) | ✅ | All files modified/created are syntactically valid |
-| Follows ViOS naming (Vi prefix, snake_case files) | ✅ | `VAddr`, `ViError`, `loader/early.rs`, `loader/disk_layout.rs` |
+| Follows ViCell naming (Vi prefix, snake_case files) | ✅ | `VAddr`, `ViError`, `loader/early.rs`, `loader/disk_layout.rs` |
 | Forbid unsafe in Cells (Law 5) | ✅ | init cell uses only safe Rust syscalls |
 | Owned buffers for async (Law 2) | ✅ | Early loader uses `Box<[u8]>` for file bytes |
 | Interface stability (Law 1) | ✅ | ABI-stable `SpawnFromPath` in `libs/api/` |

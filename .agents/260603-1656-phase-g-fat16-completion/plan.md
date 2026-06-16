@@ -80,7 +80,7 @@ The original brief contained three inaccuracies, corrected here after re-grep:
 
 ## Global Success Criteria
 
-- `cargo check -p vios-kernel`, `-p service-vfs`, `-p app-shell`, and the integration crate all pass.
+- `cargo check -p ViCell-kernel`, `-p service-vfs`, `-p app-shell`, and the integration crate all pass.
 - `VFS_TASK_ID` constant fully removed; no remaining references.
 - New integration tests `block_io_denied_non_vfs` and `vfs_fat16_subdir_persistence` pass
   under QEMU (or SKIP cleanly when prerequisites absent).

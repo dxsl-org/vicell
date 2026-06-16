@@ -719,9 +719,11 @@ impl Scheduler {
                 return Some((core::ptr::null_mut(), next_ctx)); // first switch from boot context
             }
         } else {
-            // No ready tasks. If running a zombie, switch to boot context.
+            // No ready tasks.
             if let Some(cid) = current_id {
                 if self.zombies.iter().any(|t| t.id == cid) {
+                    // Zombie with no successor: switch to the idle boot context so
+                    // it can be reaped without holding the SCHEDULER lock.
                     let curr_ctx = self.zombies.iter_mut()
                         .find(|t| t.id == cid)
                         .map(|t| &mut t.context as *mut _);
@@ -729,9 +731,28 @@ impl Scheduler {
                         rl::set_current_task_id(hart_id, 0);
                         return Some((c, core::ptr::null()));
                     }
+                } else if let Some(task) = self.tasks.get_mut(&cid) {
+                    // Live blocked task with no peer ready to run.  Suspend it
+                    // cleanly by switching to the idle (boot) context so the CPU
+                    // can enter WFI and wake when a real event unblocks someone.
+                    //
+                    // Without this switch, yield_cpu returns without a context
+                    // change, the SVC handler gets stale Ok(0) results, and
+                    // current_task_id is reset to 0 — causing every subsequent
+                    // SVC to be denied.
+                    //
+                    // BOOT_CONTEXT is valid here: it is saved by __switch on the
+                    // very first boot→task context switch, which always precedes
+                    // any cell SVC.
+                    let curr_ctx = &mut task.context as *mut _;
+                    rl::set_current_task_id(hart_id, 0);
+                    return Some((curr_ctx, core::ptr::null()));
+                } else {
+                    rl::set_current_task_id(hart_id, 0);
                 }
+            } else {
+                rl::set_current_task_id(hart_id, 0);
             }
-            rl::set_current_task_id(hart_id, 0);
         }
         None
     }

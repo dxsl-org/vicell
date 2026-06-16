@@ -1,0 +1,8 @@
+[package]
+name = "driver-pwm-gpio"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+hal-gpio = { path = "../../../hal/traits/gpio" }
+hal-pwm  = { path = "../../../hal/traits/pwm" }

@@ -1,4 +1,4 @@
-# ViOS SAS Architecture — Deep Risk Analysis
+# ViCell SAS Architecture — Deep Risk Analysis
 
 **Date**: 2026-06-03  
 **Scope**: Single Address Space security model — design vs. implementation gap  
@@ -69,7 +69,7 @@ Syscall::SpawnFromPath { path_ptr, path_len } => {
 
 ## Threat Model Assessment
 
-### "Trusted Cell" Model (all Cells signed by ViOS Lab)
+### "Trusted Cell" Model (all Cells signed by ViCell Lab)
 
 | Defense | Status | Evidence |
 |---------|--------|---------|
@@ -103,7 +103,7 @@ Syscall::SpawnFromPath { path_ptr, path_len } => {
 Any ELF on disk loads as a Cell. An attacker with disk write access (via a compromised Cell with VFS write cap, or physical access) can spawn arbitrary Ring-3 code in the SAS.
 
 **Fix**: Implement `verify_cell_signature(elf_bytes)` in `spawn_from_path` before `spawn_from_mem`.  
-Requires: Ed25519 pubkey embedded in kernel, `.vios_sig` section in signed ELFs.
+Requires: Ed25519 pubkey embedded in kernel, `.ViCell_sig` section in signed ELFs.
 
 ### BV-2: Inter-Cell Memory Visibility (Structural)
 
@@ -220,7 +220,7 @@ WASM bytecode không có khái niệm raw pointer — chỉ có linear memory in
 - WASM validator đảm bảo code semantics an toàn từ khi load — không cần hardware barrier
 
 **Tier 3 Hypervisor với Stage-2 paging** giải quyết nốt:
-- Legacy Linux/Windows/Android apps chưa port sang ViOS
+- Legacy Linux/Windows/Android apps chưa port sang ViCell
 - Sensitive silos: private key operations, data cực nhạy
 - Spectre/Meltdown side-channels (known limitation của SAS model, được Tier 3 cô lập hoàn toàn)
 
@@ -269,7 +269,7 @@ C code bên trong CÓ THỂ:
 
 **Tuy nhiên**, đây không phải lỗ hổng kiến trúc mà là **trade-off đã được chấp nhận**, vì:
 
-1. **Lua/MicroPython interpreter là trusted code** — được ký bởi ViOS Lab, cùng trust level với kernel's own `unsafe` blocks.
+1. **Lua/MicroPython interpreter là trusted code** — được ký bởi ViCell Lab, cùng trust level với kernel's own `unsafe` blocks.
 2. **Scripts chạy bên trong VM đều bị sandbox** — Lua script người dùng viết không có quyền gọi C pointer arithmetic; Lua VM kiểm soát điều này.
 3. **Tương đương với kernel unsafe** — kernel cũng có nhiều `unsafe` blocks; nếu kernel bị exploit thì toàn hệ thống hỏng. C-runtime Cell cũng vậy — khi đã trusted + signed + audited thì risk là implementation bugs, không phải architectural holes.
 
@@ -290,7 +290,7 @@ Legacy Linux/Windows     ❌ Not implemented     ✅ Resolved — Tier 3 Hypervi
 Spectre side-channel     ❌ Not mitigated       ✅ Resolved — Tier 3 VM isolation
 ```
 
-**Kiến trúc SAS + LBI + 3-Tier của ViOS là sound và complete về mặt thiết kế.**
+**Kiến trúc SAS + LBI + 3-Tier của ViCell là sound và complete về mặt thiết kế.**
 
 Mọi threat category đều có giải pháp trong spec:
 - Implementation gaps (v0.2) là **engineering debt**, không phải architectural flaws.

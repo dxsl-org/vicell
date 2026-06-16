@@ -63,7 +63,7 @@ fn vfs_fat16_subdir_persistence() {
 
     // ── First boot: mkdir + write into the subdir, then shut down ──────────────
     let mut qemu = QemuRunner::boot(&kernel_path(), &disk_path());
-    qemu.wait_for("ViOS >", BOOT_TIMEOUT)
+    qemu.wait_for("ViCell >", BOOT_TIMEOUT)
         .unwrap_or_else(|e| panic!("first boot prompt failed: {e}\n{}", qemu.dump()));
     assert!(
         qemu.output_contains("FAT16 /data volume mounted"),
@@ -72,11 +72,11 @@ fn vfs_fat16_subdir_persistence() {
     std::thread::sleep(std::time::Duration::from_millis(500));
 
     qemu.send_line("mkdir /data/pdir");
-    qemu.wait_for("ViOS >", CMD_TIMEOUT)
+    qemu.wait_for("ViCell >", CMD_TIMEOUT)
         .unwrap_or_else(|e| panic!("mkdir did not return to prompt: {e}\n{}", qemu.dump()));
 
     qemu.send_line("echo SUBDIR_PERSIST > /data/pdir/f.txt");
-    qemu.wait_for("ViOS >", CMD_TIMEOUT)
+    qemu.wait_for("ViCell >", CMD_TIMEOUT)
         .unwrap_or_else(|e| panic!("subdir write did not return to prompt: {e}\n{}", qemu.dump()));
 
     qemu.send_line("shutdown");
@@ -91,7 +91,7 @@ fn vfs_fat16_subdir_persistence() {
 
     // ── Second boot: verify the subdir file persisted ─────────────────────────
     let mut qemu2 = QemuRunner::boot(&kernel_path(), &disk_path());
-    qemu2.wait_for("ViOS >", BOOT_TIMEOUT)
+    qemu2.wait_for("ViCell >", BOOT_TIMEOUT)
         .unwrap_or_else(|e| panic!("second boot prompt failed: {e}\n{}", qemu2.dump()));
     assert!(
         qemu2.output_contains("FAT16 /data volume mounted"),

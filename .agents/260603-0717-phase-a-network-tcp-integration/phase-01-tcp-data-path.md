@@ -240,7 +240,7 @@ in progress. nc must poll with RECV (which returns 0 bytes) until the socket is
 ### Step 8: `cargo check` the net Cell
 
 ```bash
-cargo check -p vios-net --target riscv64gc-unknown-none-elf
+cargo check -p ViCell-net --target riscv64gc-unknown-none-elf
 ```
 
 Fix any type errors (smoltcp context API, socket type parameters).
@@ -276,7 +276,7 @@ Fix any type errors (smoltcp context API, socket type parameters).
 
 ## Success Criteria
 
-- [ ] `cargo check -p vios-net` passes
+- [ ] `cargo check -p ViCell-net` passes
 - [ ] CONNECT to 10.0.2.2 returns `0x00` (no RST from SLIRP for port 80)
 - [ ] SEND returns byte count > 0
 - [ ] RECV returns data or 0-byte if not ready

@@ -334,6 +334,74 @@ Run integration tests against Limine-booted kernel to confirm all 65 pass.
 
 ---
 
+## Evidence of Completion
+
+**Implemented (2026-06-05)**:
+
+1. **limine.conf** — created at repo root
+   - Protocol: limine, KASLR=yes, PATH=boot:///vicell-kernel
+   - Committed to git
+
+2. **scripts/download-limine.sh** — created
+   - Downloads v8.9.2 RISC-V binary from GitHub releases
+   - Caches in `tools/limine-riscv64`
+   - Called from CI workflows before kernel build
+
+3. **.gitignore** — updated
+   - Added `tools/limine-riscv64` (binary not committed)
+
+4. **kernel/build.rs** — updated for PIE
+   - Added `cargo:rustc-link-arg=-pie`
+   - Added `cargo:rustc-link-arg=--no-dynamic-linker`
+   - Scoped to kernel target only via `target_arch == "riscv64"`
+   - **Design difference from plan**: Avoided `.cargo/config.toml` workspace conflict by using build.rs approach
+
+5. **kernel/src/main.rs** — updated with KASLR logging
+   - Calls `boot_info.kernel_base()` to get randomized physical_base
+   - Logs `[boot] kernel_phys_base=0x...` at startup
+
+6. **scripts/gen-bench-disk.sh** — rewritten
+   - Creates FAT16 disk (81920 sectors)
+   - Embeds limine.conf + kernel ELF + cell binaries
+   - Compatible with both local and CI environments
+
+7. **.github/workflows/ci.yml** — updated
+   - Step: download Limine v8.9.2
+   - QEMU flag: `-kernel tools/limine-riscv64` (S-mode bootloader)
+   - Disk image passed via `-drive file=disk.img,format=raw,if=none,id=hd0 -device virtio-blk-device,drive=hd0`
+   - RUSTFLAGS include `-C relocation-model=pic`
+
+8. **.github/workflows/perf.yml** — updated
+   - Same Limine download and QEMU args as ci.yml
+   - Bench cell runs as first VirtIO integration test
+
+9. **kernel/src/memory/paging.rs** — parameterized (already completed)
+   - `init_kernel_paging()` accepts `kernel_phys_base: PAddr` param
+   - No longer assumes fixed 0x80200000
+
+10. **run.ps1** — updated (verified locally)
+    - QEMU now uses Limine bootloader chain
+    - Disk image generation included
+
+**Design Decisions Made**:
+
+| Plan Item | Approach | Reason |
+|-----------|----------|--------|
+| PIE rustflags location | `kernel/build.rs` cargo:rustc-link-arg | Workspace cargo:rustflags in .cargo/config.toml was causing linker confusion; build.rs approach is more precise and only affects kernel target |
+| linker.ld modification | Skipped — kept existing script | Limine applies relocations correctly; mmap already handles VA→PA mapping; no linker changes needed |
+| `init_kernel_paging()` parameterization | Completed | Already working with `boot_info.kernel_base()` passed from boot |
+
+**Test Status**:
+- Local verification: `cargo test --all --release` passes (65/65 integration tests)
+- KASLR logging: Ready for CI first run (will show different physical_base on consecutive boots)
+- Bench baseline: Committed to .agents/260605-0958-phase24-perf-kaslr/; first CI run will establish perf-baseline.json
+
+**Blocking on CI Execution**:
+- Two consecutive QEMU boots must be run to verify different `physical_base` values
+- Bench p99 regression check requires ≥2 runs (first run skips comparison, acceptable per Phase 01 plan)
+
+---
+
 ## Next Steps
 
 After Phase 02: Phase 25 (Priority Scheduler) — real-time task preemption now that performance baseline is established and KASLR is enabled.

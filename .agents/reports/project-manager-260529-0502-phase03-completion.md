@@ -11,7 +11,7 @@ effort_estimate: 40h
 
 ## Summary
 
-Phase 03 — the foundational Ring 3 execution and boot stability work — is now **complete**. All 12 implementation tasks finished. The ViOS kernel can now boot, transition to user-mode (Ring 3 / U-mode), execute user code via syscalls, and cleanly exit.
+Phase 03 — the foundational Ring 3 execution and boot stability work — is now **complete**. All 12 implementation tasks finished. The ViCell kernel can now boot, transition to user-mode (Ring 3 / U-mode), execute user code via syscalls, and cleanly exit.
 
 ## What Got Done
 
@@ -67,7 +67,7 @@ Phase 03 — the foundational Ring 3 execution and boot stability work — is no
 ## Serial Output
 
 ```
-[ViOS] kernel boot v0.2.0
+[ViCell] kernel boot v0.2.0
 [paging] kernel PT active
 [task] spawning user_hello at 2
 Hi from U-mode!

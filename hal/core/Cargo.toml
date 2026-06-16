@@ -15,6 +15,7 @@ hal-paging = { path = "../traits/paging" }
 hal-uart = { path = "../traits/uart" }
 hal-traits-mmc = { path = "../traits/mmc" }
 hal-display = { path = "../traits/display" }
+hal-hypervisor = { path = "../traits/hypervisor" }
 
 hal-riscv = { path = "../arch/riscv", optional = true }
 hal-arm = { path = "../arch/arm", optional = true }

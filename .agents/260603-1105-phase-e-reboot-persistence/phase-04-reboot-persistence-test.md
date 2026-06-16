@@ -29,16 +29,16 @@
 ## Data flow / test matrix
 ```
 Boot #1 (QemuRunner A, disk_v3.img)
-  wait_for "ViOS >"              (boot reached shell)
+  wait_for "ViCell >"              (boot reached shell)
   assert output_contains "FAT16 /data volume mounted"   (mount OK on boot 1)
   send_line "echo REBOOT_OK > /data/persist.txt"
-  wait_for "ViOS >"             (write returned to prompt → OP_WRITE durable)
+  wait_for "ViCell >"             (write returned to prompt → OP_WRITE durable)
   send_line "shutdown"          (Phase 2 built-in → SBI SRST)
   wait_for_natural_exit(15)     (Phase 3 → QEMU exits, disk flushed)  ── GATE
   drop(A)                       (safe; process already gone)
 
 Boot #2 (QemuRunner B, SAME disk_v3.img)
-  wait_for "ViOS >"
+  wait_for "ViCell >"
   assert output_contains "FAT16 /data volume mounted"   (mount OK on boot 2)
   send_line "vcat /data/persist.txt"
   wait_for "REBOOT_OK"          ── PASS criterion (persistence proven)
@@ -73,7 +73,7 @@ fn vfs_fat16_reboot_persistence() {
 
     // ── First boot: write the marker ─────────────────────────────────────
     let mut qemu = QemuRunner::boot(&kernel_path(), &disk_path());
-    qemu.wait_for("ViOS >", BOOT_TIMEOUT)
+    qemu.wait_for("ViCell >", BOOT_TIMEOUT)
         .unwrap_or_else(|e| panic!("first boot prompt failed: {e}\n{}", qemu.dump()));
     assert!(
         qemu.output_contains("FAT16 /data volume mounted"),
@@ -82,7 +82,7 @@ fn vfs_fat16_reboot_persistence() {
 
     std::thread::sleep(std::time::Duration::from_millis(500));
     qemu.send_line("echo REBOOT_OK > /data/persist.txt");
-    qemu.wait_for("ViOS >", CMD_TIMEOUT)
+    qemu.wait_for("ViCell >", CMD_TIMEOUT)
         .unwrap_or_else(|e| panic!("write did not return to prompt: {e}\n{}", qemu.dump()));
 
     // ── Graceful shutdown — lets VirtIO flush disk_v3.img ─────────────────
@@ -95,7 +95,7 @@ fn vfs_fat16_reboot_persistence() {
 
     // ── Second boot: verify persistence ──────────────────────────────────
     let mut qemu2 = QemuRunner::boot(&kernel_path(), &disk_path());
-    qemu2.wait_for("ViOS >", BOOT_TIMEOUT)
+    qemu2.wait_for("ViCell >", BOOT_TIMEOUT)
         .unwrap_or_else(|e| panic!("second boot prompt failed: {e}\n{}", qemu2.dump()));
     assert!(
         qemu2.output_contains("FAT16 /data volume mounted"),
@@ -114,7 +114,7 @@ fn vfs_fat16_reboot_persistence() {
 - [ ] 4a: add `vfs_fat16_reboot_persistence` test
 - [ ] `cargo check --manifest-path tests/integration/Cargo.toml`
 - [ ] Build kernel release: `cargo build --release` (so `kernel_path()` exists)
-- [ ] Run: `cargo test -p vios-integration-tests vfs_fat16_reboot_persistence -- --nocapture`
+- [ ] Run: `cargo test -p ViCell-integration-tests vfs_fat16_reboot_persistence -- --nocapture`
 - [ ] Confirm `vfs_fat16_write_read` still passes (no regression)
 
 ## Success Criteria

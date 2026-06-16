@@ -119,6 +119,19 @@ pub fn handle_irq() {
     crate::task::waker::signal_net_rx();
 }
 
+/// Return `true` if `irq` belongs to the VirtIO NIC and handle it.
+///
+/// Follows the same pattern as `virtio_input::ack_irq` — checks the stored
+/// IRQ number internally so `vi_handle_virtio_irq` stays architecture-agnostic.
+pub fn ack_irq(irq: u32) -> bool {
+    let net_irq = *NET_IRQ.lock();
+    if net_irq == 0 || net_irq != irq {
+        return false;
+    }
+    handle_irq();
+    true
+}
+
 /// Return the MAC address of the discovered NIC, or an all-zero address if
 /// no device is present.
 pub fn mac_address() -> [u8; 6] {

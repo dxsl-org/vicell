@@ -6,6 +6,7 @@ pub use types::*;
 pub mod traits {
     pub use hal_arch_trait::*;
     pub use hal_display::*;
+    pub use hal_hypervisor::*;
     pub use hal_interrupt::*;
     pub use hal_paging::*;
     pub use hal_timer::*;

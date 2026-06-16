@@ -19,11 +19,11 @@
 ## Key Insights
 - **`/bin/shutdown` is broken** (`cells/apps/sys-tools/src/bin/shutdown.rs`): it ecalls `a7=0x08`, which the kernel reads as `ViSyscall::Wait` (ID 8) — NOT a shutdown. We bypass it entirely with a shell built-in; no need to fix the binary in this phase.
 - **No `libs/api/` change** — raw syscall 502 has no `ViSyscall` entry, so it dodges the Law 1 2x-confirm gate. This is the exact pattern already used for BlkRead=500/BlkWrite=501 (verified `syscall.rs:1199`).
-- `vios_syscall_dispatch` SUM-enables user memory around `handle_syscall` (`syscall.rs:1212-1216`); irrelevant to Shutdown since the handler never touches user memory and never returns.
+- `ViCell_syscall_dispatch` SUM-enables user memory around `handle_syscall` (`syscall.rs:1212-1216`); irrelevant to Shutdown since the handler never touches user memory and never returns.
 - **`dispatch_builtin` arm type:** every arm yields `ViResult<()>` and is collapsed by `match result { Ok(()) => 0, Err(_) => 1 }` (`executor.rs:169`). The new arm must therefore be `"shutdown" => crate::cmd_sys::cmd_shutdown(),` — NOT `=> { ...; Ok(()) }`. `cmd_shutdown()` returns `ViResult<()>` (diverging body), which unifies cleanly.
 
 ## Requirements
-- **Functional:** typing `shutdown` at the ViOS prompt powers off the machine; QEMU process exits with no hang.
+- **Functional:** typing `shutdown` at the ViCell prompt powers off the machine; QEMU process exits with no hang.
 - **Non-functional:** kernel handler is `noreturn`; ostd `sys_shutdown` is `-> !`.
 
 ## Data flow
@@ -34,7 +34,7 @@ shell prompt "shutdown"
        → println("System shutting down...")
        → ostd::syscall::sys_shutdown()  [-> !]
           → syscall_raw(502, 0,0,0,0)  ecall (a7=502)
-             → kernel vios_syscall_dispatch: 502 => Syscall::Shutdown
+             → kernel ViCell_syscall_dispatch: 502 => Syscall::Shutdown
                 → handle_syscall: Syscall::Shutdown
                    → asm ecall (a7=0x53525354 SRST, fid 0, type 0)  [noreturn]
                       → OpenSBI (M-mode) powers off → QEMU exits
@@ -122,7 +122,7 @@ pub fn cmd_shutdown<'a>() -> ViResult<()> {
 - [ ] 2d: `sys_shutdown()` in ostd
 - [ ] 2e: `cmd_shutdown()` in cmd_sys.rs
 - [ ] 2f: `"shutdown"` arm in executor.rs
-- [ ] `cargo check -p vios-kernel -p ostd -p app-shell --target riscv64gc-unknown-none-elf`
+- [ ] `cargo check -p ViCell-kernel -p ostd -p app-shell --target riscv64gc-unknown-none-elf`
 
 ## Success Criteria
 - Compiles clean.

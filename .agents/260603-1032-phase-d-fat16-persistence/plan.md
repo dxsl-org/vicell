@@ -23,7 +23,7 @@ shell ──IPC OP_WRITE──▶ VFS cell ──/data/?──┬─ yes ─▶ 
                                             │                                      │
                                             └─ /tmp/ ─▶ RamFS (volatile)           │ sys_blk_write(500/501)
                                                                                    ▼
-                                                            kernel vios_syscall_dispatch (raw 500/501)
+                                                            kernel ViCell_syscall_dispatch (raw 500/501)
                                                                                    │
                                                                                    ▼
                                                             viVirtIOBlk.write_sector() ─▶ QEMU VirtIO disk
@@ -61,7 +61,7 @@ Phase 5 depends on Phase 2 (formatted disk) and Phase 4 (routing live).
    Plan uses **81920 sectors** for the FAT16 region.
 
 3. **Raw syscall integration point is the `_ => match syscall_id` fallback** in
-   `vios_syscall_dispatch` (`kernel/src/task/syscall.rs:1158`). `ViSyscall::from(500)`
+   `ViCell_syscall_dispatch` (`kernel/src/task/syscall.rs:1158`). `ViSyscall::from(500)`
    returns `ViSyscall::Unknown` (`libs/api/src/syscall.rs:139`), so 500/501 fall
    through to the numeric match. Add `BlkRead`/`BlkWrite` variants to the internal
    `Syscall` enum and map 500/501 there. `libs/api/src/syscall.rs` is NOT touched

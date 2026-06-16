@@ -149,20 +149,20 @@ fn network_tcp_send_recv() {
 
     let mut qemu = QemuRunner::boot(&kernel_path(), &disk_path());
 
-    qemu.wait_for("ViOS >", BOOT_TIMEOUT)
+    qemu.wait_for("ViCell >", BOOT_TIMEOUT)
         .unwrap_or_else(|e| panic!("shell not reached: {e}"));
 
     qemu.wait_for("DHCP acquired", 20)
         .unwrap_or_else(|e| panic!("DHCP failed: {e}\n{}", qemu.dump()));
 
     // nc connects to 10.0.2.2:<port> → SLIRP → host echo server
-    // nc prints "HELLO_VIOS" echoed back
+    // nc prints "HELLO_ViCell" echoed back
     qemu.send_line(&format!("nc 10.0.2.2 {echo_port}"));
 
     qemu.wait_for("connected", 10)
         .unwrap_or_else(|e| panic!("TCP connect failed: {e}\n{}", qemu.dump()));
 
-    qemu.wait_for("HELLO_VIOS", 15)
+    qemu.wait_for("HELLO_ViCell", 15)
         .unwrap_or_else(|e| panic!("TCP echo not received: {e}\n{}", qemu.dump()));
 }
 ```
@@ -216,7 +216,7 @@ All 9+ tests should pass.
 |----------|----------|--------|
 | SOCKET_TCP create → non-zero cap | Critical | nc binary (Step 5) |
 | CONNECT to host echo server | Critical | network_tcp_send_recv |
-| SEND "HELLO_VIOS" + receive echo | Critical | network_tcp_send_recv |
+| SEND "HELLO_ViCell" + receive echo | Critical | network_tcp_send_recv |
 | CLOSE socket cleanly | High | nc binary exit |
 | DHCP still passes | Critical | Existing regression test |
 | Boot + shell still pass | Critical | Existing regression test |
@@ -233,15 +233,15 @@ All 9+ tests should pass.
 - [ ] Implement ServiceLookup lookup table in `kernel/src/task/syscall.rs`
 - [ ] Add `spawn_echo_server()` to `tests/integration/src/lib.rs`
 - [ ] Wire `nc.rs` to SOCKET_TCP + CONNECT + SEND + RECV + CLOSE (follow `cmd_fs.rs` pattern)
-- [ ] `cargo check -p vios-net-tools` — zero errors
+- [ ] `cargo check -p ViCell-net-tools` — zero errors
 - [ ] Add `network_tcp_send_recv` test to `boot.rs`
 - [ ] `cargo build --release && ./gen_disk.ps1` — rebuild with new nc binary
-- [ ] Run `network_tcp_send_recv` test — passes (HELLO_VIOS echoed)
+- [ ] Run `network_tcp_send_recv` test — passes (HELLO_ViCell echoed)
 - [ ] Run full suite — all existing tests still pass
 
 ## Success Criteria
 
-- [ ] `network_tcp_send_recv` passes: "HELLO_VIOS" appears in serial output
+- [ ] `network_tcp_send_recv` passes: "HELLO_ViCell" appears in serial output
 - [ ] All 9+ existing integration tests still pass (no regressions)
 - [ ] nc connects, sends, receives, closes cleanly
 - [ ] CONNECT returns `0x00` (not `0xFF` — proves Phase 1 wiring works)

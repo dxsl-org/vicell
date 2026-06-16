@@ -1,0 +1,14 @@
+[package]
+name = "driver-gpio"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+types    = { path = "../../../libs/types" }
+api      = { path = "../../../libs/api" }
+ostd     = { path = "../../../libs/ostd" }
+hal-gpio = { path = "../../../hal/traits/gpio" }
+
+[lib]
+# rlib (default): can be imported as Rust dep by periph-demo and future driver Cells.
+

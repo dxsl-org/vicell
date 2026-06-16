@@ -16,7 +16,7 @@
 
 ## Key Insights (verified)
 - Harness pattern: `QemuRunner::boot(&kernel_path(), &disk_path())` →
-  `wait_for("ViOS >", BOOT_TIMEOUT)` → `send_line(...)` → `wait_for(marker, CMD_TIMEOUT)`.
+  `wait_for("ViCell >", BOOT_TIMEOUT)` → `send_line(...)` → `wait_for(marker, CMD_TIMEOUT)`.
   Mirrors `shell_executes_echo` (`boot.rs:99-113`).
 - The shell already supports `echo X > path` (Phase C wired OP_WRITE) and `vcat`
   (OP_READ). Re-verify the redirect + vcat commands exist in the shell before
@@ -34,10 +34,10 @@
 
 ## Architecture / Data Flow (test)
 ```
-boot kernel+disk → wait "ViOS >"
+boot kernel+disk → wait "ViCell >"
   → sleep 500ms (readline warmup, as in shell_executes_echo)
   → send_line("echo PHASE_D_PERSIST > /data/test.txt")
-  → wait "ViOS >"           (write completed, prompt returned)
+  → wait "ViCell >"           (write completed, prompt returned)
   → send_line("vcat /data/test.txt")
   → wait "PHASE_D_PERSIST"  (read-back proves FAT16 round-trip)
 ```
@@ -67,7 +67,7 @@ fn vfs_fat16_write_read() {
         return;
     }
     let mut qemu = QemuRunner::boot(&kernel_path(), &disk_path());
-    qemu.wait_for("ViOS >", BOOT_TIMEOUT)
+    qemu.wait_for("ViCell >", BOOT_TIMEOUT)
         .unwrap_or_else(|e| panic!("prompt not reached: {e}\n--- output ---\n{}", qemu.dump()));
     // Confirm the FAT16 volume mounted (Phase 3 startup log).
     assert!(
@@ -76,7 +76,7 @@ fn vfs_fat16_write_read() {
     );
     std::thread::sleep(std::time::Duration::from_millis(500));
     qemu.send_line("echo PHASE_D_PERSIST > /data/test.txt");
-    qemu.wait_for("ViOS >", CMD_TIMEOUT)
+    qemu.wait_for("ViCell >", CMD_TIMEOUT)
         .unwrap_or_else(|e| panic!("write did not return to prompt: {e}\n{}", qemu.dump()));
     qemu.send_line("vcat /data/test.txt");
     qemu.wait_for("PHASE_D_PERSIST", CMD_TIMEOUT)
@@ -89,9 +89,9 @@ mounted"` — keep them in sync.
 
 ### 3. Run
 ```
-cargo build --release -p vios-kernel
+cargo build --release -p ViCell-kernel
 ./gen_disk.ps1
-cargo test -p vios-integration-tests vfs_fat16_write_read -- --nocapture
+cargo test -p ViCell-integration-tests vfs_fat16_write_read -- --nocapture
 ```
 
 ## Todo List
@@ -134,7 +134,7 @@ sector-range clamp + capability gate on block syscalls, wider OP_WRITE for >255 
 - Test correctly asserts mount-log string: `FAT16 /data volume mounted`
 
 **Test Execution Results:**
-- `cargo test -p vios-integration-tests vfs_fat16_write_read -- --nocapture` **PASSES**
+- `cargo test -p ViCell-integration-tests vfs_fat16_write_read -- --nocapture` **PASSES**
 - Test does not skip (QEMU, kernel, disk all present)
 - Boot-to-prompt succeeds within `BOOT_TIMEOUT` (existing setting: ~5s)
 - FAT16 mount log detected in output

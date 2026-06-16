@@ -111,12 +111,12 @@ test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 ## Build & Compile Status
 
 ```
-✅ cargo check -p vios-kernel --target riscv64gc-unknown-none-elf
+✅ cargo check -p ViCell-kernel --target riscv64gc-unknown-none-elf
 ✅ cargo check -p service-vfs --target riscv64gc-unknown-none-elf
 ✅ cargo check -p ostd --target riscv64gc-unknown-none-elf
 ✅ cargo check -p app-shell --target riscv64gc-unknown-none-elf
 ✅ cargo check --manifest-path tests/integration/Cargo.toml
-✅ cargo test -p vios-integration-tests (14/14 pass)
+✅ cargo test -p ViCell-integration-tests (14/14 pass)
 ```
 
 ---

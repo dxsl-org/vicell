@@ -17,7 +17,7 @@
 
 ## Key Insights (verified)
 - `ViSyscall::from(500)` and `from(501)` both return `ViSyscall::Unknown`
-  (`libs/api/src/syscall.rs:139`). In `vios_syscall_dispatch`, `Unknown` falls to
+  (`libs/api/src/syscall.rs:139`). In `ViCell_syscall_dispatch`, `Unknown` falls to
   the `_ => match syscall_id { ... }` arm (`kernel/src/task/syscall.rs:1158`),
   whose current default is `frame.regs[10] = usize::MAX; return;`. This is exactly
   where 500/501 must be matched.
@@ -41,7 +41,7 @@
 ```
 ostd::sys_blk_write(sector, buf)
   └─ syscall_raw(501, sector, buf.as_ptr(), 512, 0)  // a7=501
-        └─ ecall ─▶ vios_syscall_dispatch
+        └─ ecall ─▶ ViCell_syscall_dispatch
               ViSyscall::from(501) == Unknown ─▶ _ => match syscall_id { 501 => Syscall::BlkWrite{..} }
                     └─ handle_syscall(Syscall::BlkWrite) [SUM=1]
                           └─ validate_user_buf(ptr, 512)
@@ -65,7 +65,7 @@ Add near the existing `syscall` fn (after line 36):
 /// Used for block I/O (ids 500/501) which intentionally have no `ViSyscall`
 /// entry — keeping them out of the stable ABI in `libs/api` avoids the
 /// Interface-is-Sacred 2x-confirmation gate. The kernel dispatches them via the
-/// numeric fallback in `vios_syscall_dispatch`.
+/// numeric fallback in `ViCell_syscall_dispatch`.
 #[inline(always)]
 unsafe fn syscall_raw(id: usize, a0: usize, a1: usize, a2: usize, a3: usize) -> isize {
     let mut ret: isize;
@@ -147,7 +147,7 @@ Inside `_ => match syscall_id {`, before the final `_ => { frame.regs[10] = usiz
 
 ### 5. Compile
 ```
-cargo check -p vios-kernel --target riscv64gc-unknown-none-elf
+cargo check -p ViCell-kernel --target riscv64gc-unknown-none-elf
 cargo check -p ostd --target riscv64gc-unknown-none-elf
 ```
 
@@ -156,7 +156,7 @@ cargo check -p ostd --target riscv64gc-unknown-none-elf
 - [ ] Add `BlkRead`/`BlkWrite` variants to kernel `Syscall` enum
 - [ ] Add handlers in `handle_syscall`
 - [ ] Map 500/501 in `_ => match syscall_id`
-- [ ] `cargo check -p vios-kernel` and `-p ostd` pass
+- [ ] `cargo check -p ViCell-kernel` and `-p ostd` pass
 
 ## Success Criteria
 - Both `cargo check` commands compile clean (no warnings on new unsafe blocks).
@@ -182,7 +182,7 @@ Phase 3 (BlockStream) consumes `sys_blk_read`/`sys_blk_write`.
 
 ## Evidence
 
-**Compilation:** `cargo check -p vios-kernel --target riscv64gc-unknown-none-elf` exits 0.
+**Compilation:** `cargo check -p ViCell-kernel --target riscv64gc-unknown-none-elf` exits 0.
 
 **Code Integration Points Verified:**
 - `libs/ostd/src/syscall.rs` — `syscall_raw` + `sys_blk_read`/`sys_blk_write` added (lines ~37–100)
@@ -190,7 +190,7 @@ Phase 3 (BlockStream) consumes `sys_blk_read`/`sys_blk_write`.
 - `kernel/src/task/syscall.rs` — `handle_syscall` arms for BlkRead/BlkWrite added (lines ~1116–1138)
 - `kernel/src/task/syscall.rs` — numeric fallback mapping 500/501 in `_ => match syscall_id` (lines ~144–145)
 
-**Test Result:** `cargo test -p vios-integration-tests -- --test-threads=1` shows Phase 5 integration test `vfs_fat16_write_read` passing (13/13 integration tests pass).
+**Test Result:** `cargo test -p ViCell-integration-tests -- --test-threads=1` shows Phase 5 integration test `vfs_fat16_write_read` passing (13/13 integration tests pass).
 
 ## Unresolved Questions
 - Should `sys_blk_write` to a sector ≥ device capacity be rejected in the kernel,

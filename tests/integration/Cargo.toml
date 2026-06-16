@@ -59,6 +59,14 @@ path = "tests/periph-i2c-spi.rs"
 name = "shell-utils"
 path = "tests/shell-utils.rs"
 
+[[test]]
+name = "periph-can-pwm-adc"
+path = "tests/periph-can-pwm-adc.rs"
+
+[[test]]
+name = "robot-demo-e2e"
+path = "tests/robot-demo-e2e.rs"
+
 [dev-dependencies]
 tempfile = "3"
 

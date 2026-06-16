@@ -4,9 +4,9 @@ title: Plan Sync — Codebase State Validation
 effort_estimate: 4h
 ---
 
-# Plan Sync Report: ViOS Implementation Roadmap
+# Plan Sync Report: ViCell Implementation Roadmap
 
-**Completed:** 2026-05-29 | **Scope:** Sync `.agents/260528-2016-vios-full-implementation/plan.md` with actual codebase state
+**Completed:** 2026-05-29 | **Scope:** Sync `.agents/260528-2016-ViCell-full-implementation/plan.md` with actual codebase state
 
 ---
 
@@ -65,7 +65,7 @@ Phases 14, 15, 16, 18, 23 remain partial (all P2/P3 feature extensions with lowe
 ## Evidence Trail
 
 ### Git Log (40 commits reviewed)
-- Boot fixes: `fix(boot): resolve all boot panics — kernel boots to ViOS shell prompt`
+- Boot fixes: `fix(boot): resolve all boot panics — kernel boots to ViCell shell prompt`
 - VFS: `feat(vfs): implement file handle table, mount registry, quota tracking`
 - HAL: `feat(hal): implement RV32 & AArch32 architecture traits`
 - Lua: `feat(runtime/lua): implement Lua 5.4 C bindings`
@@ -84,7 +84,7 @@ Phases 14, 15, 16, 18, 23 remain partial (all P2/P3 feature extensions with lowe
 - **Phase 06:** Detailed report documenting ELF loader, cell table, disk layout — all shipped
 
 ### Boot Verification
-- Plan baseline: "ViOS boots to interactive shell prompt on 128MB RAM"
+- Plan baseline: "ViCell boots to interactive shell prompt on 128MB RAM"
 - Kernel binary: 4.4 MB (91% reduction via separate kernel_fs.img)
 - RAM requirement: 128 MB (down from 512 MB)
 - Shell runs with 20+ commands and aliases
@@ -142,7 +142,7 @@ Phases 14, 15, 16, 18, 23 remain partial (all P2/P3 feature extensions with lowe
 
 ## Files Modified
 
-- `D:\ViCell\.agents\260528-2016-vios-full-implementation\plan.md`
+- `D:\ViCell\.agents\260528-2016-ViCell-full-implementation\plan.md`
   - Phase index table: 5 phase statuses updated
   - Validation log: Added Session 2 comprehensive validation entry (evidence trail + impact analysis)
 

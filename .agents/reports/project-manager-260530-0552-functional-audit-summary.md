@@ -1,4 +1,4 @@
-# ViOS v0.2.1 Functional Audit Summary
+# ViCell v0.2.1 Functional Audit Summary
 **Date:** 2026-05-30  
 **Status Transition:** 23/23 "complete" (file-based) → 12 complete + 6 partial (function-based)  
 **v1.0 Readiness:** ~75% by functional verification; 5 bugs fixed; honest gaps documented
@@ -87,7 +87,7 @@ Prior plan claimed **23/23 phases complete (100%)** based on file existence and 
 
 **Phase 17: Enhanced Shell & Standard Utilities**  
 - **Expected:** Interactive REPL with 20+ built-in commands  
-- **Actual:** Shell spawns and prints "ViOS >" prompt; 20+ commands implemented in builtins.rs  
+- **Actual:** Shell spawns and prints "ViCell >" prompt; 20+ commands implemented in builtins.rs  
 - **Gap:** Interactive serial I/O echo NOT consumed by shell (test `shell_executes_echo` is #[ignore]'d); parser + command logic exist but REPL interaction unverified in QEMU  
 - **Impact:** Shell displays prompt but user input handling unproven
 
@@ -127,7 +127,7 @@ Prior phases marked "complete" when:
 **These metrics missed:**
 - Phases 11, 15, 16, 17, 18, 20 had code files checked in but **untested** in actual runtime environment
 - File existence ≠ functional correctness
-- Example: Phase 17 (shell) prints "ViOS >" but doesn't consume user input — test was #[ignore]'d because I/O unproven
+- Example: Phase 17 (shell) prints "ViCell >" but doesn't consume user input — test was #[ignore]'d because I/O unproven
 
 **Lesson:** Progress must be measured by:
 1. ✅ Code compiles (build verification)
@@ -172,7 +172,7 @@ File existence alone is insufficient.
 - [x] Baseline summary updated (honest status: "12 complete, 6 partial, ~75% verified-working")
 - [x] Session 5 functional audit log added to plan.md with full gap analysis
 - [x] Open question added to plan.md: v1.0 acceptance threshold for partial phases
-- [x] Memory file created (`project-vios-functional-status.md`) for future reference
+- [x] Memory file created (`project-ViCell-functional-status.md`) for future reference
 - [x] This report generated
 
 ---
@@ -192,5 +192,5 @@ File existence alone is insufficient.
 ---
 
 **Report Generated:** 2026-05-30 05:52 UTC  
-**Plan Location:** `D:\ViCell\.agents\260528-2016-vios-full-implementation\plan.md`  
-**Memory:** `D:\ViCell\.claude\agent-memory\project-manager\project-vios-functional-status.md`
+**Plan Location:** `D:\ViCell\.agents\260528-2016-ViCell-full-implementation\plan.md`  
+**Memory:** `D:\ViCell\.claude\agent-memory\project-manager\project-ViCell-functional-status.md`

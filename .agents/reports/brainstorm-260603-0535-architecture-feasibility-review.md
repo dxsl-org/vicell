@@ -1,4 +1,4 @@
-# ViOS Architecture & Feasibility Review
+# ViCell Architecture & Feasibility Review
 
 **Date**: 2026-06-03  
 **Type**: Brainstorm / Strategic Review  
@@ -16,7 +16,7 @@
 | HAL | 2,503 | 10 crates, RV64 full, ARM/x86 stubs |
 | Libs | 4,284 | types, api, ostd |
 
-**Boot chain (verified)**: OpenSBI → kernel → init → VFS → Config → Shell (`ViOS >`)
+**Boot chain (verified)**: OpenSBI → kernel → init → VFS → Config → Shell (`ViCell >`)
 
 ---
 
@@ -43,7 +43,7 @@
 
 ### Strengths
 
-- **SAS + LBI is academically sound** — Theseus, Asterinas, Tock have papers. ViOS is in good company.
+- **SAS + LBI is academically sound** — Theseus, Asterinas, Tock have papers. ViCell is in good company.
 - **Nano-kernel < 9K LOC** — auditable, portable, small attack surface.
 - **8 Coding Laws** — `#![forbid(unsafe_code)]` in Cells, Vi prefix, no `mod.rs` — discipline with clear rationale.
 - **Zero-cost IPC** — direct function call across Cells vs message passing = real perf advantage.
@@ -134,7 +134,7 @@ All of this simultaneously = Phase 1 at 60%, everything partial, nothing product
 ## 7 Integration Tests for Core Path
 
 ```
-1. boot_banner        boot → OpenSBI → "ViOS >"
+1. boot_banner        boot → OpenSBI → "ViCell >"
 2. shell_basic        echo, ls, cat, cd
 3. vfs_rw             mkdir/write/read/unlink on RamFS
 4. network_dhcp       DHCP lease acquired

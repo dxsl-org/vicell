@@ -184,6 +184,21 @@ pub unsafe fn run_vcpu_impl(vcpu: &mut AArch64Vcpu) -> ViVmExit {
         );
     }
 
+    // ── 2a. Configure virtual-timer access for guest ─────────────────────────
+    // CNTVOFF_EL2 = 0: virtual timer offset from physical counter = 0.
+    // CNTHCTL_EL2 = 0b11: EL1PCTEN|EL1PCEN — EL1/EL0 may read physical counter.
+    // Linux uses the virtual timer (CNTV / PPI 27); these two writes enable it.
+    // SAFETY: EL2-private sysregs; safe to write unconditionally before guest entry.
+    unsafe {
+        core::arch::asm!(
+            "msr cntvoff_el2, xzr",
+            "mov {0}, #3",
+            "msr cnthctl_el2, {0}",
+            out(reg) _,
+            options(nomem, nostack),
+        );
+    }
+
     // ── 2. Restore guest EL1 sysregs + EL2 entry control ────────────────────
     // SAFETY: writing EL1/EL0 sysregs from EL2 is permitted; Cells are EL0
     // and protected by TGE routing — these writes only affect the guest bank.

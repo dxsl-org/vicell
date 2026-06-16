@@ -89,7 +89,7 @@ fn block_io_denied_non_vfs() {
         return;
     }
     let mut qemu = QemuRunner::boot(&kernel_path(), &disk_path());
-    qemu.wait_for("ViOS >", BOOT_TIMEOUT)
+    qemu.wait_for("ViCell >", BOOT_TIMEOUT)
         .unwrap_or_else(|e| panic!("prompt not reached: {e}\n{}", qemu.dump()));
     std::thread::sleep(std::time::Duration::from_millis(500));
 

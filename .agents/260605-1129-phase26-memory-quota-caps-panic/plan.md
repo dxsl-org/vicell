@@ -1,10 +1,11 @@
 # Phase 26 — Memory Quota + ZST Capabilities + Panic Isolation
 
-**Status**: 📋 PLANNED  
+**Status**: ✅ COMPLETE (2026-06-07)  
 **Priority**: P1  
 **Target**: 2026-08-04  
 **Effort**: ~3 weeks  
-**Created**: 2026-06-05
+**Created**: 2026-06-05  
+**Completed**: 2026-06-07 (audit confirmed all 4 phases already implemented)
 
 ---
 
@@ -23,10 +24,10 @@ Three interlocking security improvements that together prevent a misbehaving Cel
 
 | # | File | Status | Effort | Description |
 |---|------|--------|--------|-------------|
-| 1 | [phase-01-zst-caps.md](phase-01-zst-caps.md) | 📋 PLANNED | 3 days | Replace KernelPerms bitfield with type-safe ZST cap tokens |
-| 2 | [phase-02-memory-quota.md](phase-02-memory-quota.md) | 📋 PLANNED | 4 days | Per-cell heap quota — OOM kills cell, not kernel |
-| 3 | [phase-03-fault-isolation.md](phase-03-fault-isolation.md) | 📋 PLANNED | 3 days | Trap handler kills Cell on fault instead of kernel panic |
-| 4 | [phase-04-audit-ring.md](phase-04-audit-ring.md) | 📋 PLANNED | 2 days | SPSC 256 KB audit ring buffer → /data/kernel.log |
+| 1 | [phase-01-zst-caps.md](phase-01-zst-caps.md) | ✅ COMPLETE | 3 days | Replace KernelPerms bitfield with type-safe ZST cap tokens |
+| 2 | [phase-02-memory-quota.md](phase-02-memory-quota.md) | ✅ COMPLETE | 4 days | Per-cell heap quota — OOM kills cell, not kernel |
+| 3 | [phase-03-fault-isolation.md](phase-03-fault-isolation.md) | ✅ COMPLETE | 3 days | Trap handler kills Cell on fault instead of kernel panic |
+| 4 | [phase-04-audit-ring.md](phase-04-audit-ring.md) | ✅ COMPLETE | 2 days | SPSC 256 KB audit ring buffer → /data/kernel.log |
 
 **Execution order**: 1 → 2 → 3 → 4. Phase 1 is high-urgency (security hole). Phases 3 + 4 can run in parallel after Phase 1.
 

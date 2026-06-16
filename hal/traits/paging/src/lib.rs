@@ -16,6 +16,9 @@ impl PageFlags {
     pub const GLOBAL: usize = 1 << 5;
     pub const ACCESSED: usize = 1 << 6;
     pub const DIRTY: usize = 1 << 7;
+    /// Device MMIO mapping — use non-cacheable Device-nGnRnE attributes (AArch64 MAIR index 0).
+    /// On RISC-V and x86_64 this flag is ignored (all MMIO uses the same PTE path).
+    pub const DEVICE: usize = 1 << 8;
 
     pub const R_W_X: usize = Self::READ | Self::WRITE | Self::EXECUTE;
 

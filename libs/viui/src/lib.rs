@@ -52,6 +52,7 @@ pub mod gles2_canvas;
 pub mod layout;
 pub mod node;
 pub mod node_widgets;
+pub mod overlay;
 pub mod prelude;
 pub mod render_ctx;
 pub mod renderer;

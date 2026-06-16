@@ -29,7 +29,7 @@ fatfs Seek(Current(n))
     → >= 0? → result as u64      [unchanged]
 
 cell ecall(500/501, sector, buf)
-  → vios_syscall_dispatch maps to Syscall::BlkRead/BlkWrite
+  → ViCell_syscall_dispatch maps to Syscall::BlkRead/BlkWrite
     → handle_syscall:
         sector >= CELL_TABLE_BASE_LBA? → Ok(0)   [NEW: rejected, no driver call]
         else → validate_user_buf → viVirtIOBlk.read/write_sector
@@ -88,7 +88,7 @@ Insert the guard as the FIRST statement inside the `Syscall::BlkRead { sector, b
 - [ ] 1a: SeekFrom::Current underflow guard in `block_stream.rs:87`
 - [ ] 1b: BlkRead sector cap in `syscall.rs`
 - [ ] 1c: BlkWrite sector cap in `syscall.rs`
-- [ ] `cargo check -p vios-kernel -p service-vfs --target riscv64gc-unknown-none-elf`
+- [ ] `cargo check -p ViCell-kernel -p service-vfs --target riscv64gc-unknown-none-elf`
 
 ## Success Criteria
 - Compiles clean (above check).

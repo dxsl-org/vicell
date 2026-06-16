@@ -8,6 +8,7 @@ pub mod heap;
 pub mod kaslr;
 pub mod paging;
 pub mod rt_heap;
+pub mod stage2;
 pub mod tests;
 pub mod vma;
 

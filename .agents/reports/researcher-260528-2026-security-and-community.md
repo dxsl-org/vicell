@@ -1,15 +1,15 @@
-# ViOS: Security Audit & Community Infrastructure Research
+# ViCell: Security Audit & Community Infrastructure Research
 **Date**: 2026-05-28 | **Status**: Final
 
 ---
 
 ## TOPIC 1: SECURITY AUDIT FOR CAPABILITY-BASED OS
 
-### 1.1 STRIDE for ViOS Cellular/SAS Model
+### 1.1 STRIDE for ViCell Cellular/SAS Model
 
-ViOS's threat model differs fundamentally from POSIX: no process boundaries, all code in Ring 0, isolation enforced by Rust's type system + ZST capability tokens + Ed25519-signed Cells.
+ViCell's threat model differs fundamentally from POSIX: no process boundaries, all code in Ring 0, isolation enforced by Rust's type system + ZST capability tokens + Ed25519-signed Cells.
 
-| STRIDE Category | ViOS-Specific Threat | Mitigation Already In Place | Gap |
+| STRIDE Category | ViCell-Specific Threat | Mitigation Already In Place | Gap |
 |---|---|---|---|
 | **Spoofing** | Cell impersonation — unsigned Cell binary loaded as trusted | Ed25519 signature on each Cell ELF | Verify signature check happens BEFORE relocation, not after |
 | **Tampering** | Runtime symbol table poisoning — malicious Cell replaces a function pointer in Global Symbol Table | Lock-free hash table (immutable after registration?) | Need read-only lock on symbol table after boot; audit `cell/registry` |
@@ -18,11 +18,11 @@ ViOS's threat model differs fundamentally from POSIX: no process boundaries, all
 | **DoS** | Fault Injection Cell already planned (Memory Quota, Watchdog) | Memory Quota + Watchdog in testing plan | Need rate-limiting on IPC/symbol lookups; stack exhaustion via deep async chains |
 | **Elevation of Privilege** | A Cell obtaining a capability ZST it was never issued (confused deputy) | ZST tokens not Copy/Clone by design | Audit all `unsafe transmute` paths; check if Box<dyn> downcasting leaks capability types |
 
-**Highest-priority STRIDE item for ViOS**: Elevation of Privilege via capability token smuggling through `unsafe` transmute or raw pointer reinterpretation. seL4's formal proof focused on exactly this class of violations.
+**Highest-priority STRIDE item for ViCell**: Elevation of Privilege via capability token smuggling through `unsafe` transmute or raw pointer reinterpretation. seL4's formal proof focused on exactly this class of violations.
 
 ### 1.2 SAS-Specific Threat Vectors (No Hardware MMU Isolation)
 
-These threats are unique to ViOS's architecture and don't apply to conventional OSes:
+These threats are unique to ViCell's architecture and don't apply to conventional OSes:
 
 1. **Type confusion via unsafe transmute** — TYPEPULSE (USENIX Security 2025) identified that generic-to-u8 reinterpretation in unsafe Rust is the dominant type confusion source. A Cell that can transmute a `Box<dyn ViDriver>` into raw bytes then cast to another trait object bypasses all ZST capability enforcement.
 
@@ -42,14 +42,14 @@ These threats are unique to ViOS's architecture and don't apply to conventional 
 
 **1. LibAFL in QEMU mode (primary)**
 - `libafl` + `libafl_qemu` crates; supports `no_std`, scales across cores
-- Run ViOS in QEMU, inject malformed syscall/IPC sequences at the Cell API boundary
+- Run ViCell in QEMU, inject malformed syscall/IPC sequences at the Cell API boundary
 - LibAFL supports coverage-guided fuzzing of the kernel without modifying kernel source
 - Scales linearly across cores via LLMP (Low-Level Message Passing)
 - Adoption risk: LOW — actively maintained by AFLplusplus team, production use at Google
 
 **2. cargo-fuzz / libFuzzer (secondary, for unit-level)**
 - Use for fuzzing individual kernel subsystems that can be extracted to host (e.g., the ELF loader, symbol table lookup, capability token parsing)
-- Limitation: requires `std` harness wrapper; ViOS is `no_std` so you need a thin host shim
+- Limitation: requires `std` harness wrapper; ViCell is `no_std` so you need a thin host shim
 - `cargo fuzz run <target>` is the simplest entry point
 
 **3. KernMiri (exploratory, not production-ready)**
@@ -65,11 +65,11 @@ These threats are unique to ViOS's architecture and don't apply to conventional 
 
 ### 1.4 Unsafe Code Audit Tools
 
-| Tool | Purpose | Verdict for ViOS |
+| Tool | Purpose | Verdict for ViCell |
 |---|---|---|
 | `cargo-geiger` | Reports unsafe block counts per crate | Run first; gives baseline. `cargo install cargo-geiger` |
 | Rudra | Detects send/sync variance bugs, panic safety, use-after-free patterns in unsafe Rust | High value for HAL/kernel crates; run on `kernel/` and `hal/` only |
-| Miri | UB detection at runtime, interpreter-based | Can't run ViOS binary directly; use for isolated host-side tests of kernel algorithms |
+| Miri | UB detection at runtime, interpreter-based | Can't run ViCell binary directly; use for isolated host-side tests of kernel algorithms |
 | KernMiri | Miri extended for OS physical memory / paging | Aspirational; copy approach from Asterinas when HAL is stable |
 | TYPEPULSE | Detects type confusion in unsafe generic→concrete casts | Academic tool (USENIX 2025); not yet a cargo plugin |
 
@@ -83,7 +83,7 @@ Cells must produce zero unsafe blocks (Law 4). Any `geiger` hit in `cells/` is a
 
 ### 1.5 Formal Verification: Kani
 
-**Kani Rust Verifier** (AWS, actively maintained, cargo-integrated) is the right tool for ViOS invariant proofs:
+**Kani Rust Verifier** (AWS, actively maintained, cargo-integrated) is the right tool for ViCell invariant proofs:
 
 ```toml
 # Cargo.toml
@@ -107,15 +107,15 @@ Kani uses bounded model checking (CBMC backend). It can prove:
 
 **Limitation**: Kani cannot currently verify `unsafe` blocks with raw pointer aliasing across async boundaries. For that, the approach is: minimize unsafe surface (cargo-geiger), then manually review residual unsafe.
 
-**Comparison with seL4 approach**: seL4 used Isabelle/HOL for full functional correctness — 200k LOC proof for ~9k LOC kernel. That's out of scope for ViOS at v0.x. Kani proofs on 5–10 critical invariants is the practical 80/20 choice.
+**Comparison with seL4 approach**: seL4 used Isabelle/HOL for full functional correctness — 200k LOC proof for ~9k LOC kernel. That's out of scope for ViCell at v0.x. Kani proofs on 5–10 critical invariants is the practical 80/20 choice.
 
 ### 1.6 Lessons from Reference OS Projects
 
-| OS | Security Approach | Applicable to ViOS |
+| OS | Security Approach | Applicable to ViCell |
 |---|---|---|
-| **Tock** | Rust capsule system + MPU for hardware isolation; OSFC 2024 talk on formal verification of isolation guarantees | Tock's capsule permission model mirrors ViOS ZST capabilities; study their `AppSlice` ownership model |
-| **Theseus** | All code Ring 0 SAS + safe Rust; MappedPages abstraction owns physical frames exclusively | Most architecturally similar to ViOS; their "intralingual OS" design paper is essential reading |
-| **Asterinas** | Framekernel: tiny unsafe TCB (14% of code) + all services in safe Rust; KernMiri for UB; Verus for proofs | Aspire to their TCB ratio; ViOS should track `unsafe` LOC % as a metric |
+| **Tock** | Rust capsule system + MPU for hardware isolation; OSFC 2024 talk on formal verification of isolation guarantees | Tock's capsule permission model mirrors ViCell ZST capabilities; study their `AppSlice` ownership model |
+| **Theseus** | All code Ring 0 SAS + safe Rust; MappedPages abstraction owns physical frames exclusively | Most architecturally similar to ViCell; their "intralingual OS" design paper is essential reading |
+| **Asterinas** | Framekernel: tiny unsafe TCB (14% of code) + all services in safe Rust; KernMiri for UB; Verus for proofs | Aspire to their TCB ratio; ViCell should track `unsafe` LOC % as a metric |
 | **seL4** | Isabelle/HOL full proof; capability access control formally verified | Too heavyweight for v0.x; adopt the *design pattern* (minimize TCB, explicit capability derivation tree) |
 
 ---
@@ -127,7 +127,7 @@ Kani uses bounded model checking (CBMC backend). It can prove:
 Ranked sections by contributor value:
 
 ```markdown
-# Contributing to ViOS
+# Contributing to ViCell
 
 ## Quick Start (< 5 min to first build)
 - Prerequisites: Rust nightly, QEMU, ...
@@ -181,7 +181,7 @@ needs-repro          — Bug without reproduction steps
 blocked              — Waiting on another issue
 ```
 
-**Key insight from research**: Projects that label ~25% of issues as `good-first-issue` see 13% more new contributors. For ViOS specifically, good candidates are:
+**Key insight from research**: Projects that label ~25% of issues as `good-first-issue` see 13% more new contributors. For ViCell specifically, good candidates are:
 - Documentation improvements (docs/ directory)
 - Adding `kani` proof harnesses for existing invariants
 - Porting a new architecture's UART impl to the `ViUart` trait
@@ -197,7 +197,7 @@ blocked              — Waiting on another issue
 | Discord | Real-time, lowers barrier for quick questions, good for voice debugging sessions | Not searchable, answers lost, proprietary | **Secondary** — onboarding help, contributor chat |
 | Issues | Structured, trackable, linked to code | Too formal for discussion | Bug reports + feature requests only |
 
-**Rationale**: OS newcomers will Google "ViOS how to implement driver" — GitHub Discussions answers are indexed, Discord answers are not. Architectural decisions must be preserved. Discord is for the human warmth that keeps contributors engaged.
+**Rationale**: OS newcomers will Google "ViCell how to implement driver" — GitHub Discussions answers are indexed, Discord answers are not. Architectural decisions must be preserved. Discord is for the human warmth that keeps contributors engaged.
 
 Avoid Matrix/IRC for a small project: fragmentation risk outweighs openness benefit until community exceeds ~200 active members.
 
@@ -236,13 +236,13 @@ commit_parsers = [
   run: git-cliff --current --output CHANGELOG.md
 ```
 
-git-cliff is written in Rust (uses git2 + tera), actively maintained, supports GitHub PR links, and generates Keep-a-Changelog format. No Node.js dependency, fits ViOS's Rust-first toolchain.
+git-cliff is written in Rust (uses git2 + tera), actively maintained, supports GitHub PR links, and generates Keep-a-Changelog format. No Node.js dependency, fits ViCell's Rust-first toolchain.
 
-Alternative `release-plz` (also Rust) auto-bumps Cargo.toml versions and opens release PRs — worth evaluating when ViOS reaches v1.0.
+Alternative `release-plz` (also Rust) auto-bumps Cargo.toml versions and opens release PRs — worth evaluating when ViCell reaches v1.0.
 
 ### 2.5 Release Tagging Strategy
 
-**ViOS is pre-1.0; apply Cargo's "left-shifted" semver rules:**
+**ViCell is pre-1.0; apply Cargo's "left-shifted" semver rules:**
 
 ```
 v0.MINOR.PATCH
@@ -264,7 +264,7 @@ git push origin v0.3.0
 **GitHub Release automation** (via git-cliff + gh CLI):
 ```bash
 git-cliff --current > NOTES.md
-gh release create v0.3.0 --notes-file NOTES.md --title "ViOS v0.3.0"
+gh release create v0.3.0 --notes-file NOTES.md --title "ViCell v0.3.0"
 ```
 
 **Do not use `-rc` suffixes until approaching v1.0**. For early OS development, even numbered releases are unstable by definition; the version number communicates interface stability, not production readiness.
@@ -275,7 +275,7 @@ What makes OS newcomers succeed (drawn from Asterinas, Tock, and RavynOS pattern
 
 **1. Zero-friction dev environment**
 - Asterinas ships OSDK (`cargo osdk run`) that eliminates manual QEMU configuration
-- ViOS equivalent: ensure `./run.ps1` works on a fresh clone; document all prereqs in ONBOARDING.md with exact version numbers
+- ViCell equivalent: ensure `./run.ps1` works on a fresh clone; document all prereqs in ONBOARDING.md with exact version numbers
 - Add a `Dockerfile` or `devcontainer.json` for contributors who don't want to install RISC-V cross toolchain locally
 
 **2. Guided first issue design**
@@ -284,13 +284,13 @@ What makes OS newcomers succeed (drawn from Asterinas, Tock, and RavynOS pattern
 - Target < 2 hours for a `good-first-issue` resolution
 
 **3. Architecture glossary**
-- ViOS uses non-standard terminology (Cell, Nano Kernel, SAS, LBI) that differs from every other OS project
+- ViCell uses non-standard terminology (Cell, Nano Kernel, SAS, LBI) that differs from every other OS project
 - A `GLOSSARY.md` or inline in ONBOARDING.md saves every newcomer 30 minutes of confusion
-- Map ViOS terms to familiar equivalents: "Cell = process (but shares address space)" etc.
+- Map ViCell terms to familiar equivalents: "Cell = process (but shares address space)" etc.
 
 **4. Mentored PR pathway**
 - Tag newcomer PRs with `first-contribution`; assign a maintainer reviewer within 48h
-- Linux Kernel Mentorship Program model: structured mentorship with monthly checkins — too heavy for v0.x ViOS; lighter version is a "PR buddy" volunteer list in CONTRIBUTING.md
+- Linux Kernel Mentorship Program model: structured mentorship with monthly checkins — too heavy for v0.x ViCell; lighter version is a "PR buddy" volunteer list in CONTRIBUTING.md
 
 **5. Runnable examples before kernel hacking**
 - New contributors should be able to build a trivial Cell ("hello world" driver) before touching kernel code
@@ -315,7 +315,7 @@ What makes OS newcomers succeed (drawn from Asterinas, Tock, and RavynOS pattern
 2. **Label taxonomy + 5–10 real `good-first-issue`s** — prerequisite for community growth
 3. **git-cliff + conventional commits** — automates changelog, zero ongoing cost
 4. **GitHub Discussions (open now) + Discord (when > 50 active contributors)**
-5. **GLOSSARY.md** — uniquely high value for ViOS because of non-standard terminology
+5. **GLOSSARY.md** — uniquely high value for ViCell because of non-standard terminology
 6. **Devcontainer / Dockerfile** — defer until Phase 2 boot is stable
 
 ---
@@ -338,7 +338,7 @@ What makes OS newcomers succeed (drawn from Asterinas, Tock, and RavynOS pattern
 
 ## UNRESOLVED QUESTIONS
 
-1. Are ViOS capability ZST tokens currently `!Copy + !Clone` enforced at the type level, or only by convention? If by convention, a `ptr::read` on ZST address bypasses it without triggering unsafe warnings in stable Rust — needs code audit.
+1. Are ViCell capability ZST tokens currently `!Copy + !Clone` enforced at the type level, or only by convention? If by convention, a `ptr::read` on ZST address bypasses it without triggering unsafe warnings in stable Rust — needs code audit.
 
 2. Does the Global Symbol Table allow overwriting an existing symbol registration? If yes, that's the TOCTOU attack vector described above.
 

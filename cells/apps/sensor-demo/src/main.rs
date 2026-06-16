@@ -28,14 +28,15 @@ pub fn main() {
     }
 }
 
+// Bounded so GPIO is released for other Driver Cells (e.g. pwm-demo, spi-demo).
+const DEMO_CYCLES: u32 = 3;
+
 fn run_with_gpio(gpio: Pl061Gpio) {
     let mut i2c = BitBangI2c::new(gpio);
-    let mut tick: u32 = 0;
-    loop {
+    for tick in 0..DEMO_CYCLES {
         let r = poll_sensor(&mut i2c, tick);
         print_reading(&r);
         sleep_1s();
-        tick = tick.wrapping_add(1);
     }
 }
 
@@ -61,11 +62,9 @@ fn print_reading(r: &sht3x::Reading) {
 }
 
 fn run_synthetic() {
-    let mut tick: u32 = 0;
-    loop {
+    for tick in 0..DEMO_CYCLES {
         print_reading(&sht3x::synthetic(tick));
         sleep_1s();
-        tick = tick.wrapping_add(1);
     }
 }
 
