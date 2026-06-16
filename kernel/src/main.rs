@@ -10,6 +10,7 @@ extern crate alloc;
 use core::panic::PanicInfo;
 
 // Core kernel modules
+pub mod acpi;
 pub mod audit;
 pub mod boot;
 pub mod cell;
@@ -32,6 +33,28 @@ use api::posix::_putchar;
 mod cpu_features;
 mod sync;
 pub mod platform;
+
+/// Signal QEMU to exit with a success (0) or failure (1) code.
+///
+/// Only available under the `test-hooks` feature — never call this in
+/// production builds. The kernel integration-test harness uses this
+/// instead of parsing serial output for "PASS"/"FAIL" banners.
+///
+/// Device addresses: RISC-V = SiFive test 0x100000, ARM64 = semihosting,
+/// x86_64 = isa-debug-exit (iobase 0xF4).
+#[cfg(feature = "test-hooks")]
+pub fn qemu_exit(success: bool) -> ! {
+    use qemu_exit::QEMUExit;
+    #[cfg(target_arch = "riscv64")]
+    { qemu_exit::RISCV64::new(0x100000).exit(if success { 0 } else { 1 }); }
+    #[cfg(target_arch = "aarch64")]
+    { qemu_exit::AArch64Semihosting::default().exit(if success { 0 } else { 1 }); }
+    #[cfg(target_arch = "x86_64")]
+    { qemu_exit::X86::new(0xF4, 0).exit(if success { 0 } else { 1 }); }
+    // Fallback for other arches: spin forever so the test times out clearly.
+    #[allow(clippy::empty_loop)]
+    loop {}
+}
 
 // Re-export types for convenience
 pub use types::*;
@@ -75,6 +98,31 @@ pub extern "C" fn kmain(hartid: usize, dtb: usize) -> ! {
         crate::memory::kaslr::init_kaslr(hhdm);
     }
 
+    // Parse ACPI tables BEFORE paging init so we have the real MMIO addresses
+    // for LAPIC, IOAPIC, HPET, and PCIe ECAM.  Must run after HHDM offset is set
+    // (phys_to_virt requires it) but before init_kernel_paging_x86 maps MMIO.
+    //
+    // On failure or absent RSDP the parser returns QEMU q35 defaults so the
+    // system boots unchanged on emulated hardware.
+    #[cfg(target_arch = "x86_64")]
+    let acpi_info = {
+        use crate::memory::frame::phys_to_virt;
+        // UART is already initialised above; use it directly for early boot log.
+        // `log_info` closure is not yet defined at this point in kmain.
+        let early_puts = |s: &str| {
+            for c in s.bytes() { crate::hal::uart_16550::putchar(c); }
+        };
+        let rsdp = crate::boot::limine::get_rsdp_ptr().unwrap_or(0);
+        if rsdp != 0 {
+            let info = crate::acpi::parse(rsdp, |p| phys_to_virt(p));
+            early_puts("[INFO] ACPI tables parsed\n");
+            info
+        } else {
+            early_puts("[INFO] ACPI RSDP not found — using QEMU q35 defaults\n");
+            crate::acpi::AcpiInfo::default()
+        }
+    };
+
     // 1. Initialize HAL (Architecture specific) - Early Trap Setup
     // x86_64: LAPIC is deferred until after paging sets up the MMIO mapping
     // (LAPIC phys 0xFEE00000 isn't in Limine's HHDM for MMIO regions).
@@ -87,6 +135,10 @@ pub extern "C" fn kmain(hartid: usize, dtb: usize) -> ! {
     }
     #[cfg(not(target_arch = "x86_64"))]
     hal::ARCH.init();
+    // Initialize Goldfish RTC for wall-clock time on QEMU ARM64 virt.
+    // Must run after ARCH.init() (which sets up MMIO identity map via paging::init).
+    #[cfg(target_arch = "aarch64")]
+    hal::rtc::init_default();
 
     // Define puts helper — arch-specific character output.
     let puts = |s: &str| {
@@ -197,6 +249,9 @@ pub extern "C" fn kmain(hartid: usize, dtb: usize) -> ! {
     }
     #[cfg(target_arch = "x86_64")]
     {
+        // Set runtime ECAM base from ACPI before PCIe scan.
+        crate::task::drivers::pcie_ecam::set_ecam_base_x86(acpi_info.ecam_base as usize);
+
         log_info("Initializing x86_64 paging (kernel PML4)...");
         let root_table_phys = {
             let mut locked_frame_allocator = memory::frame::FRAME_ALLOCATOR.lock();
@@ -204,6 +259,9 @@ pub extern "C" fn kmain(hartid: usize, dtb: usize) -> ! {
                 locked_frame_allocator
                     .as_mut()
                     .expect("Frame allocator not initialized"),
+                acpi_info.ioapic_base,
+                acpi_info.hpet_base,
+                acpi_info.lapic_base,
             )
             .expect("Failed to initialize x86_64 kernel PML4")
         };
@@ -231,8 +289,11 @@ pub extern "C" fn kmain(hartid: usize, dtb: usize) -> ! {
                 options(nomem, nostack)
             );
         }
-        // HPET + calibrated LAPIC periodic timer: now safe because HPET (0xFED0_0000)
-        // and LAPIC (0xFEE0_0000) are identity-mapped in our new PML4.
+        // Propagate HPET base to HAL timer init (runtime from ACPI, fallback to
+        // QEMU q35 default 0xFED0_0000 when ACPI is absent).
+        crate::hal::set_hpet_base(acpi_info.hpet_base as usize);
+        // HPET + calibrated LAPIC periodic timer: now safe because HPET, IOAPIC,
+        // and LAPIC are identity-mapped in our new PML4 at the ACPI-parsed bases.
         crate::hal::init_timers();
         log_info("x86_64 timers initialized (HPET + LAPIC)");
     }
@@ -276,11 +337,12 @@ pub extern "C" fn kmain(hartid: usize, dtb: usize) -> ! {
     task::drivers::uart::init(); // registers log backend on all arches
     #[cfg(target_arch = "riscv64")]
     task::drivers::uart::init_input();
-    // RV32 Nano / x86_64 bring-up: skip VirtIO probing (PCIe transport not yet ported).
+    // RV32 Nano / x86_64 bring-up: skip VirtIO MMIO probing (PCIe transport not yet ported).
+    // x86_64 gets VirtIO via the PCI path in virtio_pci::init() below.
     #[cfg(any(target_arch = "riscv64", target_arch = "aarch64"))]
     task::drivers::init();
     // x86_64: load embedded kernel_fs.img into RAM so EarlyLoader can serve ELFs from it.
-    // VirtIO block device is not set up on q35 yet (no PCIe transport) — ramdisk handles it.
+    // VirtIO devices on q35 are on PCIe — probed via virtio_pci::init() after ECAM scan.
     #[cfg(target_arch = "x86_64")]
     {
         task::drivers::ramdisk::init_driver();
@@ -292,15 +354,21 @@ pub extern "C" fn kmain(hartid: usize, dtb: usize) -> ! {
         log_info("x86_64: ramdisk + UART RX IRQ initialised");
     }
 
-    // PCIe ECAM scan + NVMe init — runs on arches where NVMe is the primary disk.
-    // ARM64 virt uses VirtIO block (not PCIe NVMe); accessing 0x3F000000 on QEMU
-    // virt 7+ triggers a Synchronous External Abort (bus error) — skip on aarch64.
+    // PCIe ECAM scan + NVMe + e1000 + VirtIO PCI init.
+    // ARM64 virt uses VirtIO MMIO (not PCIe); accessing 0x3F000000 on QEMU
+    // virt 7+ triggers a Synchronous External Abort — skip on aarch64.
     #[cfg(any(target_arch = "riscv64", target_arch = "x86_64"))]
     {
         task::drivers::pcie_ecam::init();
         task::drivers::iommu::init();          // bare passthrough (noop when absent)
         task::drivers::blk_nvme::init_driver();
         task::drivers::nic_e1000::init_driver();
+        // VirtIO PCI: probe vendor 0x1AF4 devices on PCIe bus 0.
+        // On RISC-V virt, VirtIO appears as MMIO (not PCIe), so this is a no-op
+        // there (no vendor 0x1AF4 on the PCIe bus).
+        // On x86_64 q35, this initialises VirtIO BLK and NET from BAR1 MMIO.
+        task::drivers::virtio_pci::init();
+        log_info("x86_64: VirtIO PCI probe done");
     }
 
     // Attempt warm boot from snapshot before any cell initialization.

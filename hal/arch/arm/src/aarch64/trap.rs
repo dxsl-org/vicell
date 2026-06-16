@@ -115,9 +115,13 @@ pub extern "C" fn vi_aarch64_trap_handler(frame: &mut TrapFrame) {
     }
 }
 
-/// IRQ handler — dispatches timer and VirtIO MMIO interrupts.
+/// GIC ID for the PL061 GPIO controller on QEMU ARM virt (SPI 7 = GIC ID 39).
+const GPIO_GIC_ID: u32 = 39;
+
+/// IRQ handler — dispatches timer, GPIO, and VirtIO MMIO interrupts.
 ///
 /// Timer PPIs: EL1 = GIC ID 30 (CNTP), EL2 = GIC ID 26 (CNTHP).
+/// GPIO PL061: GIC ID 39 (SPI 7) → forwards to MMIO-owner cell via IPC.
 /// VirtIO MMIO: QEMU virt SPI 16..47 = GIC IDs 48..79 (32 slots).
 /// `vi_handle_virtio_irq` expects SPI numbers (as stored in `VirtioEntry.irq`),
 /// so GIC ID is converted: SPI_nr = GIC_ID − 32.
@@ -126,6 +130,7 @@ pub extern "C" fn vi_aarch64_irq_handler(_frame: &mut TrapFrame) {
     extern "Rust" {
         fn vi_timer_tick();
         fn vi_handle_virtio_irq(irq: u32);
+        fn vi_gpio_notify_irq();
     }
     let irq = super::gic::claim();
     let timer_irq = if super::el2::is_el2() { 26 } else { 30 };
@@ -145,6 +150,14 @@ pub extern "C" fn vi_aarch64_irq_handler(_frame: &mut TrapFrame) {
         // SAFETY: vi_timer_tick is #[no_mangle] in kernel/src/task.rs.
         unsafe { vi_timer_tick(); }
         return; // skip the final complete() below — EOI already sent
+    } else if irq == GPIO_GIC_ID {
+        // GPIO PL061 edge interrupt: EOI first (priority drop), then notify cell.
+        // EOI before notify so the GIC can deliver the next GPIO edge immediately
+        // after the cell re-enables the interrupt (GPIOIE write from userspace).
+        super::gic::complete(irq);
+        // SAFETY: vi_gpio_notify_irq is #[no_mangle] in kernel/src/task/drivers/gpio_irq.rs.
+        unsafe { vi_gpio_notify_irq(); }
+        return;
     } else if irq >= 32 && irq != 0x3FF {
         // SPI range (GIC ID ≥ 32): dispatch to the VirtIO IRQ handler.
         // Convert GIC ID → SPI number so the comparison against VirtioEntry.irq works.

@@ -112,6 +112,15 @@ pub fn release_for(cell_id: CellId) {
     REGISTRY.lock().retain(|_base, &mut (_len, owner)| owner != cell_id);
 }
 
+/// Return the task ID (TID) of the cell that currently owns the MMIO region
+/// whose base address exactly matches `base`.
+///
+/// Returns `None` if no cell has requested that exact base address.
+/// Used by the GPIO IRQ handler to route interrupts to the current MMIO owner.
+pub fn lookup_mmio_owner(base: usize) -> Option<usize> {
+    REGISTRY.lock().get(&base).map(|&(_len, cell_id)| cell_id.0 as usize)
+}
+
 /// Current number of registered regions (diagnostics).
 pub fn region_count() -> usize {
     REGISTRY.lock().len()

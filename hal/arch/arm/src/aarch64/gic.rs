@@ -47,6 +47,9 @@ pub fn init() {
     for i in 48u32..80 {
         enable_irq(i);
     }
+    // Enable GPIO PL061 IRQ: QEMU ARM virt assigns PL061 to SPI 7 (GIC ID 39).
+    // Required for edge-triggered GPIO interrupts to reach vi_aarch64_irq_handler.
+    enable_irq(39);
 
     // CPU interface: allow all priorities, enable.
     wr(gicc(GICC_PMR), 0xFF);

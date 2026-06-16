@@ -28,7 +28,8 @@ const GPIOIE: usize = 0x410; // interrupt enable
 const GPIOIS: usize = 0x404; // interrupt sense: 0=edge, 1=level
 const GPIOIBE: usize = 0x408; // both edges
 const GPIOIEV: usize = 0x40C; // event: 0=falling, 1=rising
-const GPIOIC: usize = 0x41C; // interrupt clear
+const GPIOIC: usize = 0x41C;  // interrupt clear (write 1 to clear)
+const GPIOMIS: usize = 0x418; // masked interrupt status (read-only)
 
 /// PL061 GPIO controller for QEMU ARM virt.
 pub struct Pl061Gpio {
@@ -62,6 +63,23 @@ impl Pl061Gpio {
         let offset = (1usize << (pin + 2)) & 0x3FF; // addr bits [9:2]
         let data: u32 = if high { 1u32 << pin } else { 0 };
         self.mmio.write_u32(offset, data)
+    }
+
+    /// Return the masked interrupt status register (GPIOMIS).
+    ///
+    /// Each set bit indicates a pin whose edge IRQ fired AND was enabled.
+    /// Call this after receiving a `GPIO_IRQ_NOTIFY` (opcode 0xA0) from the kernel
+    /// to discover which pins triggered, then call `clear_irq(mask)` to ACK them.
+    pub fn read_mis(&self) -> ViResult<u8> {
+        Ok(self.mmio.read_u32(GPIOMIS)? as u8)
+    }
+
+    /// Acknowledge (clear) GPIO interrupts for the pins in `mask`.
+    ///
+    /// Writes GPIOIC without touching GPIOIE, so the interrupt remains enabled
+    /// for the next edge.  Call after reading GPIOMIS and processing all set bits.
+    pub fn clear_irq(&mut self, mask: u8) -> ViResult<()> {
+        self.mmio.write_u32(GPIOIC, u32::from(mask))
     }
 }
 

@@ -28,6 +28,7 @@ pub mod virtio_blk;
 pub mod virtio_gpu;
 pub mod virtio_input;
 pub mod virtio_net;
+pub mod gpio_irq;     // GPIO edge IRQ → MMIO-owner IPC dispatch (AArch64 PL061)
 pub mod virtio_rng;
 pub mod pcie_ecam;    // PCIe ECAM config-space walker (bus 0)
 pub mod blk_nvme;     // NVMe kernel block driver (ViBlockDevice impl)
@@ -36,6 +37,7 @@ pub mod iommu_riscv;  // RISC-V IOMMU PCIe driver
 pub mod iommu_x86;    // Intel VT-d passthrough driver
 pub mod nic;          // NIC selector (e1000 > VirtIO)
 pub mod nic_e1000;    // Intel e1000 (82540EM) PCIe NIC driver
+pub mod virtio_pci;   // VirtIO PCI transport for x86_64 q35 (transitional BLK/NET)
 
 /// Initialize drivers subsystem
 ///
