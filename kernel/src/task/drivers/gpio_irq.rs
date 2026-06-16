@@ -34,6 +34,7 @@ pub extern "Rust" fn vi_gpio_notify_irq() {
     let Some(tid) = crate::resource_registry::lookup_mmio_owner(PL061_BASE) else {
         return; // No cell currently owns GPIO — drop the interrupt.
     };
+    log::info!("[gpio-irq] IRQ fired — notifying GPIO owner tid={}", tid);
     let msg = [GPIO_IRQ_NOTIFY, 0x00, 0x00, 0x00];
     // SAFETY: ipc_send copies 4 bytes from a stack buffer to the target cell's
     // recv page.  On AArch64 EL1 can access EL0 pages in ViCell's SAS layout

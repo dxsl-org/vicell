@@ -53,17 +53,19 @@ pub extern "C" fn main() {
 
     // Supervised services in bring-up order — VFS first (it serves /bin/*).
     // tids[i] is the current live tid of paths[i] (None when down).
-    const NSVC: usize = 9;
+    // robot-demo and robot-dashboard are Temporary (run-once) and use GPIO.
+    // They are spawned after periph-demo in the unsupervised section below so
+    // that periph-demo can complete its GPIO IRQ self-test before robot-demo
+    // claims the PL061 MMIO region.
+    const NSVC: usize = 7;
     let paths: [&str; NSVC] = [
         "/bin/vfs",
         "/bin/config",
         "/bin/input",
         "/bin/net",
         "/bin/compositor",
-        "/bin/silo",             // Security Silo — P-256 key isolation (Tier 3a)
+        "/bin/silo",   // Security Silo — P-256 key isolation (Tier 3a)
         "/bin/shell",
-        "/bin/robot-demo",       // G1 sensor→actuator→MQTT reference demo
-        "/bin/robot-dashboard",  // G1 ViUI v2 dashboard demo (FramebufferRenderer)
     ];
     let mut tids: [Option<usize>; NSVC] = [None; NSVC];
 
@@ -78,8 +80,6 @@ pub extern "C" fn main() {
         Some(service::COMPOSITOR),
         Some(types::silo::SILO_SERVICE_ID), // SILO = 6
         None, // shell is not a registered service
-        None, // robot-demo is not a registered service
-        None, // robot-dashboard is not a registered service
     ];
 
     // Restart policy per service. All current services are Permanent (a robot must keep
@@ -93,8 +93,6 @@ pub extern "C" fn main() {
         Policy::Permanent, // compositor
         Policy::Permanent, // silo — key service, must stay up
         Policy::Transient, // shell: restart on crash, but a clean `exit` is final
-        Policy::Temporary, // robot-demo: run once then stop
-        Policy::Temporary, // robot-dashboard: ViUI demo, run once
     ];
     // Per-service restart-intensity state (sliding window).
     let mut restart_count: [u32; NSVC] = [0; NSVC];
@@ -142,7 +140,13 @@ pub extern "C" fn main() {
     // Optional benchmark suite (CI disk images only) — not supervised.
     let _ = sys_spawn_from_path("/bin/bench");
     // Optional peripheral demo (GPIO/UART) — AArch64 only, no-op on RISC-V.
+    // Spawned first so it can claim PL061 GPIO before robot-demo.
     let _ = sys_spawn_from_path("/bin/periph-demo");
+    // G1 sensor→actuator→MQTT reference demo — spawned after periph-demo so
+    // it can reuse GPIO once periph-demo completes its IRQ self-test.
+    let _ = sys_spawn_from_path("/bin/robot-demo");
+    // G1 ViUI v2 dashboard demo (FramebufferRenderer).
+    let _ = sys_spawn_from_path("/bin/robot-dashboard");
     // Optional I2C sensor demo (SHT3x, bit-bang over GPIO pins 0/1) — AArch64 only.
     let _ = sys_spawn_from_path("/bin/sensor-demo");
     // Optional SPI demo (bit-bang over GPIO pins 2/3/4/5) — AArch64 only.

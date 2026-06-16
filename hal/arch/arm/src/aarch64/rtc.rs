@@ -27,15 +27,17 @@ pub fn init_default() {
 }
 
 /// Nanoseconds since Unix epoch; `0` if RTC not initialized.
+///
+/// QEMU ARM virt uses the PL031 (ARM PrimeCell RTC) at this address.
+/// PL031 RTCDR (offset 0x0) returns a 32-bit seconds count since the Unix
+/// epoch (sourced from QEMU_CLOCK_REALTIME on the host).  Multiply by
+/// 1_000_000_000 to convert to nanoseconds for the common hal::rtc contract.
 pub fn now_epoch_ns() -> u64 {
     let base = BASE.load(Ordering::Acquire);
     if base == 0 {
         return 0;
     }
-    // SAFETY: base is a valid MMIO window; volatile reads are non-aliasing.
-    unsafe {
-        let low  = core::ptr::read_volatile(base as *const u32);
-        let high = core::ptr::read_volatile((base + 4) as *const u32);
-        (high as u64) << 32 | low as u64
-    }
+    // SAFETY: base is a valid MMIO window; volatile read is non-aliasing.
+    let secs = unsafe { core::ptr::read_volatile(base as *const u32) };
+    secs as u64 * 1_000_000_000
 }
