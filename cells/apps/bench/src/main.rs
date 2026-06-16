@@ -163,6 +163,7 @@ pub fn main() {
                 ostd::syscall::sys_send(sender, &[]);
             }
         }
+        "smp-worker" => scenarios::smp::run_worker(),
         _ => {} // orchestrator falls through
     }
 
@@ -237,6 +238,13 @@ pub fn main() {
     run_rt_preempt();
     run_rt_control_loop();
     run_rt_under_load();
+
+    // ── 6. SMP throughput (work-stealing, 2 harts) ────────────────────────────
+    println("");
+    println("[smp] SMP throughput suite (2-hart work-stealing):");
+    let (sp, sf) = scenarios::smp::run_smp_suite();
+    passed += sp;
+    failed += sf;
 
     // ── Summary ───────────────────────────────────────────────────────────────
     println("");

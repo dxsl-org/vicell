@@ -7,3 +7,4 @@ pub mod syscall_yield;
 pub mod rt_load;
 pub mod preempt_latency;
 pub mod control_loop;
+pub mod smp;

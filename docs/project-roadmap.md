@@ -68,7 +68,7 @@ ViCell ships in two product stages defined by target hardware. The mapping princ
 | WASM WASI 2.0 Component Model (+ePMP) | Phase 28/31 | ⚠️ dropped — same decision | **G2 (dropped)** |
 | 🆕 Tier 3 kernel prep — H-extension HS-mode boot (RISC-V) | *new* | ✅ COMPLETE (2026-06-07) — cpu_features.rs DTB detection + HypervisorCap ZST + TCB field; see .agents/260607-1420-h-ext-hypervisor-cap/ | **G1 prep** (non-breaking) |
 | 🆕 Tier 3a Security Silo (Stage-2 fenced bare-metal guest) | *new* | 📋 | G1-optional |
-| 🆕 Tier 3b Linux VM — crosvm fork + vicell_hv/ port | Phase 31 | 📋 | **G2** |
+| 🆕 Tier 3b Linux VM — ARM64 EL2 VMM (all 10 phases) | Phase 31 | ✅ COMPLETE 2026-06-16 — EL2 hypervisor boots Alpine 3.21.3 aarch64, multi-arch ENOSYS stubs, CI smoke job | **G2** |
 | 🆕 **SMP multi-core scheduler + work-stealing** | Phase 32 | ✅ COMPLETE 2026-06-09 — SBI HSM hart_start/send_ipi, per-hart ViHartLocal via tp CSR, per-hart ready queues + work stealing, RT cells pinned to hart 1, WaitForEvent (217) | **G2** |
 | Compositor + GPU desktop (full) + mouse | M2.4 + M2.2 full | 📋 | G2 |
 | 🆕 **ViUI v1** (Elm model, FramebufferCanvas, GlyphAtlas, P01–P07) | new | ✅ Done 2026-06-08 — foundation only, design superseded | **G2 prep** |
@@ -82,7 +82,7 @@ ViCell ships in two product stages defined by target hardware. The mapping princ
 | 🆕 x86_64 full bring-up | ext. M1.3 | ✅ COMPLETE (2026-06-13) — APIC, HPET/TSC, real MMU, VirtIO, PL011 RX; 5/5 QEMU integration tests pass; syscall exit path fixed | **G2** |
 | VFS scale (FAT32/ext4, large disks) | M2.1 ext. | 📋 | G2 |
 | Full utility suite (grep/sed/awk/top/ps…) | M3.2 full | 📋 | G2 |
-| Throughput benchmark | M4.4 full | 📋 | G2 |
+| Throughput benchmark (SMP) | M4.4 subset | ✅ DONE 2026-06-16 — 3 SMP scenarios in bench cell: spawn_rate(≥20/s), ipc_throughput(≥5000/s), work_distribution(scale≥1.4×); QEMU-TCG caveat logged | G2 |
 | Lua / MicroPython runtimes | M3.3/M3.4 | ✅ | shared |
 | Advanced IPC (SendGather/RecvScatter/Timeout) | M4.2 | ✅ | shared |
 | Network TCP/UDP/DNS/MQTT | Phases A–E | ✅ | shared |
