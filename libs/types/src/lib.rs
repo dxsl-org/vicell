@@ -163,6 +163,8 @@ impl Default for DirEntry {
     }
 }
 
+pub mod silo;
+
 // ─── Host-runnable unit tests ─────────────────────────────────────────────────
 
 #[cfg(test)]

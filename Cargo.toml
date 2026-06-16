@@ -59,7 +59,8 @@ members = [
     "cells/services/power",
     "cells/services/config",
     "cells/services/hypervisor",
-    
+    "cells/services/silo",
+
     # Cells - Apps
     "cells/apps/init",
     "cells/apps/shell",
@@ -87,6 +88,7 @@ members = [
     "cells/apps/robot-dashboard",
     "cells/apps/sdk-demo",
     "cells/apps/input-test",
+    "cells/apps/silo-test",
 
 ]
 

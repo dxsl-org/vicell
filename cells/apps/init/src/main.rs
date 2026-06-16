@@ -53,13 +53,14 @@ pub extern "C" fn main() {
 
     // Supervised services in bring-up order — VFS first (it serves /bin/*).
     // tids[i] is the current live tid of paths[i] (None when down).
-    const NSVC: usize = 8;
+    const NSVC: usize = 9;
     let paths: [&str; NSVC] = [
         "/bin/vfs",
         "/bin/config",
         "/bin/input",
         "/bin/net",
         "/bin/compositor",
+        "/bin/silo",             // Security Silo — P-256 key isolation (Tier 3a)
         "/bin/shell",
         "/bin/robot-demo",       // G1 sensor→actuator→MQTT reference demo
         "/bin/robot-dashboard",  // G1 ViUI v2 dashboard demo (FramebufferRenderer)
@@ -75,6 +76,7 @@ pub extern "C" fn main() {
         Some(service::INPUT),
         Some(service::NET),
         Some(service::COMPOSITOR),
+        Some(types::silo::SILO_SERVICE_ID), // SILO = 6
         None, // shell is not a registered service
         None, // robot-demo is not a registered service
         None, // robot-dashboard is not a registered service
@@ -89,6 +91,7 @@ pub extern "C" fn main() {
         Policy::Permanent, // input
         Policy::Permanent, // net
         Policy::Permanent, // compositor
+        Policy::Permanent, // silo — key service, must stay up
         Policy::Transient, // shell: restart on crash, but a clean `exit` is final
         Policy::Temporary, // robot-demo: run once then stop
         Policy::Temporary, // robot-dashboard: ViUI demo, run once
@@ -153,6 +156,8 @@ pub extern "C" fn main() {
     // Optional hypervisor service — auto-starts when /bin/hypervisor is present in
     // the disk image (aarch64 + virtualization=on kernel builds only).
     let _ = sys_spawn_from_path("/bin/hypervisor");
+    // Optional silo integration test — only present in test disk images.
+    let _ = sys_spawn_from_path("/bin/silo-test");
     // VFS integration test suite: only present in test-hooks kernel images.
     let _ = sys_spawn_from_path("/bin/vfs-test");
     // Bare-cell input delivery test — ostd::input focus + event loop, no viui.

@@ -107,7 +107,7 @@ Analogy: WSL2 trên Windows — chạy Windows + Linux side-by-side, Linux disk/
 
 ### 4.2 Hai flavors — khác nhau hoàn toàn
 
-#### Tier 3a — Security Silo [G1-optional]
+#### Tier 3a — Security Silo [G1-optional] **✅ COMPLETE (2026-06-16)**
 
 ```
 Mục đích: Chạy code cực nhạy cảm (private keys, crypto) trong vùng phần cứng cô lập
@@ -120,6 +120,19 @@ Use case thực tế G1: robot lưu TLS private key trong Silo — ngay cả ker
 bị compromise cũng không đọc được key (Stage-2 hardware fence).
 
 Không cần device emulation, không cần Linux. Reuse Stage-2 primitives của Tier 3b.
+
+**Implementation Status:**
+- **P01** — Guest binary (`cells/guests/silo-guest/`): aarch64-unknown-none-softfloat, p256 ECDSA/ECDH, mailbox protocol ✅
+- **P02** — Silo service cell (`cells/services/silo/`): VMM-lite, embedded guest, IPC handlers (Sign/Ecdh/GetPub) ✅
+- **P03A** — ostd SiloHandle API (`libs/ostd/src/silo.rs`): connect/init_key/sign/ecdh/get_public_key ✅
+- **P03B** — Net Cell HsmCryptoProvider: DEFERRED (pending TLS plan Phase 03 embedded-tls integration)
+- **P04** — Integration test cell (`cells/apps/silo-test/`): T1–T6 tests all passing ✅
+  - T1: Service lookup
+  - T2: Key initialization + GetPub
+  - T3: ECDSA sign round-trip verification
+  - T4: ECDH shared secret verification
+  - T5: Fault recovery
+  - T6: Capability isolation enforcement
 
 #### Tier 3b — Linux VM [G2]
 

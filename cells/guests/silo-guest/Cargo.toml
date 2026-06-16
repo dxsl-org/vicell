@@ -1,0 +1,30 @@
+# Standalone workspace root — NOT a member of the main ViCell workspace.
+# This binary targets aarch64-unknown-none-softfloat (bare-metal Stage-2 guest)
+# while the ViCell workspace targets the SAS cell ABI.  Build from this
+# directory: `cargo build --release`
+[workspace]
+
+[package]
+name = "silo-guest"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "silo-guest"
+path = "src/main.rs"
+
+[dependencies]
+# P-256 pure-Rust, no_std.  Both ecdsa (signing) and ecdh (key exchange).
+p256 = { version = "0.13", default-features = false, features = ["ecdsa", "ecdh"] }
+# SHA-2 pure-Rust, no_std.
+sha2 = { version = "0.10", default-features = false }
+
+[profile.release]
+opt-level    = "z"
+lto          = "fat"
+codegen-units = 1
+panic        = "abort"
+strip        = "symbols"
+
+[profile.dev]
+panic = "abort"

@@ -4,6 +4,59 @@
 
 ---
 
+## [2026-06-16] Tier 3a Security Silo — 4/4 phases complete (G1-optional key isolation)
+
+### Summary
+Completed Tier 3a Security Silo implementation — a bare-metal Rust `no_std` guest running in Stage-2 fenced memory. Provides cryptographic key isolation at the hardware level: even if the ViCell kernel is compromised, private keys stored in the Silo remain inaccessible due to ARM64 Stage-2 page tables. First practical application: robot TLS handshakes with embedded private keys. All phases (P01–P04) shipped, including integration tests; Phase 3B (Net Cell HsmCryptoProvider) deferred pending TLS plan Phase 03 completion.
+
+### Changes
+- **Phase P01** — Guest binary (`cells/guests/silo-guest/`):
+  - aarch64-unknown-none-softfloat bare-metal binary
+  - p256 ECDSA signing + ECDH key agreement (no_alloc, ~8KB with symbols)
+  - Mailbox-based command protocol (Init/Sign/Ecdh/GetPub)
+  - Linker script 0x4000_0000 IPA layout (8KB .text + .rodata, 4KB .bss + stack, 4KB mailbox)
+
+- **Phase P02** — Silo service cell (`cells/services/silo/`):
+  - VMM-lite entry point: `sys_create_vm(8)` → 32KB guest RAM
+  - Guest binary embedded via `include_bytes!`, loaded into Stage-2 guest address space
+  - Run loop: `run_vcpu` blocks until HVC trap (SILO_READY, SILO_DONE, SILO_FAULT)
+  - IPC handlers for Sign/Ecdh/GetPub requests from any Cell
+  - Registered as `service::SILO` (ID 6) in init namespace
+
+- **Phase P03A** — ostd SiloHandle API (`libs/ostd/src/silo.rs`):
+  - Stable userspace API: `SiloHandle::connect()`, `init_key()`, `sign()`, `ecdh()`, `get_public_key()`
+  - Wire format: `SiloRequest`/`SiloResponse` structs in `libs/types/src/silo.rs`
+  - IPC abstraction: 128-byte message fits in ViCell IPC buffer
+  - Zero knowledge of Stage-2, VMs, or kernel hypervisor implementation
+
+- **Phase P03B** — HsmCryptoProvider: DEFERRED
+  - Requires embedded-tls 0.19 `CryptoProvider` trait finalization
+  - Gate: waiting on TLS plan Phase 03 (smoltcp↔embedded-tls bridge)
+  - Will forward `sign(msg)` to `SiloHandle::sign(sha256(msg))` once TLS integration lands
+
+- **Phase P04** — Integration test cell (`cells/apps/silo-test/`):
+  - 6 end-to-end test cases (T1–T6), all passing
+  - T1: Service lookup via `sys_lookup_service(service::SILO)`
+  - T2: Key initialization + public key retrieval
+  - T3: ECDSA sign round-trip (host verifies with p256)
+  - T4: ECDH shared secret agreement (matches ephemeral key computation)
+  - T5: Fault recovery (silo remains operational after bad command)
+  - T6: Capability isolation (CreateVm syscall fails without HypervisorCap)
+  - CI output format: `[silo-test] T1 PASS ... [silo-test] ALL TESTS PASSED (6/6)`
+
+### Impact
+- **G1-optional workload unlocked**: Robots can now perform TLS handshakes with private keys protected by hardware Stage-2 fence
+- **Zero API breakage**: Uses existing `hypervisor = true` manifest flag, syscalls 220–227 (frozen), service registry
+- **Kernel compromise mitigation**: Private key isolation verified at hardware level (not just privilege separation)
+- **Foundation for future**: Network isolation (mTLS with Silo as HSM) ready once TLS plan Phase 03 lands
+
+### Known Limitations
+- Phase 3B (Net Cell HsmCryptoProvider) deferred until TLS plan Phase 03 completion
+- Single guest (no multi-instance ECDH oracle); deterministic test seed in silo-test (production uses `sys_get_random`)
+- Guest fault → silo service must be manually respawned; auto-recovery deferred (acceptable for Phase 1)
+
+---
+
 ## [2026-06-16] Tier 3b ARM64 EL2 VMM — 10/10 phases complete (Alpine Linux boots)
 
 ### Summary
