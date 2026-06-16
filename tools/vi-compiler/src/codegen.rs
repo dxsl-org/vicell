@@ -90,6 +90,8 @@ fn widget_ctor_style(rust_type: &str) -> CtorStyle {
         // TextEdit::new(text: Signal<String>) — confirmed from source
         "TextEdit"                   => CtorStyle::SignalFirst,
         "ListView"                   => CtorStyle::ItemsSignal,
+        // Dialog / DropDown require runtime queue — emit imperative placeholder
+        "Dialog" | "DropDown"        => CtorStyle::NoArg,
         // Image::new(data, width, height) — too complex; emit empty placeholder
         _                            => CtorStyle::NoArg,
     }
@@ -219,6 +221,8 @@ impl CodeGen {
             out.push_str("    use viui::node_widgets::card::Card;\n");
             out.push_str("    use viui::node_widgets::divider::Divider;\n");
             out.push_str("    use viui::node_widgets::space::Space;\n");
+            out.push_str("    use viui::node_widgets::dialog::Dialog;\n");
+            out.push_str("    use viui::node_widgets::dropdown::DropDown;\n");
             out.push_str("    use viui::canvas::Color;\n\n");
 
             // Indent each line of component source by 4 spaces.
@@ -759,6 +763,55 @@ impl CodeGen {
                 let w = find_binding_f32(&elem.bindings, "width").unwrap_or(0.0);
                 let h = find_binding_f32(&elem.bindings, "height").unwrap_or(0.0);
                 stmts.push(format!("        let {} = Space::new({}f32, {}f32);", var, w, h));
+                stmts.push(String::new());
+                (stmts, subs, var)
+            }
+
+            // ── Dialog ────────────────────────────────────────────────────────
+            // Dialog requires a runtime `OverlayActionQueue` that cannot be
+            // inferred from .vi bindings alone. Emit an alert() placeholder that
+            // compiles; the caller replaces it with the appropriate constructor.
+            "Dialog" => {
+                let var = st.next_widget("Dialog");
+                let title_str = elem.bindings.iter()
+                    .find(|b| b.property == "title")
+                    .map(|b| expr_as_raw_text(&b.value))
+                    .unwrap_or_else(|| "Dialog".to_string());
+                let msg_str = elem.bindings.iter()
+                    .find(|b| b.property == "message")
+                    .map(|b| expr_as_raw_text(&b.value))
+                    .unwrap_or_default();
+                stmts.push(format!(
+                    "        // Dialog: replace queue placeholder with app.action_queue()"
+                ));
+                stmts.push(format!(
+                    "        let {var} = Dialog::alert(\"{title}\", \"{msg}\", \
+                     viui::overlay::new_action_queue(), || {{}});",
+                    var   = var,
+                    title = escape_str(&title_str),
+                    msg   = escape_str(&msg_str),
+                ));
+                stmts.push(String::new());
+                (stmts, subs, var)
+            }
+
+            // ── DropDown / Dropdown ───────────────────────────────────────────
+            // DropDown::new(selected, items, queue).
+            // Emit a placeholder with an empty items list; the caller fills it in.
+            "DropDown" | "Dropdown" => {
+                let var = st.next_widget("DropDown");
+                let sig_var = find_signal_binding(
+                    &elem.bindings, "selected", "DropDown", &mut stmts, st,
+                );
+                stmts.push(format!(
+                    "        // DropDown: replace queue placeholder with app.action_queue()"
+                ));
+                stmts.push(format!(
+                    "        let {var} = DropDown::new({sig}, alloc::vec![], \
+                     viui::overlay::new_action_queue());",
+                    var = var,
+                    sig = sig_var,
+                ));
                 stmts.push(String::new());
                 (stmts, subs, var)
             }
