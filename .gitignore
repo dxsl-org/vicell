@@ -36,6 +36,7 @@ test_error*.txt
 .references/
 .agents/
 .claude/
+CLAUDE.md
 .cargo/
 # Integration tests need their own target override; include their config.
 !tests/integration/.cargo/
