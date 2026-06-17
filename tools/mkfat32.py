@@ -226,30 +226,48 @@ def create_fat32_image(output_path: str, files: list):
     min_sectors = max(2048, (needed + SECTOR_SIZE - 1) // SECTOR_SIZE)
     sector_count = ((min_sectors + 8191) // 8192) * 8192      # align to 4 MB
 
-    # FAT16 entries are 2 bytes.  Iterate to converge on a FAT size large enough
-    # to map every data cluster (FAT size depends on cluster count, which depends
-    # on FAT size).  A single pass over-estimates safely.
-    def fat_sectors_for(data_sectors_guess: int) -> int:
-        clusters = data_sectors_guess + 2  # +2 for reserved FAT entries 0,1
-        fat_bytes = clusters * 2
-        fs = (fat_bytes + SECTOR_SIZE - 1) // SECTOR_SIZE
-        return ((fs + 31) // 32) * 32                         # align to 16 KB
+    # Auto-select sectors/cluster: start at 1, double until data fits in FAT16
+    # window (<=65524 clusters).  Valid values per FAT spec: 1,2,4,8,16,32,64,128.
+    sectors_per_cluster = 1
+    while True:
+        cluster_size = SECTOR_SIZE * sectors_per_cluster
 
-    fat_sectors = fat_sectors_for(sector_count)
-    data_start  = RESERVED + FATS * fat_sectors + root_dir_sectors
-    data_clusters = sector_count - data_start
+        # FAT16 entries are 2 bytes.  Iterate to converge on a FAT size large
+        # enough to map every data cluster.
+        def fat_sectors_for(data_sectors_guess: int) -> int:
+            clusters = (data_sectors_guess // sectors_per_cluster) + 2
+            fat_bytes = clusters * 2
+            fs = (fat_bytes + SECTOR_SIZE - 1) // SECTOR_SIZE
+            return ((fs + 31) // 32) * 32                     # align to 16 KB
 
-    # Guard: keep the cluster count inside the FAT16 window.
-    if data_clusters < FAT16_MIN_CLUSTERS:
-        # Grow the image so the data region clears the FAT12/FAT16 boundary.
-        sector_count = data_start + FAT16_MIN_CLUSTERS + 16
-        sector_count = ((sector_count + 8191) // 8192) * 8192
-        data_clusters = sector_count - data_start
-    if data_clusters > FAT16_MAX_CLUSTERS:
-        raise ValueError(
-            f"image needs {data_clusters} clusters (> FAT16 max {FAT16_MAX_CLUSTERS}); "
-            f"reduce embedded file size or switch to a larger cluster size"
-        )
+        fat_sectors = fat_sectors_for(sector_count)
+        data_start  = RESERVED + FATS * fat_sectors + root_dir_sectors
+        # Round data_start up to a cluster boundary so sector offsets stay aligned.
+        cluster_boundary = ((data_start + sectors_per_cluster - 1)
+                            // sectors_per_cluster) * sectors_per_cluster
+        data_start = cluster_boundary
+        data_sectors = sector_count - data_start
+        data_clusters = data_sectors // sectors_per_cluster
+
+        # Guard: keep the cluster count inside the FAT16 window.
+        if data_clusters < FAT16_MIN_CLUSTERS:
+            sector_count = data_start + FAT16_MIN_CLUSTERS * sectors_per_cluster + 16
+            sector_count = ((sector_count + 8191) // 8192) * 8192
+            data_sectors = sector_count - data_start
+            data_clusters = data_sectors // sectors_per_cluster
+
+        if data_clusters <= FAT16_MAX_CLUSTERS:
+            break  # geometry fits
+
+        # Too many clusters — double cluster size and retry.
+        sectors_per_cluster *= 2
+        if sectors_per_cluster > 128:
+            raise ValueError(
+                f"image too large even at 128 sectors/cluster "
+                f"({total_bytes // (1024*1024)} MB); reduce embedded file size"
+            )
+        # Recalculate sector_count at the new cluster granularity.
+        sector_count = ((min_sectors + 8191) // 8192) * 8192
 
     # ── 3. Cluster allocator (FAT16: 2-byte entries) ─────────────────────────
     fat = bytearray(fat_sectors * SECTOR_SIZE)
@@ -272,7 +290,7 @@ def create_fat32_image(output_path: str, files: list):
 
     def cluster_offset(cluster: int) -> int:
         """Byte offset of *cluster* in the image."""
-        return (data_start + (cluster - 2)) * SECTOR_SIZE
+        return (data_start + (cluster - 2) * sectors_per_cluster) * SECTOR_SIZE
 
     # ── 4. Build directory tree ──────────────────────────────────────────────
     # dir_files[dir_path] → list of (filename, cluster, size, attr); '' = root
@@ -311,7 +329,7 @@ def create_fat32_image(output_path: str, files: list):
         if d == '':
             continue
         slots = dir_slot_count(d)
-        n_clusters = max(1, (slots * 32 + CLUSTER_SIZE - 1) // CLUSTER_SIZE)
+        n_clusters = max(1, (slots * 32 + cluster_size - 1) // cluster_size)
         dir_cluster[d] = alloc_chain(n_clusters)
 
     # Register subdirectories in their parent dirs.
@@ -325,7 +343,7 @@ def create_fat32_image(output_path: str, files: list):
     # Allocate clusters for files and register them in their parent dirs.
     file_cluster = {}
     for dst, data in file_data.items():
-        num_c = max(1, (len(data) + CLUSTER_SIZE - 1) // CLUSTER_SIZE)
+        num_c = max(1, (len(data) + cluster_size - 1) // cluster_size)
         fc    = alloc_chain(num_c)
         file_cluster[dst] = fc
         parent = dst.rsplit('/', 1)[0] if '/' in dst else ''
@@ -344,7 +362,7 @@ def create_fat32_image(output_path: str, files: list):
         # b) Boot sector (FAT16 BPB)
         img.write(b'\xEB\x3C\x90' + b'MSWIN4.1')
         img.write(struct.pack('<H', SECTOR_SIZE))      # bytes/sector
-        img.write(struct.pack('<B', 1))                # sectors/cluster
+        img.write(struct.pack('<B', sectors_per_cluster)) # sectors/cluster
         img.write(struct.pack('<H', RESERVED))         # reserved sectors
         img.write(struct.pack('<B', FATS))             # FAT count
         img.write(struct.pack('<H', ROOT_ENTRIES))     # root entry count (FAT16 != 0)

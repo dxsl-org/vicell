@@ -46,6 +46,15 @@ cargo build --release -p app-sys-tools 2>&1 | Select-Object -Last 3
 cargo build --release -p robot-demo -p robot-dashboard 2>&1 | Select-Object -Last 3
 cargo build --release -p input-test 2>&1 | Select-Object -Last 3
 
+# DOOM — only if doomgeneric sources have been cloned
+$doom_src = "cells\apps\doom\src\c\doomgeneric\doomgeneric"
+if (Test-Path $doom_src) {
+    Write-Host "Building DOOM cell..."
+    cargo build --release -p doom --target riscv64gc-unknown-none-elf -Z build-std=core,alloc 2>&1 | Select-Object -Last 3
+} else {
+    Write-Host "Skipping DOOM (clone doomgeneric to $doom_src first)."
+}
+
 # 1b. Update kernel embedded cells (init, shell, vfs, config) from release builds.
 # These 4 cells are embedded in kernel_fs.img via include_bytes!.
 Write-Host "Updating kernel embedded cells..."
