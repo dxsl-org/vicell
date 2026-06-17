@@ -147,6 +147,9 @@ pub extern "C" fn main() {
     let _ = sys_spawn_from_path("/bin/robot-demo");
     // G1 ViUI v2 dashboard demo (FramebufferRenderer).
     let _ = sys_spawn_from_path("/bin/robot-dashboard");
+    // DOOM demo — auto-spawns when /bin/doom is present in VIFS1.
+    // Waits for compositor internally (DG_Init calls wait_for_compositor).
+    let _ = sys_spawn_from_path("/bin/doom");
     // Optional I2C sensor demo (SHT3x, bit-bang over GPIO pins 0/1) — AArch64 only.
     let _ = sys_spawn_from_path("/bin/sensor-demo");
     // Optional SPI demo (bit-bang over GPIO pins 2/3/4/5) — AArch64 only.
