@@ -46,5 +46,7 @@ Write-Host ""
         -device virtio-blk-device,drive=hd0 `
         -netdev user,id=net0 `
         -device virtio-net-device,netdev=net0 `
+        -object rng-random,id=rng0 `
+        -device virtio-rng-device,rng=rng0 `
         -device virtio-keyboard-device `
         -device virtio-gpu-device

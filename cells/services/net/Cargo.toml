@@ -3,6 +3,30 @@ name = "service-net"
 version = "0.1.0"
 edition = "2021"
 
+# ── TLS build flavors (mutually exclusive) ────────────────────────────────────
+# tls-roots-embedded : single pinned CA via pki::CertVerifier (G1 default, small)
+# tls-roots-full     : rustls-webpki multi-root (G2 server/PC, deferred to P04)
+# tls-insecure       : UnsecureProvider — no cert check, dev/lab only
+#
+# CA selector (mutually exclusive, one must be active in embedded builds):
+# tls-ca-private     : fleet's own ECDSA P-256 CA (default; replace private.der)
+# tls-ca-amazon      : Amazon Root CA 3 (ECDSA P-256, +21 KB)
+# tls-ca-letsencrypt : ISRG Root X2 (ECDSA P-384, +100 KB)
+# tls-ca-rsa         : RSA CA opt-in (heavy, +135 KB, documented cost)
+[features]
+default = ["tls-roots-embedded", "tls-ca-private"]
+
+# Flavors
+tls-roots-embedded = []
+tls-roots-full     = []   # deps wired in P04
+tls-insecure       = []
+
+# CA selectors — map to embedded-tls crypto features per spike-00 size table
+tls-ca-private      = ["embedded-tls/rustpki"]   # ECDSA P-256, +21 KB (reuses handshake crates)
+tls-ca-amazon       = ["embedded-tls/rustpki"]   # Amazon Root CA 3, ECDSA P-256, +21 KB
+tls-ca-letsencrypt  = ["embedded-tls/p384"]      # ISRG Root X2, ECDSA P-384, +100 KB
+tls-ca-rsa          = ["embedded-tls/rsa"]       # RSA heavyweight opt-in, +135 KB
+
 [dependencies]
 types  = { path = "../../../libs/types" }
 api    = { path = "../../../libs/api" }

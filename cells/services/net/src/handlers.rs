@@ -407,12 +407,12 @@ fn handle_tls_raw(
                 match sockets.get_mut::<tcp::Socket>(handle).state() {
                     tcp::State::Established => break,
                     tcp::State::Closed | tcp::State::CloseWait => {
-                        table.remove(cap_id); sys_send(sender, &[0u8; 8]); return;
+                        table.remove(cap_id); sockets.remove(handle); sys_send(sender, &[0u8; 8]); return;
                     }
                     _ => {}
                 }
                 spin += 1;
-                if spin > 20_000_000 { table.remove(cap_id); sys_send(sender, &[0u8; 8]); return; }
+                if spin > 20_000_000 { table.remove(cap_id); sockets.remove(handle); sys_send(sender, &[0u8; 8]); return; }
                 core::hint::spin_loop();
             }
             table.set_state(cap_id, SocketState::Connected);
@@ -429,7 +429,27 @@ fn handle_tls_raw(
                     tls_table.insert(cap_id, entry);
                     sys_send(sender, &cap_id.to_le_bytes());
                 }
-                Err(_) => { table.remove(cap_id); sys_send(sender, &[0u8; 8]); }
+                Err(e) => {
+                    // Distinguish a verification REJECT from a transport timeout/drop:
+                    // both collapse to cap 0 on the wire, but the log must be falsifiable
+                    // (a timed-out handshake must not be mistaken for "MITM blocked").
+                    let msg = match e {
+                        embedded_tls::TlsError::InvalidCertificate
+                        | embedded_tls::TlsError::InvalidCertificateEntry
+                        | embedded_tls::TlsError::InvalidSignature => {
+                            "[net/tls] connect REJECTED — certificate verification failed \
+                             (untrusted CA / expired / hostname mismatch / tampered)"
+                        }
+                        embedded_tls::TlsError::Io(_) | embedded_tls::TlsError::IoError => {
+                            "[net/tls] connect failed — transport I/O (timeout or connection drop)"
+                        }
+                        _ => "[net/tls] connect failed — TLS handshake error (other)",
+                    };
+                    let _ = ostd::syscall::sys_log(msg);
+                    table.remove(cap_id);
+                    sockets.remove(handle);
+                    sys_send(sender, &[0u8; 8]);
+                }
             }
         }
 
