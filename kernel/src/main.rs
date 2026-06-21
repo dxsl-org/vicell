@@ -467,6 +467,13 @@ pub extern "C" fn kmain(hartid: usize, dtb: usize) -> ! {
         } else {
             log_info("ed25519 verify self-test FAIL — signed policy unsafe");
         }
+        // Power-on self-test of the signed-policy path: verify + parse a known
+        // dev-signed blob, and confirm a tampered blob is rejected.
+        if crate::policy::self_test() {
+            log_info("policy verify+parse self-test PASS (signed blob + tamper)");
+        } else {
+            log_info("policy verify+parse self-test FAIL");
+        }
 
         // Copy to Vec to ensure alignment (include_bytes! is align 1, parsing needs align 8)
         let init_data = alloc::vec::Vec::from(INIT_ELF);

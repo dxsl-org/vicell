@@ -4,6 +4,40 @@
 
 ---
 
+## [2026-06-21] Security: signed operator policy — host signer + signed-path verify (P5b, part 2)
+
+### Summary
+Completes the Phase 03 crypto+parse verification: a host signer produces a
+dev-signed policy blob, the kernel verifies it against the embedded dev fleet
+public key and parses it correctly, and a tampered blob is rejected — all
+confirmed at boot on both arches. (Baking a real `/POLICY.BIN` into the committed
+VIFS1 FAT images is a deployment step, deferred; the absent-path test (pt1) +
+this signed-path self-test together cover the load/verify/parse logic.)
+
+### Changes
+- `scripts/sign-policy.py` (new) — builds the `VPOL` blob from a policy spec and
+  Ed25519-signs it (Python `cryptography`); fixed dev seed → reproducible dev
+  keypair (dev-only, never shipped). Emits the dev pubkey + signed blob as Rust
+  literals (`--emit-rust`) or writes `/POLICY.BIN` (`--out`).
+- `kernel/src/policy.rs` — embedded `DEV_FLEET_PUBKEY` (used as `FLEET_ROOT_PUBKEY`
+  under the `dev-policy-key` feature so a dev-signed blob verifies); `self_test()`
+  verifies + parses the dev-signed blob, checks `/bin/vfs` caps, and asserts a
+  tampered blob is rejected.
+- `kernel/src/main.rs` — boot power-on self-test of the policy verify+parse path.
+
+### Verification
+- Both arches build clean under PIC; boot logs "policy verify+parse self-test
+  PASS (signed blob + tamper)" — signer→pubkey→verify→parse→domain-validate chain
+  proven end-to-end; tampered blob rejected.
+
+### Remaining (Phase 03 deployment / Phase 04)
+- Deployment: bake a dev-signed `/POLICY.BIN` into the 4 committed VIFS1 images
+  (mkfat32 tooling) so `load_from_vifs1` reports `PolicyLoaded` from disk.
+- Phase 04: fold `policy::lookup` into the spawn grant (`manifest ∩ spawner ∩
+  policy`) + headless recovery hatch + snapshot-invalidate.
+
+---
+
 ## [2026-06-21] Security: signed operator policy — kernel load/verify machinery (P5b, part 1)
 
 ### Summary

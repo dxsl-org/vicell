@@ -35,15 +35,21 @@ const POLICY_PATH: &str = "/POLICY.BIN";
 const MMIO_MASK: u8 = DEV_GPIO | DEV_UART;
 const REGION_MASK: u8 = 0b111;
 
+/// Dev fleet Ed25519 **public** key — derived from the fixed dev seed in
+/// `scripts/sign-policy.py` (reproducible; a dev key, never shipped in release).
+const DEV_FLEET_PUBKEY: [u8; 32] = [
+    0x21, 0x52, 0xf8, 0xd1, 0x9b, 0x79, 0x1d, 0x24, 0x45, 0x32, 0x42, 0xe1, 0x5f, 0x2e, 0xab, 0x6c,
+    0xb7, 0xcf, 0xfa, 0x7b, 0x6a, 0x5e, 0xd3, 0x00, 0x97, 0x96, 0x0e, 0x06, 0x98, 0x81, 0xdb, 0x12,
+];
+
 /// Fleet root Ed25519 **public** key (trust anchor; lives in the kernel TCB, not
-/// in mutable VIFS1 data). Replaced by the real provisioned key for production.
-///
-/// NOTE: still a placeholder (all-zero) until the host signer (`scripts/sign-policy`)
-/// is wired and emits the dev key. A zero key fails every verify → any present
-/// policy is treated as `Invalid` (fail-closed) until the real key lands, which is
-/// the safe direction. Absent policy still works (dev-permissive) for boot.
+/// in mutable VIFS1 data). `dev-policy-key` feature → the dev key (so a dev-signed
+/// `/POLICY.BIN` verifies); otherwise a placeholder the production provisioning
+/// replaces. A zero/placeholder key fails every verify → any present policy is
+/// `Invalid` (fail-closed), the safe direction; absent policy still boots
+/// (dev-permissive).
 #[cfg(feature = "dev-policy-key")]
-const FLEET_ROOT_PUBKEY: [u8; 32] = [0u8; 32]; // TODO(P5b-signer): dev pubkey
+const FLEET_ROOT_PUBKEY: [u8; 32] = DEV_FLEET_PUBKEY;
 #[cfg(not(feature = "dev-policy-key"))]
 const FLEET_ROOT_PUBKEY: [u8; 32] = [0u8; 32]; // TODO(prod): provisioned fleet key
 
@@ -171,6 +177,49 @@ fn parse(body: &[u8]) -> Option<Vec<PolicyEntry>> {
         });
     }
     Some(entries)
+}
+
+/// Self-test of the full signed-policy path: verify + parse a known dev-signed
+/// blob (from `scripts/sign-policy.py`), confirm a known entry parses correctly,
+/// and confirm a tampered blob is REJECTED. Returns `true` iff both hold. Run as
+/// a boot power-on self-test before trusting the policy path.
+pub fn self_test() -> bool {
+    // 135-byte dev-signed blob (4 entries) emitted by scripts/sign-policy.py.
+    const BLOB: [u8; 135] = [
+        0x56, 0x50, 0x4f, 0x4c, 0x01, 0x00, 0x04, 0x00, 0x08, 0x2f, 0x62, 0x69, 0x6e, 0x2f, 0x76, 0x66,
+        0x73, 0x01, 0x00, 0x00, 0x00, 0x00, 0x07, 0x08, 0x2f, 0x62, 0x69, 0x6e, 0x2f, 0x6e, 0x65, 0x74,
+        0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x0a, 0x2f, 0x62, 0x69, 0x6e, 0x2f, 0x73, 0x68, 0x65, 0x6c,
+        0x6c, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x09, 0x2f, 0x62, 0x69, 0x6e, 0x2f, 0x69, 0x6e, 0x69,
+        0x74, 0x01, 0x01, 0x01, 0x00, 0x03, 0x07, 0x44, 0x17, 0x69, 0xc2, 0xc9, 0x40, 0x3a, 0x1f, 0x67,
+        0xcf, 0xfa, 0x4d, 0xa1, 0x23, 0x15, 0x29, 0xa1, 0xa6, 0x62, 0x9f, 0xb4, 0xde, 0x48, 0xe1, 0x61,
+        0x00, 0x0f, 0x83, 0x98, 0x01, 0x00, 0x46, 0x06, 0x6d, 0x20, 0xa8, 0xa5, 0xff, 0xd9, 0x05, 0x4f,
+        0x51, 0x12, 0x46, 0xc6, 0x45, 0x59, 0x7b, 0x15, 0xae, 0x1e, 0x22, 0xb6, 0x33, 0xb4, 0x2b, 0xc8,
+        0x84, 0x28, 0x2d, 0x83, 0x7f, 0xde, 0x00,
+    ];
+    if BLOB.len() < HEADER_LEN + SIG_LEN {
+        return false;
+    }
+    let (body, sig) = BLOB.split_at(BLOB.len() - SIG_LEN);
+    let mut s = [0u8; SIG_LEN];
+    s.copy_from_slice(sig);
+
+    // 1. Valid blob: signature verifies + parses + /bin/vfs has the expected caps.
+    if !crate::ed25519::verify(&DEV_FLEET_PUBKEY, body, &s) {
+        return false;
+    }
+    let Some(entries) = parse(body) else { return false; };
+    let Some(vfs) = entries.iter().find(|e| e.path == "/bin/vfs") else { return false; };
+    if !vfs.caps.block_io || vfs.caps.block_regions != 0b111 {
+        return false;
+    }
+    // 2. Tampered blob: a flipped body byte must FAIL verification.
+    let mut bad = BLOB;
+    bad[10] ^= 0x01;
+    let (bad_body, _) = bad.split_at(bad.len() - SIG_LEN);
+    if crate::ed25519::verify(&DEV_FLEET_PUBKEY, bad_body, &s) {
+        return false;
+    }
+    true
 }
 
 /// Policy decision for a cell path. See `PolicyDecision`; the caller (Phase 04)
