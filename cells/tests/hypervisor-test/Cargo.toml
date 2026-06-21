@@ -1,0 +1,12 @@
+[package]
+name = "hypervisor-test"
+version = "0.1.0"
+edition = "2021"
+description = "Phase 04 hypervisor ABI smoke test — exercises sys_create_vm/create_vcpu/run_vcpu from userspace"
+
+[dependencies]
+api  = { path = "../../../libs/api" }
+ostd = { path = "../../../libs/ostd" }
+
+[build-dependencies]
+cell-build = { path = "../../../libs/cell-build" }

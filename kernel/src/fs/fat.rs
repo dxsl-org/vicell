@@ -299,15 +299,21 @@ impl ViFile for FatFile {
             let root = fs_lock.root_dir();
             // Important: Strip leading slash, same as open()
             let rel_path = self.path.trim_start_matches('/');
-            let res = match root.open_file(rel_path) {
-                Ok(mut file) => {
-                    file.seek(SeekFrom::Start(self.pos))
-                        .map_err(|_| ViError::IO)?;
-                    file.read(buf).map_err(|_| ViError::IO)?
-                }
-                Err(_) => return Err(ViError::NotFound),
-            };
-            res
+            // Bind via `?` so the open_file() Result temporary is dropped at this
+            // statement — keeping a `match` scrutinee alive would extend the borrow
+            // of `fs_lock` past the end of the block (E0597).
+            let mut file = root.open_file(rel_path).map_err(|_| ViError::NotFound)?;
+            file.seek(SeekFrom::Start(self.pos))
+                .map_err(|_| ViError::IO)?;
+            // Loop: fatfs Read::read may return fewer bytes than requested
+            // (e.g. stopping at a cluster boundary).  Fill the buffer fully.
+            let mut total = 0usize;
+            while total < buf.len() {
+                let r = file.read(&mut buf[total..]).map_err(|_| ViError::IO)?;
+                if r == 0 { break; } // EOF
+                total += r;
+            }
+            total
         };
         self.pos += n as u64;
         Ok(n)

@@ -1,0 +1,17 @@
+[package]
+name = "tetris-c"
+version = "0.1.0"
+edition = "2021"
+description = "Tetris-C port via Banaxi-Tech/Tetris-OS — runs on ViCell compositor with keyboard input"
+
+[[bin]]
+name = "tetris-c"
+path = "src/main.rs"
+
+[dependencies]
+api  = { path = "../../../libs/api" }
+ostd = { path = "../../../libs/ostd" }
+
+[build-dependencies]
+cc         = "1.0"
+cell-build = { path = "../../../libs/cell-build" }

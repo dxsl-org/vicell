@@ -1,0 +1,17 @@
+[package]
+name = "doom"
+version = "0.1.0"
+edition = "2021"
+description = "DOOM port via doomgeneric — runs on ViCell compositor with VirtIO keyboard input"
+
+[[bin]]
+name = "doom"
+path = "src/main.rs"
+
+[dependencies]
+api  = { path = "../../../libs/api" }
+ostd = { path = "../../../libs/ostd" }
+
+[build-dependencies]
+cc         = "1.0"
+cell-build = { path = "../../../libs/cell-build" }

@@ -1,42 +1,68 @@
 # SPDX-License-Identifier: MIT
 # ViCell mlibc sysdeps — Meson build fragment.
-# Included by third_party/mlibc/meson.build when host_machine.system() == 'vicell'.
-# Run from WSL2: see scripts/build-mlibc.sh for the full command sequence.
+# Included by third_party/mlibc-src/meson.build when host_machine.system() == 'vicell'.
+#
+# Build:
+#   Windows: pwsh scripts/setup-mlibc.ps1
+#   WSL2:    bash scripts/build-mlibc.sh
+
+# ─── Supported options (posix/linux disabled — ViCell uses its own ABI) ───────
+sysdep_supported_options = {
+    'posix': false,
+    'linux': false,
+    'glibc': false,
+    'bsd':   false,
+}
 
 # ─── Compile flags ────────────────────────────────────────────────────────────
 # -fno-exceptions/-fno-rtti: required; mlibc internals (frg) are exception-free.
 # -fno-stack-protector: no __stack_chk_fail in freestanding mode.
 # -nostdlib: we are the stdlib; do not pull in another one.
-mlibc_c_flags += [
-    '-fno-exceptions',
-    '-fno-rtti',
-    '-fno-stack-protector',
-    '-nostdlib',
-    '-Os',
-]
-
-# Architecture-specific march/mabi flags are supplied by the cross file
-# ([properties] section) so we do not hard-code them here.
+#
+# Bare-metal fast-int override (riscv-none-elf-gcc vs mlibc Linux ABI):
+#   riscv-none-elf-gcc defines __INT_FAST{8,16,32}_TYPE__ = int (32-bit).
+#   mlibc's bits/types.h RISC-V section defines int_fast8 = int8_t (8-bit)
+#   and int_fast{16,32} = int64_t (64-bit) — matching the Linux/glibc ABI.
+#   __MLIBC_CHECK_TYPE runs for GCC and fails on bare-metal targets.
+#   We override the predefined macros to match mlibc's expectations.
+add_project_arguments(
+    [
+        '-fno-exceptions', '-fno-rtti', '-fno-stack-protector', '-nostdlib', '-Os',
+        '-D__INT_FAST8_TYPE__=__INT8_TYPE__',
+        '-D__UINT_FAST8_TYPE__=__UINT8_TYPE__',
+        '-D__INT_FAST16_TYPE__=__INT64_TYPE__',
+        '-D__UINT_FAST16_TYPE__=__UINT64_TYPE__',
+        '-D__INT_FAST32_TYPE__=__INT64_TYPE__',
+        '-D__UINT_FAST32_TYPE__=__UINT64_TYPE__',
+    ],
+    language: ['c', 'cpp'],
+    native: false,
+)
 
 # ─── Include paths ─────────────────────────────────────────────────────────────
-mlibc_include_dirs += include_directories('include')
+libc_include_dirs += include_directories('include')
 
 # ─── Sources ──────────────────────────────────────────────────────────────────
-mlibc_sources += files(
+libc_sources += files(
     'generic/generic.cpp',
     'generic/entry.cpp',
 )
 
-# ─── CRT objects (empty stubs — ostd provides the real _start) ───────────────
-# The CPU-arch selection below prevents shipping the wrong arch's crt1.o.
-if host_machine.cpu_family() == 'riscv64'
-    mlibc_crt_sources = files('crt-riscv64/crt1.S')
-elif host_machine.cpu_family() == 'aarch64'
-    mlibc_crt_sources = files('crt-aarch64/crt1.S')
-endif
+# ─── CRT object (empty stub — ostd provides the real _start) ─────────────────
+if not headers_only
+    if host_machine.cpu_family() == 'riscv64'
+        crt_asm = 'crt-riscv64/crt1.S'
+    elif host_machine.cpu_family() == 'aarch64'
+        crt_asm = 'crt-aarch64/crt1.S'
+    else
+        error('vicell sysdeps: unsupported CPU family: ' + host_machine.cpu_family())
+    endif
 
-# ─── Disable unused mlibc subsystems ─────────────────────────────────────────
-# These are configured at the top-level meson setup:
-#   -Dposix_option=disabled   (no pthreads, no socket wrappers)
-#   -Dlinux_option=disabled   (no Linux-specific syscalls)
-#   -Ddefault_library=static  (produce libc.a, not libc.so)
+    crt = custom_target('crt1',
+        build_by_default: true,
+        command: c_compiler.cmd_array() + ['-c', '-o', '@OUTPUT@', '@INPUT@'],
+        input: crt_asm,
+        output: 'crt1.o',
+        install: false,
+    )
+endif

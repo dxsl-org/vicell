@@ -10,3 +10,6 @@ ostd     = { path = "../../../libs/ostd" }
 hal-gpio = { path = "../../../hal/traits/gpio" }
 
 [lib]
+
+[build-dependencies]
+cell-build = { path = "../../../libs/cell-build" }

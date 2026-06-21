@@ -35,18 +35,26 @@ pub fn is_timer_due(cntv_ctl: u64, cntv_cval: u64, cntpct: u64) -> bool {
 /// a virtual IRQ at EL1. This is the "VI-bit injection" path (sufficient for P05;
 /// proper GICH LR injection is P09).
 pub fn inject_timer_irq(vm_id: usize, vcpu_id: usize) {
-    // sys_inject_irq(vm_id, vcpu_id, intid=27)
-    unsafe {
-        let mut ret: usize;
-        core::arch::asm!(
-            "svc #0",
-            inlateout("x0") ViSyscall::InjectIrq as usize => ret,
-            in("x1") vm_id,
-            in("x2") vcpu_id,
-            in("x3") VIRT_TIMER_PPI as usize,
-            in("x4") 0usize,
-            options(nostack, preserves_flags),
-        );
-        let _ = ret;
+    #[cfg(target_arch = "aarch64")]
+    {
+        // sys_inject_irq(vm_id, vcpu_id, intid=27)
+        unsafe {
+            let mut ret: usize;
+            core::arch::asm!(
+                "svc #0",
+                inlateout("x0") ViSyscall::InjectIrq as usize => ret,
+                in("x1") vm_id,
+                in("x2") vcpu_id,
+                in("x3") VIRT_TIMER_PPI as usize,
+                in("x4") 0usize,
+                options(nostack, preserves_flags),
+            );
+            let _ = ret;
+        }
+    }
+    #[cfg(not(target_arch = "aarch64"))]
+    {
+        let _ = (vm_id, vcpu_id);
+        unimplemented!("inject_timer_irq: ARM64 only");
     }
 }

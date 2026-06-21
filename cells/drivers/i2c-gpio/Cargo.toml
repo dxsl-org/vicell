@@ -6,3 +6,6 @@ edition = "2021"
 [dependencies]
 hal-gpio = { path = "../../../hal/traits/gpio" }
 hal-i2c  = { path = "../../../hal/traits/i2c" }
+
+[build-dependencies]
+cell-build = { path = "../../../libs/cell-build" }

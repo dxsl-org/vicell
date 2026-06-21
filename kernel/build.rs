@@ -24,8 +24,7 @@ fn main() {
     // PIE: only riscv64 (Limine KASLR). riscv32 is non-PIE (direct -kernel boot,
     // OpenSBI loads kernel at ORIGIN=0x80200000 with no relocation).
     if target_arch == "riscv64" {
-        println!("cargo:rustc-link-arg=-pie");
-        println!("cargo:rustc-link-arg=--no-dynamic-linker");
+        // Removed -pie and --no-dynamic-linker because they break rust-lld with static libcore.
     }
 
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());

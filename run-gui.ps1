@@ -19,11 +19,19 @@ $env:RUSTFLAGS = $null
 if (-not (Test-Path $kernel)) { Write-Host "Kernel build failed."; exit 1 }
 
 Write-Host "Starting ViCell in Graphical Mode (compositor → VirtIO GPU)..."
-Write-Host "Serial output on this terminal; graphical window opens separately."
-Write-Host "IMPORTANT: Move the mouse cursor INTO the QEMU window — keyboard is grabbed automatically."
-Write-Host "           Press Ctrl+Alt+G to release grab and return focus to the terminal."
+Write-Host ""
+Write-Host "  QEMU window  →  compositor / ViUI graphical output (GPU framebuffer)"
+Write-Host "  THIS terminal →  shell (ViCell>) + kernel logs  (UART serial)"
+Write-Host ""
+Write-Host "Shell is HERE in this terminal, not in the QEMU window."
+Write-Host "Type commands HERE after the 'ViCell >' prompt appears."
+Write-Host "Typing into the QEMU window goes to GUI apps (compositor), NOT the shell,"
+Write-Host "and QEMU's GTK keymap on Windows may emit 'unmapped key' noise → see qemu-host.log."
 Write-Host ""
 
+# QEMU host diagnostics (audio backend, GTK keymap 'unmapped key', etc.) go to
+# STDERR; redirect them to a log file so the shell on STDOUT stays clean. The
+# serial console (shell + kernel) is on STDOUT and stays in this terminal.
 & $qemu -machine virt -m 256M -bios default -kernel $kernel `
     -drive "file=$disk,format=raw,id=hd0,if=none" `
     -device virtio-blk-device,drive=hd0 `
@@ -32,5 +40,7 @@ Write-Host ""
     -device virtio-gpu-device `
     -device virtio-keyboard-device `
     -device virtio-mouse-device `
-    -display gtk,grab-on-hover=on `
-    -serial stdio
+    -audiodev "wav,id=snd0,path=vicell-audio.wav" `
+    -device virtio-sound-device,audiodev=snd0 `
+    -display gtk `
+    -serial stdio 2> "qemu-host.log"

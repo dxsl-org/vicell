@@ -428,35 +428,95 @@ async fn run() {
 
 ### Cell Types
 
-**Applications**: Shell, hello world, Lua/MicroPython runtimes, reference robot demo
+**Tools**: System utilities & CLI applications
 ```
-cells/apps/shell/     — Interactive REPL (parser, executor, aliases, jobs, history)
-cells/apps/init/      — Bootstrap (spawns vfs, config, input, net, compositor, shell, robot-demo)
-cells/apps/hello/     — Test app
-cells/apps/robot-demo/ — Reference G1 sensor→compute→actuator→MQTT demonstration (GPIO control loop + MQTT telemetry)
+cells/tools/shell/     — Interactive REPL (parser, executor, aliases, jobs, history)
+cells/tools/init/      — Bootstrap (spawns vfs, config, input, net, compositor, shell, robot-demo; games/demos run on-demand from shell)
+cells/tools/sys-tools/ — Standalone binaries: ls, cat, echo, ps, kill (0x2A000000 VA base)
+cells/tools/net-tools/ — Network utilities: ping, curl, wget, nc, httpd, mqtt (0x26000000 VA base)
+cells/tools/wasm/      — WASM interpreter cell (feature-gated)
+```
+
+**Applications**: User-facing applications
+```
+cells/apps/robot-dashboard/ — Reference G1 HMI dashboard (ViUI v2, 800×480, 0x0D000000 VA)
+```
+
+**Demos**: Hardware/feature demonstrations and graphical showcases
+```
+cells/demos/hello/           — Minimal test app
+cells/demos/hello-cell/      — SDK reference (17-line zero-boilerplate app)
+cells/demos/periph-demo/     — GPIO pin blink demo (QEMU ARM virt)
+cells/demos/sensor-demo/     — I2C SHT3x temperature sensor (0x2E000000 VA)
+cells/demos/spi-demo/        — SPI peripheral test (0x30000000 VA)
+cells/demos/pwm-demo/        — PWM servo control
+cells/demos/adc-demo/        — ADC analog input
+cells/demos/can-demo/        — CAN bus messaging
+cells/demos/robot-demo/      — End-to-end sensor→compute→actuator (GPIO ownership cycling, MQTT)
+cells/demos/sdk-demo/        — ViCell App SDK patterns
+cells/demos/https-demo/      — TLS 1.3 HTTPS client to example.com
+cells/demos/viui-demo/       — ViUI v2 DSL → Rust codegen pipeline (Counter.vi)
+cells/demos/audio-demo/      — VirtIO sound test tone (A4-C#5-E5 arpeggio, S16LE/2ch/44100)
+cells/demos/doom/            — doomgeneric DOOM port (1024×768, 16MB quota, 0x42000000 VA); run: `doom`
+cells/demos/tetris/          — Tetris in Rust-native Cell (ViUI)
+cells/demos/tetris-c/        — Tetris via C platform hooks (demonstrates Tier 1b C pathway)
+cells/demos/tetris-lua/      — Tetris scripted in Lua (demonstrates Tier 1b Lua pathway)
 ```
 
 **Drivers**: Hardware device drivers
 ```
-cells/drivers/disk/   — VirtIO block passthrough (✅ working)
-cells/drivers/gpu/    — VirtIO GPU (opt-in framebuffer)
-cells/drivers/input/  — VirtIO input passthrough
-cells/drivers/net/    — VirtIO NIC wrapper
+cells/drivers/disk/      — VirtIO block passthrough (✅ working)
+cells/drivers/gpu/       — VirtIO GPU (opt-in framebuffer)
+cells/drivers/input/     — VirtIO input passthrough (deprecated; kernel poll used)
+cells/drivers/net/       — VirtIO NIC wrapper (deprecated; kernel poll used)
+cells/drivers/gpio/      — PL061 GPIO driver (ARM64 QEMU virt)
+cells/drivers/gpio-sifive/ — SiFive GPIO extension
+cells/drivers/serial/    — PL011 UART driver (ARM64)
+cells/drivers/i2c-gpio/  — BitBangI2c<G> generic over ViGpio
+cells/drivers/spi-gpio/  — BitBangSpi<G> generic over ViGpio
+cells/drivers/pwm-gpio/  — BitBangPwm<G> generic over ViGpio
+cells/drivers/adc-sim/   — Simulated ADC (no MMIO)
+cells/drivers/can-loopback/ — Loopback CAN (no MMIO)
+cells/drivers/wasm/      — WASM runtime wrapper
 ```
 
 **Services**: System services with long-lived state
 ```
-cells/services/vfs/   — RamFS + FAT32 (✅ read working)
-cells/services/config/— Key-value store (✅ ViStateTransfer impl)
-cells/services/compositor/ — Software blending + z-order
-cells/services/input/ — Input event routing
-cells/services/net/   — smoltcp TCP/IP + DHCP (✅ DHCP working)
+cells/services/vfs/       — RamFS + FAT32 + littlefs + BootFS (✅ MountTable dispatch complete)
+cells/services/config/    — Key-value store (✅ ViStateTransfer impl)
+cells/services/compositor/  — Software blending + z-order + Grant surfaces
+cells/services/input/     — Input event routing + focus system
+cells/services/net/       — smoltcp TCP/IP + DHCP + TLS 1.3 (✅ typed postcard IPC)
+cells/services/hypervisor/ — ARM64 EL2 VMM (Alpine Linux) (✅ minimal VMM)
+cells/services/silo/      — Security Silo (Hardware key isolation, Stage-2 fence) (✅ complete)
+cells/services/httpd/     — HTTP web server (shell builtin)
+cells/services/power/     — Power management (stub)
 ```
 
 **Runtimes**: VMs/interpreters for scripting
 ```
 cells/runtimes/lua/       — Lua 5.4 via FFI (✅ REPL verified)
-cells/runtimes/micropython/ — MicroPython 1.24.1 via FFI (✅ REPL verified)
+```
+
+**Tests**: Integration & stress test cells
+```
+cells/tests/bench/           — RT + SMP latency benchmark (3 scenarios)
+cells/tests/vfs-test/        — VFS service test suite (8 scenarios)
+cells/tests/srv-test/        — Spawn + state transfer tests
+cells/tests/hypervisor-test/ — Tier 3b VM lifecycle tests
+cells/tests/gpio-test-rv/    — RISC-V GPIO integration
+cells/tests/periph-test/     — Peripheral driver unit tests
+cells/tests/posix-shim-test/ — POSIX stdio/math/setjmp tests
+cells/tests/c-math-smoke/    — C runtime verification (12 scenarios, 3 arches)
+cells/tests/mlibc-smoke/     — mlibc Tier B integration
+cells/tests/input-test/      — Input service focus & event tests
+cells/tests/silo-test/       — Security Silo (6 end-to-end test cases)
+cells/tests/test-isolation/  — Cell fault isolation tests
+```
+
+**Guests**: Hypervisor guests (Tier 3b)
+```
+cells/guests/silo-guest/  — aarch64-unknown-none bare-metal (p256 ECDSA signing, secure enclave)
 ```
 
 **UI Library** (`libs/viui/`): no_std UI toolkit for GUI app Cells

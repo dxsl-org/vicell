@@ -1,0 +1,64 @@
+/* ViCell Cell Linker Script — Position-Independent Executable (PIE)
+ *
+ * VA = 0x0 — the kernel loader assigns the actual load base at spawn time.
+ * Cells MUST NOT encode a fixed virtual address; the OS is the only party
+ * that knows where a cell will live in the Single Address Space.
+ *
+ * Architecture-specific notes:
+ *   .sdata / __global_pointer$ / .sbss  — RISC-V small-data GP optimisation.
+ *     On AArch64 and x86_64 no input sections match; the output section is
+ *     empty and stripped by lld/ld.  Defining __global_pointer$ is harmless
+ *     on non-RISC-V targets (unreferenced symbols are pruned at link time).
+ *   __ViCell_syscalls  — x86_64 per-cell syscall allowlist bitmap.
+ *     On RISC-V and AArch64 no object provides this section; it is
+ *     zero-size and stripped.
+ */
+ENTRY(main)
+
+SECTIONS
+{
+    . = 0x0;
+
+    .text : {
+        *(.text.boot)
+        *(.text .text.*)
+    }
+
+    .rodata : ALIGN(4096) {
+        *(.rodata .rodata.*)
+    }
+
+    .init_array : ALIGN(8) {
+        PROVIDE(__init_array_start = .);
+        KEEP(*(.init_array .init_array.*))
+        PROVIDE(__init_array_end = .);
+    }
+
+    .data : ALIGN(4096) {
+        /* RISC-V: defines GP base for small-data-pointer optimisation.
+         * Unreferenced on AArch64/x86_64 — no cost. */
+        PROVIDE(__global_pointer$ = . + 0x800);
+        *(.data .data.*)
+        *(.data.rel.ro .data.rel.ro.*)
+        *(.got .got.* .got.plt)
+        *(.sdata .sdata.*)
+    }
+
+    .bss : ALIGN(4096) {
+        __bss_start = .;
+        *(.bss .bss.*)
+        *(.sbss .sbss.*)
+        *(COMMON)
+        __bss_end = .;
+    }
+
+    /* x86_64: per-cell syscall allowlist bitmap. Zero-size on other arches. */
+    __ViCell_syscalls : ALIGN(8) {
+        KEEP(*(__ViCell_syscalls))
+    }
+
+    /* Cell capability manifest — present in every cell. */
+    __ViCell_manifest : ALIGN(4096) {
+        KEEP(*(__ViCell_manifest))
+    }
+}

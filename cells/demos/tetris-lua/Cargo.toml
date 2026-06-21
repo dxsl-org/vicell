@@ -1,0 +1,17 @@
+[package]
+name = "tetris-lua"
+version = "0.1.0"
+edition = "2021"
+description = "Tetris-Lua — game logic in Lua 5.4, platform hooks (surface/input/time) in Rust"
+
+[[bin]]
+name = "tetris-lua"
+path = "src/main.rs"
+
+[dependencies]
+api  = { path = "../../../libs/api" }
+ostd = { path = "../../../libs/ostd" }
+
+[build-dependencies]
+cc         = "1.0"
+cell-build = { path = "../../../libs/cell-build" }

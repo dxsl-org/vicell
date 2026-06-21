@@ -5,3 +5,6 @@ edition = "2021"
 
 [dependencies]
 hal-adc = { path = "../../../hal/traits/adc" }
+
+[build-dependencies]
+cell-build = { path = "../../../libs/cell-build" }

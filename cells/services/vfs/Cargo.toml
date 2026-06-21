@@ -22,3 +22,6 @@ test-hooks = []
 [[bin]]
 name = "service-vfs"
 path = "src/main.rs"
+
+[build-dependencies]
+cell-build = { path = "../../../libs/cell-build" }

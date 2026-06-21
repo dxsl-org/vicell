@@ -10,12 +10,28 @@ use types::{VAddr, ViError, ViResult};
 const MAX_RELA_ENTRIES: usize = 65_536;
 
 /// RISC-V ELF relocation types (r_type field in Elf64_Rela.r_info).
-#[allow(dead_code)] // reason: table documents all types; only R_RISCV_RELATIVE is used today
+#[allow(dead_code)] // reason: table documents all types; only a subset is used
 mod riscv_reloc_type {
     pub const R_RISCV_NONE: u32 = 0;
     pub const R_RISCV_RELATIVE: u32 = 3;
     pub const R_RISCV_64: u32 = 2;
     pub const R_RISCV_JUMP_SLOT: u32 = 5;
+}
+
+/// AArch64 ELF relocation types.
+#[allow(dead_code)]
+mod aarch64_reloc_type {
+    pub const R_AARCH64_NONE: u32 = 0;
+    /// Copy-relocation with base+addend — the PIE equivalent of R_RISCV_RELATIVE.
+    pub const R_AARCH64_RELATIVE: u32 = 1027; // 0x403
+}
+
+/// x86-64 ELF relocation types.
+#[allow(dead_code)]
+mod x86_64_reloc_type {
+    pub const R_X86_64_NONE: u32 = 0;
+    /// Copy-relocation with base+addend.
+    pub const R_X86_64_RELATIVE: u32 = 8;
 }
 
 /// A single 64-bit RELA entry (Elf64_Rela layout, little-endian).
@@ -72,31 +88,50 @@ pub fn apply_relocations(base: VAddr, rela_section: &[u8]) -> ViResult<()> {
             core::ptr::read_unaligned(rela_section.as_ptr().add(offset) as *const Rela64)
         };
 
-        match entry.r_type() {
-            riscv_reloc_type::R_RISCV_NONE => {}
-            riscv_reloc_type::R_RISCV_RELATIVE => {
-                // Formula: *ptr = base + addend
+        // Shared helper: applies the base+addend formula used by all
+        // *_RELATIVE types across every supported architecture.
+        macro_rules! apply_relative {
+            ($label:literal) => {{
                 let patch_va = base.wrapping_add(entry.offset as usize);
-                let value = base.wrapping_add(entry.addend as usize);
-                // SAFETY: patch_va is within the cell's mapped pages; SUM=1
-                // allows S-mode to write to U-mode pages.
+                let value    = base.wrapping_add(entry.addend as usize);
+                // SAFETY: patch_va is within the cell's mapped pages (SAS);
+                // SSTATUS.SUM=1 lets S-mode write to U-mode pages.
                 unsafe { (patch_va as *mut usize).write_unaligned(value) };
-                log::trace!("[reloc] R_RELATIVE @ 0x{:X} = 0x{:X}", patch_va, value);
+                log::trace!("[reloc] {} @ 0x{:X} = 0x{:X}", $label, patch_va, value);
+            }};
+        }
+
+        match entry.r_type() {
+            // ── no-ops ────────────────────────────────────────────────────────
+            riscv_reloc_type::R_RISCV_NONE
+            | aarch64_reloc_type::R_AARCH64_NONE
+            | x86_64_reloc_type::R_X86_64_NONE => {}
+
+            // ── RISC-V ────────────────────────────────────────────────────────
+            riscv_reloc_type::R_RISCV_RELATIVE => {
+                apply_relative!("R_RISCV_RELATIVE");
             }
             riscv_reloc_type::R_RISCV_64 => {
-                // R_RISCV_64 with sym_index == 0 is an absolute-address
-                // fixup; treat identically to R_RISCV_RELATIVE.
+                // R_RISCV_64 with sym_index == 0 is an absolute-address fixup;
+                // treat identically to R_RISCV_RELATIVE.
                 let sym_index = (entry.info >> 32) as u32;
                 if sym_index != 0 {
                     log::error!("[reloc] R_RISCV_64 with non-zero sym {} not supported", sym_index);
                     return Err(ViError::NotSupported);
                 }
-                let patch_va = base.wrapping_add(entry.offset as usize);
-                let value = base.wrapping_add(entry.addend as usize);
-                // SAFETY: same invariant as R_RISCV_RELATIVE above.
-                unsafe { (patch_va as *mut usize).write_unaligned(value) };
-                log::trace!("[reloc] R_RISCV_64 @ 0x{:X} = 0x{:X}", patch_va, value);
+                apply_relative!("R_RISCV_64");
             }
+
+            // ── AArch64 ───────────────────────────────────────────────────────
+            aarch64_reloc_type::R_AARCH64_RELATIVE => {
+                apply_relative!("R_AARCH64_RELATIVE");
+            }
+
+            // ── x86-64 ────────────────────────────────────────────────────────
+            x86_64_reloc_type::R_X86_64_RELATIVE => {
+                apply_relative!("R_X86_64_RELATIVE");
+            }
+
             other => {
                 log::error!("[reloc] unsupported relocation type {}", other);
                 return Err(ViError::NotSupported);

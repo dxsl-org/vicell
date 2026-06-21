@@ -1,0 +1,18 @@
+[package]
+name = "test-isolation"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Apps should ONLY depend on ostd/api, NOT kernel
+ostd = { path = "../../../libs/ostd" }
+api = { path = "../../../libs/api" }
+
+# This should cause compile error if uncommented:
+# kernel = { path = "../../kernel" }
+
+[lib]
+crate-type = ["staticlib"]
+
+[build-dependencies]
+cell-build = { path = "../../../libs/cell-build" }

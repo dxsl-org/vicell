@@ -13,7 +13,25 @@ The two tiers are **mutually exclusive within a single binary**. Never link both
 
 ---
 
-## Prerequisites (one-time setup in WSL2)
+## Prerequisites
+
+### Windows (riscv64 only — no WSL2 needed)
+
+```powershell
+# xpack riscv-none-elf-gcc in PATH (download from xpack-dev-tools/riscv-none-elf-gcc-xpack)
+riscv-none-elf-gcc --version   # must print 15.x
+
+# Meson + Ninja for Windows (winget or pip)
+winget install mesonbuild.meson
+# or: pip install meson ninja
+
+# Python 3 for the patch script inside build-mlibc.sh (already required for disk tools)
+python --version
+```
+
+`.cargo/config.toml` already sets `CC_riscv64gc_unknown_none_elf = "riscv-none-elf-gcc"` — no manual env var needed.
+
+### WSL2 (riscv64 + aarch64 full build)
 
 ```bash
 # Install Meson + aarch64 cross-compiler
@@ -30,28 +48,42 @@ If the riscv toolchain path differs, update `scripts/mlibc-riscv64.cross` (`[bin
 
 ## Building mlibc
 
-**All Meson/ninja steps run in WSL2** — the Rust workspace never invokes Meson.
+The Rust workspace never invokes Meson — you run the build script once, then Cargo links against the resulting `.a`.
+
+### Windows (riscv64 only)
+
+```powershell
+# From the ViCell root
+pwsh scripts/setup-mlibc.ps1
+```
+
+Produces: `third_party/mlibc/build/libc.a`
+
+### WSL2 (riscv64 + aarch64)
 
 ```bash
 # From the ViCell WSL2 path, e.g. /mnt/d/ViCell
 bash scripts/build-mlibc.sh
 ```
 
-This produces:
+Produces:
 - `third_party/mlibc/build/libc.a` — riscv64 static library
 - `third_party/mlibc/build-aarch64/libc.a` — aarch64 static library
 
-After the script completes, `cargo check -p app-mlibc-smoke` succeeds.
+After either script completes, `cargo check -p mlibc-smoke` succeeds.
 
 ### Manual build steps (for debugging)
 
+> **Note:** `-Dsysdeps=vicell` is **not** a valid meson option for mlibc. The ViCell sysdeps are
+> selected automatically via `host_machine.system() == 'vicell'` in mlibc's `meson.build`.
+> The cross files set `system = 'vicell'` in `[host_machine]`.
+
 ```bash
-cd /path/to/ViCell/third_party/mlibc
+cd /path/to/ViCell/third_party/mlibc-src   # the cloned mlibc source
 
 # riscv64
 meson setup build \
     --cross-file=../../scripts/mlibc-riscv64.cross \
-    -Dsysdeps=vicell \
     -Ddefault_library=static \
     -Dposix_option=disabled \
     -Dlinux_option=disabled \
@@ -62,7 +94,6 @@ ls -lh build/libc.a
 # aarch64
 meson setup build-aarch64 \
     --cross-file=../../scripts/mlibc-aarch64.cross \
-    -Dsysdeps=vicell \
     -Ddefault_library=static \
     -Dposix_option=disabled \
     -Dlinux_option=disabled \
@@ -75,7 +106,7 @@ ls -lh build-aarch64/libc.a
 
 ## Applying the ViCell sysdeps patch to a fresh mlibc clone
 
-When forking a new mlibc commit, add the ViCell branch to `third_party/mlibc/meson.build`:
+The build scripts clone mlibc into `third_party/mlibc-src/` and copy `third_party/mlibc/sysdeps/vicell/` into it. When forking a new mlibc commit, add the ViCell branch to the cloned `third_party/mlibc-src/meson.build`:
 
 ```python
 # In mlibc's top-level meson.build, find the host_machine.system() dispatch block
@@ -126,6 +157,24 @@ Use VA base `0x0E000000` for mlibc-smoke. Future mlibc-backed apps should pick t
 
 ---
 
+## Cargo environment (`.cargo/config.toml`)
+
+The workspace `.cargo/config.toml` pre-configures three env vars so no manual shell setup is needed:
+
+```toml
+[env]
+# cc crate probes "riscv64-unknown-elf-gcc" by default; redirect to xpack name.
+CC_riscv64gc_unknown_none_elf  = "riscv-none-elf-gcc"
+AR_riscv64gc_unknown_none_elf  = "riscv-none-elf-ar"
+
+# bindgen (littlefs2-sys, etc.) needs libclang.dll — LLVM 22 via winget.
+LIBCLANG_PATH                  = "C:\\Program Files\\LLVM\\bin"
+```
+
+If your LLVM is in a different directory, override `LIBCLANG_PATH` in your shell or update this file.
+
+---
+
 ## Architecture: ViCell sysdeps
 
 All syscalls route through `sysdeps/vicell/include/vicell/syscall.h`:
@@ -165,8 +214,9 @@ mlibc's allocator (`frg::slab_allocator`) is backed by a **4 MB static bump aren
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| `mlibc libc.a is missing` at `cargo check` | Haven't built mlibc yet | Run `bash scripts/build-mlibc.sh` in WSL2 |
+| `mlibc libc.a is missing` at `cargo check` | Haven't built mlibc yet | Windows: `pwsh scripts/setup-mlibc.ps1`; WSL2: `bash scripts/build-mlibc.sh` |
 | Duplicate symbol `printf` / `malloc` at link | `api` missing mlibc feature | Add `features = ["mlibc"]` to api dependency |
-| `undefined reference to mlibc::sys_write` | mlibc build used wrong sysdeps | Ensure `meson setup -Dsysdeps=vicell` |
+| `__mlibc_int_fast8 != __INT_FAST8_TYPE__` ninja failure | GCC bare-metal fast-int ABI mismatch | Already fixed via `-D__INT_FAST8_TYPE__=__INT8_TYPE__` etc. in `sysdeps/vicell/meson.build`. Re-run setup script if you see it. |
+| `undefined reference to mlibc::sys_write` | Sysdeps not being picked up | Check `[host_machine] system = 'vicell'` in the `.cross` file; do NOT pass `-Dsysdeps=vicell` (invalid option) |
 | Wrong output on aarch64 (garbage data) | Wrong register layout in syscall.h | aarch64 ABI uses x0=nr (not x8) — see syscall.h |
 | Arena exhausted (malloc returns null) | Allocating >4 MB total | Increase `ARENA_SIZE` in generic.cpp |

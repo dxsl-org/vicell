@@ -84,6 +84,7 @@ pub struct Scheduler {
     /// watchdog runs inside SCHEDULER — inverting the documented lock order.
     /// yield_cpu() drains this list after dropping SCHEDULER, matching the zombie-reaper pattern.
     pub(super) pending_grant_reap: Vec<usize>,
+    pub last_global_sweep_tick: usize,
 }
 
 impl Default for Scheduler {
@@ -99,6 +100,7 @@ impl Scheduler {
             zombies: Vec::new(),
             next_task_id: 1,
             pending_grant_reap: Vec::new(),
+            last_global_sweep_tick: 0,
         }
     }
 
@@ -112,8 +114,11 @@ impl Scheduler {
         let priority = self.tasks.get(&id)
             .map(|t| t.priority)
             .unwrap_or(api::TaskPriority::Normal as u8);
-        // RT tasks are pinned to the dedicated RT hart and never stolen (Phase 04).
-        let target_hart = if priority >= api::TaskPriority::RealTime as u8 {
+        // RT tasks target the dedicated RT hart when it is online; fall back to
+        // the current hart on single-hart systems (e.g. QEMU without -smp 2).
+        let target_hart = if priority >= api::TaskPriority::RealTime as u8
+            && crate::task::smp::is_rt_hart_online()
+        {
             crate::task::smp::HART_RT
         } else {
             super::hart_local::current_hart_id()
@@ -140,8 +145,10 @@ impl Scheduler {
         } else { 0 };
 
         if new_priority > current_priority {
-            // RT tasks always land on HART_RT; send a cross-hart IPI if we're on a different hart.
-            let target_hart = if new_priority >= api::TaskPriority::RealTime as u8 {
+            // RT tasks land on HART_RT when online; fall back to current hart on single-hart systems.
+            let target_hart = if new_priority >= api::TaskPriority::RealTime as u8
+                && crate::task::smp::is_rt_hart_online()
+            {
                 crate::task::smp::HART_RT
             } else {
                 hart_id
@@ -467,130 +474,141 @@ impl Scheduler {
         // Global sweep (timer wakes, heartbeat, async-poll, watchdog) runs on hart 0 only
         // to prevent double-wake races on multihart setups.
         if hart_id != 0 { return self.pick_next_local(hart_id, now); }
-        // === GLOBAL SWEEP (hart 0 only) === falls through to pick_next_local below.
 
-        // 1. Wake tasks whose deadline elapsed: Sleeping (timer) and RecvTimeout
-        //    (a Recv with a deadline). Without the RecvTimeout sweep a cell that
-        //    RecvTimeout's a peer that never replies would block forever — the
-        //    infinite-block-on-dead-peer hazard. Deadlines are absolute
-        //    `system_ticks` (the dispatch stores `system_ticks() + timeout`).
-        let mut waking_tasks = VecDeque::new();
-        for (id, task) in self.tasks.iter_mut() {
-            let mut should_wake = false;
-            let mut timed_out = false;
-            match &task.state {
-                TaskState::Sleeping { until } => {
-                    if now >= *until {
-                        should_wake = true;
-                    }
-                }
-                TaskState::Recv { deadline: Some(d), .. } => {
-                    // `deadline` is u64 (mtime-domain field); `now` is usize system
-                    // ticks. On rv64 usize == u64, so the cast is lossless.
-                    if now as u64 >= *d {
-                        should_wake = true;
-                        timed_out = true;
-                    }
-                }
-                TaskState::WaitEvent { mask, deadline } => {
-                    let fired = super::waker::consume_pending(*mask);
-                    if fired != 0 {
-                        // Return fired mask as the syscall result.
-                        task.trap_frame.regs[10] = fired as usize;
-                        should_wake = true;
-                    } else if deadline.map(|d| now as u64 >= d).unwrap_or(false) {
-                        task.trap_frame.regs[10] = 0; // timeout — return 0
-                        should_wake = true;
-                        timed_out = true;
-                    }
-                }
-                _ => {}
-            }
-            if should_wake {
-                // ostd `sys_recv_timeout` returns Ok(0) on timeout; the syscall
-                // return register is regs[10], restored by sret when the task runs.
-                if timed_out {
-                    task.trap_frame.regs[10] = 0;
-                    task.deadline_misses = task.deadline_misses.saturating_add(1);
-                    // Observability: an RT cell whose awaited message missed its deadline
-                    // is a missed control-loop cycle — record it (no enforcement). Gated to
-                    // RT priority so the safety-timeout use on Normal cells stays quiet.
-                    if task.priority >= api::TaskPriority::RealTime as u8 {
-                        crate::audit::log_event(
-                            crate::audit::AuditEvent::RtDeadlineMiss,
-                            &crate::audit::encode_u32x2(task.cell_id.0 as u32, task.deadline_misses),
-                        );
-                    }
-                }
-                task.state = TaskState::Ready;
-                waking_tasks.push_back(*id);
-            }
-        }
-        for id in waking_tasks {
-            self.push_ready(id);
-        }
+        let time_advanced = now > self.last_global_sweep_tick;
+        let events_pending = crate::task::waker::has_any_pending();
 
-        // 1b. Heartbeat liveness sweep: terminate any cell that opted into heartbeating
-        //     but missed its deadline — a SILENT hang (deadlock / stuck loop) that the
-        //     CPU-monopoly watchdog cannot see (that only fires on RT compute hogs). The
-        //     death flows through the normal path so the supervisor restarts it. Collect
-        //     first, then `exit_task` outside the iteration (it mutates self.tasks).
-        let mut hung: Vec<(usize, u64)> = Vec::new();
-        for (id, task) in self.tasks.iter() {
-            if let Some(d) = task.heartbeat_deadline {
-                if now as u64 >= d {
-                    hung.push((*id, task.cell_id.0));
+        if time_advanced || events_pending {
+            if time_advanced {
+                self.last_global_sweep_tick = now;
+            }
+
+            // 1. Wake tasks whose deadline elapsed: Sleeping (timer) and RecvTimeout
+            //    (a Recv with a deadline). Without the RecvTimeout sweep a cell that
+            //    RecvTimeout's a peer that never replies would block forever — the
+            //    infinite-block-on-dead-peer hazard. Deadlines are absolute
+            //    `system_ticks` (the dispatch stores `system_ticks() + timeout`).
+            let mut waking_tasks = VecDeque::new();
+            for (id, task) in self.tasks.iter_mut() {
+                let mut should_wake = false;
+                let mut timed_out = false;
+                match &task.state {
+                    TaskState::Sleeping { until } => {
+                        if now >= *until {
+                            should_wake = true;
+                        }
+                    }
+                    TaskState::Recv { deadline: Some(d), .. } => {
+                        // `deadline` is u64 (mtime-domain field); `now` is usize system
+                        // ticks. On rv64 usize == u64, so the cast is lossless.
+                        if now as u64 >= *d {
+                            should_wake = true;
+                            timed_out = true;
+                        }
+                    }
+                    TaskState::WaitEvent { mask, deadline } => {
+                        let fired = super::waker::consume_pending(*mask);
+                        if fired != 0 {
+                            // Return fired mask as the syscall result.
+                            task.trap_frame.regs[10] = fired as usize;
+                            should_wake = true;
+                        } else if deadline.map(|d| now as u64 >= d).unwrap_or(false) {
+                            task.trap_frame.regs[10] = 0; // timeout — return 0
+                            should_wake = true;
+                            timed_out = true;
+                        }
+                    }
+                    _ => {}
+                }
+                if should_wake {
+                    // ostd `sys_recv_timeout` returns Ok(0) on timeout; the syscall
+                    // return register is regs[10], restored by sret when the task runs.
+                    if timed_out {
+                        task.trap_frame.regs[10] = 0;
+                        task.deadline_misses = task.deadline_misses.saturating_add(1);
+                        // Observability: an RT cell whose awaited message missed its deadline
+                        // is a missed control-loop cycle — record it (no enforcement). Gated to
+                        // RT priority so the safety-timeout use on Normal cells stays quiet.
+                        if task.priority >= api::TaskPriority::RealTime as u8 {
+                            crate::audit::log_event(
+                                crate::audit::AuditEvent::RtDeadlineMiss,
+                                &crate::audit::encode_u32x2(task.cell_id.0 as u32, task.deadline_misses),
+                            );
+                        }
+                    }
+                    task.state = TaskState::Ready;
+                    waking_tasks.push_back(*id);
                 }
             }
-        }
-        for (tid, cell_raw) in hung {
-            log::error!(
-                "[heartbeat] task {} (cell {}) missed liveness deadline — terminating (hung)",
-                tid, cell_raw
-            );
-            crate::audit::log_event(
-                crate::audit::AuditEvent::CellHung,
-                &crate::audit::encode_u32x2(cell_raw as u32, tid as u32),
-            );
-            // Release resources the hung cell owned (each locks its own state, not
-            // SCHEDULER, so they are safe to call inline here — mirrors the watchdog kill).
-            crate::fast_ipc::clear_vfs_if_cell(cell_raw as usize);
-            crate::memory::cell_quota::deregister(CellId(cell_raw));
-            crate::resource_registry::release_for(CellId(cell_raw));
-            // Grant reap deferred: free_grant_pages acquires KERNEL_ROOT + FRAME_ALLOCATOR,
-            // which must not be held under SCHEDULER. yield_cpu() drains this list after unlock.
-            self.pending_grant_reap.push(tid);
-            self.exit_task(tid, usize::MAX);
-            // If this hart was running the hung task, clear its attribution.
-            let hart_id = super::hart_local::current_hart_id();
-            if super::hart_local::ready::current_task_id_for(hart_id) == tid {
-                super::hart_local::set_current_cell_id(0);
-                super::hart_local::ready::set_current_task_id(hart_id, 0);
+            for id in waking_tasks {
+                self.push_ready(id);
+            }
+
+            // 1b. Heartbeat liveness sweep: terminate any cell that opted into heartbeating
+            //     but missed its deadline — a SILENT hang (deadlock / stuck loop) that the
+            //     CPU-monopoly watchdog cannot see (that only fires on RT compute hogs). The
+            //     death flows through the normal path so the supervisor restarts it. Collect
+            //     first, then `exit_task` outside the iteration (it mutates self.tasks).
+            let mut hung: Vec<(usize, u64)> = Vec::new();
+            for (id, task) in self.tasks.iter() {
+                if let Some(d) = task.heartbeat_deadline {
+                    if now as u64 >= d {
+                        hung.push((*id, task.cell_id.0));
+                    }
+                }
+            }
+            for (tid, cell_raw) in hung {
+                log::error!(
+                    "[heartbeat] task {} (cell {}) missed liveness deadline — terminating (hung)",
+                    tid, cell_raw
+                );
+                crate::audit::log_event(
+                    crate::audit::AuditEvent::CellHung,
+                    &crate::audit::encode_u32x2(cell_raw as u32, tid as u32),
+                );
+                // Release resources the hung cell owned (each locks its own state, not
+                // SCHEDULER, so they are safe to call inline here — mirrors the watchdog kill).
+                crate::fast_ipc::clear_vfs_if_cell(cell_raw as usize);
+                crate::memory::cell_quota::deregister(CellId(cell_raw));
+                crate::resource_registry::release_for(CellId(cell_raw));
+                // Grant reap deferred: free_grant_pages acquires KERNEL_ROOT + FRAME_ALLOCATOR,
+                // which must not be held under SCHEDULER. yield_cpu() drains this list after unlock.
+                self.pending_grant_reap.push(tid);
+                self.exit_task(tid, usize::MAX);
+                // If this hart was running the hung task, clear its attribution.
+                let hart_id = super::hart_local::current_hart_id();
+                if super::hart_local::ready::current_task_id_for(hart_id) == tid {
+                    super::hart_local::set_current_cell_id(0);
+                    super::hart_local::ready::set_current_task_id(hart_id, 0);
+                }
             }
         }
 
         // 2. Poll Async Tasks
-        let mut polled_tasks = Vec::new();
-        let waker = dummy_waker();
-        let mut cx = Context::from_waker(&waker);
+        let has_polling = self.tasks.values().any(|t| t.state == TaskState::Polling);
+        if has_polling {
+            let mut polled_tasks = Vec::new();
+            let waker = dummy_waker();
+            let mut cx = Context::from_waker(&waker);
 
-        // Iterate keys to avoid borrow check issues
-        let keys: Vec<usize> = self.tasks.keys().cloned().collect();
-        for id in keys {
-            if let Some(task) = self.tasks.get_mut(&id) {
-                if task.state == TaskState::Polling {
-                    if let Some(ref mut future_enum) = task.pending_future {
-                        match future_enum {
-                            SyscallFuture::FileRead(fd, future) => {
-                                // Poll the future
-                                match future.as_mut().poll(&mut cx) {
-                                    Poll::Ready((file, res)) => {
-                                        // Restore file handle
-                                        // file is Box<dyn ViFile>
-                                        task.open_files.insert(*fd, FileHandle::new(file));
+            // Iterate keys to avoid borrow check issues
+            let keys: Vec<usize> = self.tasks.keys().cloned().collect();
+            for id in keys {
+                if let Some(task) = self.tasks.get_mut(&id) {
+                    if task.state == TaskState::Polling {
+                        if let Some(ref mut future_enum) = task.pending_future {
+                            match future_enum {
+                                SyscallFuture::FileRead(fd, future) => {
+                                    // Poll the future
+                                    match future.as_mut().poll(&mut cx) {
+                                        Poll::Ready((file, res)) => {
+                                            // Restore file handle
+                                            // file is Box<dyn ViFile>
+                                            task.open_files.insert(*fd, FileHandle::new(file));
 
-                                        // Set return value (a0 / regs[10])
-                                        task.trap_frame.regs[10] = res.unwrap_or(0) as _; // TODO: Handle Error Properly (negative?)
+                                            // Set return value (a0 / regs[10])
+                                            task.trap_frame.regs[10] = res.unwrap_or(0) as _; // TODO: Handle Error Properly (negative?)
+
 
                                         // Wake task
                                         task.state = TaskState::Ready;
@@ -604,11 +622,12 @@ impl Scheduler {
                             }
                         }
                     }
+                    }
                 }
             }
-        }
-        for id in polled_tasks {
-            self.push_ready(id);
+            for id in polled_tasks {
+                self.push_ready(id);
+            }
         }
 
         // After global sweep, fall through to per-hart pick.

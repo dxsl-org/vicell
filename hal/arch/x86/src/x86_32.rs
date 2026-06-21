@@ -20,6 +20,7 @@ pub mod context;
 pub mod gdt;
 #[cfg(target_arch = "x86")]
 pub mod idt;
+#[cfg(target_arch = "x86")]
 pub mod uart_16550;
 
 // ── Arch trait stub for non-x86 hosts (compile-time only) ────────────────────

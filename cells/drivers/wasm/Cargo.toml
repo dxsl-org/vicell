@@ -11,3 +11,6 @@ types    = { path = "../../../libs/types" }
 api      = { path = "../../../libs/api" }
 ostd     = { path = "../../../libs/ostd" }
 wasmi    = { version = "1", default-features = false, features = ["prefer-btree-collections"] }
+
+[build-dependencies]
+cell-build = { path = "../../../libs/cell-build" }

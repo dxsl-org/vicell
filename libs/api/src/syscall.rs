@@ -183,6 +183,13 @@ pub enum ViSyscall {
     /// Allowlist-gated (bit 42). Requires `WaitForEvent` in `declare_syscalls!`.
     WaitForEvent = 217,
 
+    /// Play raw PCM frames on the VirtIO sound device's output stream (blocking).
+    /// PCM format is fixed: signed 16-bit LE, 2 channels, 44100 Hz (frame = 4 bytes).
+    /// The kernel configures + starts the output stream on first use.
+    /// ABI: a0 = pcm_ptr, a1 = pcm_len (bytes) → frames written (0 on no device/error).
+    /// Allowlist-gated (bit 47). Requires `AudioPlay` in `declare_syscalls!`.
+    AudioPlay = 218,
+
     // === Hypervisor (220-225) — HypervisorCap gated (allowlist bit 44) ===
     // All six syscalls require `hypervisor = true` in the cell manifest AND the
     // kernel to have booted at EL2 (ARM64) or with H-ext (RISC-V).  A cell
@@ -387,6 +394,8 @@ impl ViSyscall {
             Self::GetRandom     => Some(41),
             // WaitForEvent: IRQ-driven sleep (net RX waker, Phase 04 SMP).
             Self::WaitForEvent  => Some(42),
+            // AudioPlay: VirtIO sound output (bit 47 — next free after TruncateCap 46).
+            Self::AudioPlay     => Some(47),
             // HypervisorCap (bit 44): all 6 VMM syscalls share one bit.
             // Bit 43 is already assigned to GpuCursor; 44 is the next free slot.
             Self::CreateVm | Self::CreateVcpu | Self::MapGuestMemory
@@ -455,6 +464,7 @@ impl From<usize> for ViSyscall {
             215 => ViSyscall::GrantRegister,
             216 => ViSyscall::GrantUnregister,
             217 => ViSyscall::WaitForEvent,
+            218 => ViSyscall::AudioPlay,
             220 => ViSyscall::CreateVm,
             221 => ViSyscall::CreateVcpu,
             222 => ViSyscall::MapGuestMemory,

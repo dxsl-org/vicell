@@ -1,0 +1,40 @@
+vbe: Initialising...
+vbe: Version: 3.0
+vbe: OEM: SeaBIOS VBE(C) 2011
+vbe: Graphics vendor: SeaBIOS Developers
+vbe: Product name: SeaBIOS VBE Adapter
+vbe: Product revision: Rev. 1
+edid: Success.
+vbe: EDID detected screen resolution of 1280x800
+vbe: Found matching mode 0x17a, attempting to set...
+vbe: Framebuffer address: 0xfd000000
+edid: Success.
+limine: Loading executable `boot():/boot/kernel.elf`...
+limine: Physical base:   0xf48a000
+limine: Virtual base:    0xffffffff80000000
+limine: Slide:           0x0
+limine: ELF entry point: 0xffffffff80000000
+limine: Base revision:   3
+limine: Requests count:  5
+limine: Top of HHDM:     0x40000000
+vbe: Initialising...
+vbe: Version: 3.0
+vbe: OEM: SeaBIOS VBE(C) 2011
+vbe: Graphics vendor: SeaBIOS Developers
+vbe: Product name: SeaBIOS VBE Adapter
+vbe: Product revision: Rev. 1
+edid: Success.
+vbe: EDID detected screen resolution of 1280x800
+vbe: Found matching mode 0x17a, attempting to set...
+vbe: Mode was already set, perfect!
+vbe: Framebuffer address: 0xfd000000
+edid: Success.
+paging: 1GiB pages are not supported!
+[ViCell] kernel boot v0.2.1
+Kernel started (Hart: 0, DTB: ...)
+[boot] kernel_phys_base=0x000000000f48a000
+[INFO] Frame allocator initialized
+[INFO] Initializing x86_64 paging (kernel PML4)...
+[INFO] x86_64 paging initialized
+[INFO] Activating x86_64 paging (mov cr3)...
+PQAHC1oKnx

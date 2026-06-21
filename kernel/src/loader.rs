@@ -14,6 +14,7 @@ pub mod early;
 pub mod elf;
 pub mod elf_tests;
 pub mod reloc;
+pub mod va_alloc;
 pub use elf::ElfLoader;
 
 /// ELF parser trait.
@@ -68,13 +69,7 @@ pub fn spawn_from_path(path: &str) -> ViResult<usize> {
     // Read ELF bytes from the early bootstrap table.
     let elf_bytes = early::EarlyLoader::read_file(path)?;
 
-    // Apply relocations (base = 0 for fixed-VA cells; non-zero for PIE cells).
-    // For cells with no .rela.dyn section, get_section returns NotFound — skip.
-    let base: VAddr = 0; // fixed-VA cells compiled with shell.ld; PIE support is future work
     let elf_loader = ElfLoader;
-    if let Ok(rela_section) = elf_loader.get_section(&elf_bytes, ".rela.dyn") {
-        reloc::apply_relocations(base, rela_section)?;
-    }
 
     // Read capability manifest from `__ViCell_manifest` ELF section.
     // Absent or malformed → None (falls back to legacy hardcoded path grants).
@@ -104,9 +99,27 @@ pub fn spawn_from_path(path: &str) -> ViResult<usize> {
     // Extract cell name from the last path component (e.g. "/bin/shell" → "shell").
     let name = path.rsplit('/').next().unwrap_or(path);
 
-    // Spawn via the existing in-memory spawn path (ELF parse + segment map).
-    let tid = crate::task::spawn_from_mem(&elf_bytes, name, CellId(0), alloc::vec::Vec::new())
+    // Spawn via the in-memory path.  For PIE cells, spawn_from_mem allocates a
+    // VA base and loads segments there; it returns (tid, load_base).
+    let (tid, load_base) = crate::task::spawn_from_mem(&elf_bytes, name, CellId(0), alloc::vec::Vec::new())
         .map_err(|_| ViError::OutOfMemory)?;
+
+    // Apply ELF relocations AFTER pages are mapped (the relocation engine writes
+    // to the cell's live VA pages, not to the raw ELF buffer).
+    // For PIE cells load_base != 0; for fixed-VA cells this is a no-op (base==0
+    // and the formula *ptr = 0 + addend == addend was already baked in at link time).
+    if let Ok(rela_section) = elf_loader.get_section(&elf_bytes, ".rela.dyn") {
+        if let Err(e) = reloc::apply_relocations(load_base, &rela_section) {
+            // Relocation failed — the task is already in the scheduler but must
+            // never run with partial relocations.  Kill it before returning.
+            // CellSegments::Drop (inside exit_task's eager_unmap path) frees
+            // the segment frames and PIE VA slot.
+            if let Some(sched) = crate::task::SCHEDULER.lock().as_mut() {
+                sched.exit_task(tid, 0xff);
+            }
+            return Err(e);
+        }
+    }
 
     // Assign a unique CellId based on the task ID so per-cell quota and
     // capability checks are correctly scoped.  `spawn_from_mem` defaults to
@@ -123,6 +136,11 @@ pub fn spawn_from_path(path: &str) -> ViResult<usize> {
         crate::audit::AuditEvent::CellSpawn,
         &crate::audit::encode_u32x2(tid as u32, 0u32),
     );
+
+    // Integrity measurement (IMA-style): hash the ELF image and record it in the
+    // append-only measurement log BEFORE the cell is scheduled. Evidence for
+    // future DICE/EAT attestation — orthogonal to (and complements) Cell signing.
+    crate::measurement_log::measure(tid, path, &elf_bytes);
 
     // Read per-Cell syscall allowlist from ELF section __ViCell_syscalls.
     // The section (if present) contains a u64 LE bitset; absent = permit-all.
@@ -176,8 +194,13 @@ pub fn spawn_from_path(path: &str) -> ViResult<usize> {
                     if m.has_spawn() {
                         task.spawn_cap = Some(crate::task::cap::SpawnCap::new());
                     }
-                    if m.has_gpio() || m.has_uart() {
-                        task.mmio_cap = true;
+                    // Parameterized MMIO cap: record WHICH device classes the
+                    // cell declared, not just a yes/no. Enforced at request_mmio.
+                    if m.has_gpio() {
+                        task.mmio_devices |= crate::resource_registry::DEV_GPIO;
+                    }
+                    if m.has_uart() {
+                        task.mmio_devices |= crate::resource_registry::DEV_UART;
                     }
                     if m.has_hypervisor()
                         && (crate::cpu_features::has_h_ext()

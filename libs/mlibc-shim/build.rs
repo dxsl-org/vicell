@@ -1,8 +1,13 @@
 // mlibc-shim build.rs — inject the pre-built mlibc libc.a into the linker.
 //
-// The .a must be produced by running `scripts/build-mlibc.sh` in WSL2 first.
-// If the file is absent, this script emits a clear error rather than silently
-// falling back to posix.rs (which would cause duplicate-symbol link failures).
+// libc.a must be produced BEFORE a full `cargo build`.  Two paths:
+//   Windows:  pwsh scripts/setup-mlibc.ps1   (clones + builds natively)
+//   WSL2/Linux: bash scripts/build-mlibc.sh
+//
+// If libc.a is absent this script emits a Cargo warning and returns early
+// so that `cargo check` (no link step) still succeeds.  A full `cargo build`
+// of any cell that links mlibc-shim will fail at the linker step with
+// "cannot find -lc", which is the intended signal to run the setup script.
 
 use std::env;
 use std::path::PathBuf;
@@ -10,14 +15,12 @@ use std::path::PathBuf;
 fn main() {
     let arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
 
-    // Locate workspace root: CARGO_MANIFEST_DIR is libs/mlibc-shim/, go up twice.
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     let workspace_root = manifest_dir
         .parent()   // libs/
-        .and_then(|p| p.parent()) // workspace root
+        .and_then(|p| p.parent())
         .expect("mlibc-shim: could not find workspace root from CARGO_MANIFEST_DIR");
 
-    // Per-arch build directory under third_party/mlibc/
     let build_dir = if arch == "aarch64" {
         workspace_root.join("third_party/mlibc/build-aarch64")
     } else {
@@ -27,21 +30,17 @@ fn main() {
     let lib_path = build_dir.join("libc.a");
 
     if !lib_path.exists() {
-        eprintln!("\n\
-            ╔══════════════════════════════════════════════════════════════╗\n\
-            ║  mlibc-shim: libc.a not found for arch={}{}║\n\
-            ║                                                              ║\n\
-            ║  Build it first:                                             ║\n\
-            ║    (in WSL2)  bash scripts/build-mlibc.sh                   ║\n\
-            ║                                                              ║\n\
-            ║  Expected path: {}  ║\n\
-            ╚══════════════════════════════════════════════════════════════╝\n",
-            arch,
-            " ".repeat(18usize.saturating_sub(arch.len())),
-            lib_path.display(),
+        // Non-fatal: warn and skip.  `cargo check` has no link step so this is
+        // safe.  `cargo build` will fail at the linker — that error is the cue
+        // to run the setup script below.
+        println!(
+            "cargo:warning=mlibc libc.a missing for arch={arch}. \
+             Run `pwsh scripts/setup-mlibc.ps1` (Windows) or \
+             `bash scripts/build-mlibc.sh` (WSL2/Linux). \
+             Expected: {}",
+            lib_path.display()
         );
-        // Fail the build explicitly
-        panic!("mlibc libc.a is missing — run scripts/build-mlibc.sh in WSL2");
+        return;
     }
 
     println!("cargo:rustc-link-search=native={}", build_dir.display());

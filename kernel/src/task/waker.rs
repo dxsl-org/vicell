@@ -15,6 +15,11 @@ use core::sync::atomic::{AtomicBool, Ordering};
 /// Cleared by the WaitForEvent handler when the net cell is woken.
 pub static NET_RX_PENDING: AtomicBool = AtomicBool::new(false);
 
+/// Returns true if any event is currently pending.
+pub fn has_any_pending() -> bool {
+    NET_RX_PENDING.load(Ordering::Relaxed)
+}
+
 /// Signal a NIC RX event.  Called from the VirtIO interrupt handler (ISR context).
 ///
 /// Sets `NET_RX_PENDING` so the next timer sweep wakes any `WaitEvent(NET_RX)` task.

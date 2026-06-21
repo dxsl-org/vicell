@@ -544,7 +544,7 @@ impl QemuRunner {
         let child = Command::new(qemu_binary_rv32())
             .args([
                 "-machine", "virt",
-                "-m", "128M",
+                "-m", "256M",
                 "-nographic",
                 "-bios", "default",
                 "-kernel", kernel,
@@ -589,7 +589,7 @@ impl QemuRunner {
             .args([
                 "-machine", "virt",
                 "-cpu", "cortex-a15",
-                "-m", "128M",
+                "-m", "256M",
                 "-nographic",
                 "-kernel", kernel,
                 "-monitor", "none",
@@ -634,7 +634,7 @@ impl QemuRunner {
             .args([
                 "-machine", "pc",
                 "-cpu", "base",
-                "-m", "128M",
+                "-m", "256M",
                 "-nographic",
                 "-kernel", kernel,
                 "-monitor", "none",

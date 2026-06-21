@@ -1,6 +1,6 @@
 # ViCell Security Model
 
-**Version:** v0.2.1-dev | **Updated:** 2026-05-29
+**Version:** v0.2.3-dev | **Updated:** 2026-06-21
 
 ## Design Philosophy
 
@@ -69,9 +69,14 @@ SAS is the worst-case environment for Spectre attacks. In a traditional OS, Spec
 **Mitigations planned**:
 - Short-term: Document "trusted cells only" constraint explicitly (done here)
 - Medium-term: Tier 3 VM isolation for untrusted code (hardware page tables per VM)
-- Long-term: CHERIoT RISC-V hardware capabilities — see "CHERI Integration Roadmap" section below
+- Long-term: CHERIoT RISC-V hardware capabilities — see "Hardware Isolation Roadmap" section below
 
 **Do NOT use ViCell to run untrusted third-party code until Tier 3 VM is implemented.**
+
+> **Full analysis:** [research/research-hardware-isolation.md](research/research-hardware-isolation.md) — covers the
+> full menu of hardware supplements (CFI, MPK/PKS, MPU/PMP, RISC-V WorldGuard/Smmtt, IOMMU/IOPMP, confidential
+> computing, CHERI), each rated against the SAS "no-TLB-flush-per-Cell-switch" criterion, plus peer-OS prior art
+> (Tock, Hubris, RedLeaf, Theseus, Singularity, CheriOS) and a severity-ranked gap list.
 
 > **Isolation strategy decision (2026-06-05):** per-Cell **SATP** isolation at Tier 1 is
 > **explicitly NOT pursued**. PMP is M-mode-only (unreachable from ViCell's S-mode without
@@ -88,6 +93,46 @@ Kernel loads at a fixed virtual address. An attacker with any code execution can
 
 **Planned**: KASLR via Limine boot randomization — estimated 3 days to implement, deferred to Phase 24.
 
+### DMA Isolation Absent — IOMMU in Passthrough Mode
+**Severity: Critical (real hardware with DMA-capable peripherals)**
+
+The RISC-V IOMMU and x86 VT-d shipped in Track B run in **passthrough mode** — RISC-V via `DDTP.MODE=1`
+(bare; translation disabled), x86 via VT-d with translation *enabled* (`TES`) but every one of the 256 BDFs
+mapped to a `TT=0b10` passthrough context entry in a single shared domain. Both yield IOVA==PA with no
+permission table, and `iommu::map_dma()` is a literal identity no-op (`kernel/src/task/drivers/iommu.rs`) —
+functionally equivalent to having no IOMMU. In a SAS, a **Cell *is* the
+driver**: it owns the device MMIO and programs the DMA descriptor ring directly, with no kernel intermediary.
+A compromised (or buggy) Cell that holds a DMA-capable peripheral (NIC, NVMe, GPU, USB host, on-chip DMA
+engine) can read or write **any** physical address — kernel page tables, scheduler/Cell metadata, other Cells'
+stacks — **without a single line of `unsafe`**, purely via MMIO writes it is legitimately permitted to issue.
+This defeats LBI and every CPU-side memory protection at once. The blast radius equals a Linux *kernel driver*
+bug, not a user-space exploit. (Thunderclap, NDSS 2019, bypassed the IOMMU of macOS/Linux/FreeBSD even when
+*enabled* — ViCell has not enabled translation at all.)
+
+**Key distinction**: MMIO ownership ≠ DMA authorization. The Resource Registry enforces exclusive MMIO
+ownership, but holding NIC MMIO implies DMA capability while holding UART MMIO does not. The kernel must track
+DMA capability **separately** and install per-device, per-Cell IOMMU/IOPMP translation entries.
+
+**Planned**: Switch IOMMU from passthrough → translate mode with per-device IOVA→PA tables; add
+`sys_grant_dma(device, phys, size)` mapping only granted pages; RISC-V **IOPMP** (bus-side) for on-chip DMA
+controllers that bypass the SMMU. Must be resolved before any Cell is granted a real DMA-capable peripheral on
+hardware. See [research/research-hardware-isolation.md](research/research-hardware-isolation.md) §3.
+
+### Forward-Edge CFI Absent (BTI / CET-IBT)
+**Severity: High (prerequisite for MPK)**
+
+Spatial memory protection does not stop a corrupted indirect branch from jumping anywhere in the SAS. ViCell
+plans PAC (ARM) but PAC only covers the **backward edge** (return addresses) — forward-edge JOP/COP is open
+without **BTI** (ARM) or **CET-IBT** (x86). Critically, **MPK/PKU is not a security boundary without CFI**:
+`WRPKRU` is an unprivileged instruction, so any JOP gadget reaching an unsanctioned `WRPKRU`/`XRSTOR` grants
+the attacker every protection key (ERIM, USENIX Sec 2019; PKU Pitfalls, USENIX Sec 2020 — 10 working bypasses).
+Safe Rust Cells neutralize most of this, but C FFI (mlibc, DOOM), Lua dispatch, and unsafe kernel code
+re-expand the gadget surface to the whole image.
+
+**Planned**: Compile Cells + kernel with `+bti,+pac-ret` (ARM) / `CONFIG_X86_KERNEL_IBT` + CET Shadow Stack
+(x86); make CFI a hard prerequisite before enabling any MPK domain. See
+[research/research-hardware-isolation.md](research/research-hardware-isolation.md) §2.
+
 ### No Audit Log
 **Severity: Medium**
 
@@ -98,11 +143,44 @@ Cell actions (IPC sends, file writes, network connects) are not persistently log
 ### Capability Token System — Implementation Gap
 **Severity: Medium**
 
-Spec (01-core.md) describes unforgeable Zero-Sized Type capability tokens. Current implementation uses a `can_block_io` TCB flag — a simpler mechanism that works for current cell count but does not scale to arbitrary capability types.
+Spec (01-core.md) describes unforgeable Zero-Sized Type capability tokens. Current implementation uses an ELF
+manifest of one `flags: u8` (8 boolean flags, **all used**) plus a `can_block_io` TCB flag — coarse, granted
+all-at-spawn, with **no scoping, no delegation, no revocation, no user/operator consent**. This is effectively
+the **Android pre-6.0 install-time permission model**, and violates all four capability-OS invariants (no
+ambient authority · explicit delegation · monotonic downgrade · revocable).
 
-**Planned**: Full ZST capability token system when Cell count exceeds 20.
+**Planned** (see [research/research-cell-security-permissions.md](research/research-cell-security-permissions.md)
+for the full design + capability-OS / mobile-OS references): evolve through (1) **parameterized capabilities**
+(`__ViCell_cap_args` ELF section — e.g. "GPIO pins 14-17" not "all GPIO"; additive, no Law 1 bump), (2)
+**spawn-time intersection** (a Cell can only delegate caps it holds — kills confused-deputy), (3) **runtime
+revocation** (`CapHandle` + `sys_cap_revoke`), (4) **operator-signed policy** for headless G1 fleets (consent =
+signed policy, NOT a dialog — see the headless-robot caveat) and an optional **TCC-style consent-broker Cell**
+for G2 HMI (sensitive caps only). Hard invariant: the manifest is a **ceiling, not a floor**, and **only the
+kernel enforces** (consent feeds the syscall-boundary check). LBI already closes the TCC "permission-laundering
+via code injection" hole that produced repeated macOS/iOS TCC CVEs.
 
-## CHERI Integration Roadmap
+### Boot Trust Chain + Attestation — Absent
+**Severity: Medium (High for fleet deployment)**
+
+ViCell has no secure boot, no measured boot, no device attestation, and no sealed storage. Cell binary signing
+(Ed25519/P-256) is planned but unimplemented. A robot fleet cannot cryptographically prove a device runs
+unmodified ViCell (vs tampered firmware with a cloned identity), and secrets are not bound to a measured boot
+state.
+
+**Planned** (see [research/research-cell-security-permissions.md](research/research-cell-security-permissions.md)
+§3): a TPM-free **DICE/RIoT** layered chain (`CDI_n = HKDF(CDI_{n-1}, HASH(layer_n))`), per-Cell **SHA-256
+measurement** at `spawn_from_path()` extended into a kernel measurement log (Linux IMA model), **remote
+attestation** via EAT tokens (RFC 9711) + RATS (RFC 9334) verified by ARM Veraison fleet-side, and **sealed
+storage** with the AEAD key held in the **Silo** (closes the CDI-in-RAM exposure). Hardware root of trust:
+**OpenTitan** (open-source RISC-V) is the natural backing for the existing Silo abstraction.
+
+## Hardware Isolation Roadmap
+
+> **Full menu + status:** [research/research-hardware-isolation.md](research/research-hardware-isolation.md).
+> This section keeps only the CHERI sub-roadmap; CFI / MPK-PKS / MPU-PMP / WorldGuard-Smmtt / IOMMU-IOPMP /
+> confidential-computing supplements live in the research doc and the project roadmap §G.
+
+### CHERI sub-roadmap
 
 **CHERIoT** (Capability Hardware Extension RISC-V for IoT) là extension RISC-V cung cấp **hardware-enforced pointer bounds** — kết hợp hoàn hảo với Rust LBI của ViCell.
 
@@ -122,13 +200,15 @@ Spec (01-core.md) describes unforgeable Zero-Sized Type capability tokens. Curre
 
 | Platform | Status | CHERI Type |
 |----------|--------|-----------|
-| **CHERIoT-IBEX** (lowRISC/Microsoft) | ✅ Production silicon, FPGA | RV32 (embedded) |
-| **Sonata dev board** (lowRISC) | ✅ Có thể mua ngay | CHERIoT-IBEX RV32 |
-| **Morello** (ARM) | ✅ Limited hardware | AArch64 CHERI |
-| **CHERI-RISC-V RV64** (Cambridge) | 🔶 Research, FPGA only | RV64 full CHERI |
-| **Standard RISC-V RV64 với CHERI** | ❌ Chưa có silicon | — |
+| **CHERIoT-IBEX** (lowRISC/Microsoft) | ✅ Sonata FPGA (~$412); SCI ICENI silicon Early-Access 2025; Rust no_std fork active (cập nhật hằng tuần từ 2/2026) | RV32E (embedded) |
+| **Morello** (ARM) | ❌ **ARM tuyên bố KHAI TỬ** — không sản phẩm, không kế thừa có tên (eval ~20-35% overhead) | AArch64 CHERI (EoL) |
+| **RISC-V "Zcheri" extension** | ❌ **Chưa ratify** (target đầu 2026, đã trượt) | RV32CH/RV64CH |
+| **CHERI-RISC-V RV64** (Cambridge / COSMIC) | 🔶 FPGA only; COSMIC nhắm secure-enclave 3/2028, chưa tape-out | RV64 full CHERI |
 
-> **Thực tế**: CHERI cho RV64 (target chính của ViCell) chưa có production silicon. CHERIoT-IBEX là RV32 — phù hợp cho **ViCell-Nano** profile (embedded robots, constrained devices).
+> **Thực tế (2026)**: CHERI cho RV64 (target chính của ViCell) **chưa có silicon, chưa có Rust target, ISA chưa ratify**
+> — KHÔNG khả thi cho 2026-Q4; realistic 2028-2030. ARM Morello đã bị khai tử. **CHERIoT-IBEX là RV32E** và là path
+> duy nhất chín muồi — phù hợp **ViCell-Nano** profile (embedded robots). Compartment switch đo được 209-452 cycle
+> (nhanh hơn null syscall, SOSP 2025).
 
 ### Integration Path với ViCell (Phase 31)
 
@@ -190,6 +270,13 @@ Bước 4: Kernel unsafe blocks
 | Kernel | Capability table, syscall argument validation, frame zeroing |
 | CI | `cargo-geiger`, `cargo-audit`, `cargo-deny` on every PR |
 | Fuzzing | Weekly libFuzzer harnesses on ELF parser + VFS path validator |
+| HW — spatial _(roadmap)_ | MPU/PMP (embedded C-tier), MPK/PKS (x86 tier domains), MTE (ARM UAF hardening) |
+| HW — control-flow _(roadmap)_ | BTI+PAC (ARM), CET IBT+Shadow Stack (x86), Zicfilp/Zicfiss (RISC-V) — **prerequisite for MPK** |
+| HW — DMA _(roadmap)_ | IOMMU/SMMU translate mode + IOPMP; per-Cell `sys_grant_dma` (**not** MMIO ownership) |
+| HW — VM-grade _(roadmap)_ | Stage-2/EPT (Tier 3); TDX/SEV-SNP/ARM CCA for attested multi-tenant |
+
+> Hardware layers are rated against the SAS "no-TLB-flush-per-switch" criterion in
+> [research/research-hardware-isolation.md](research/research-hardware-isolation.md).
 
 ## Security Contacts
 

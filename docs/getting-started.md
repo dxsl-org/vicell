@@ -2,7 +2,7 @@
 
 > Your complete guide to building and contributing to ViCell
 >
-> **Version**: 0.2.1-dev | **Last Updated**: 2026-06-03
+> **Version**: 0.2.1-dev | **Last Updated**: 2026-06-19
 
 ## Quick Start
 
@@ -17,6 +17,8 @@ Get ViCell running in 5 steps. Expect 30–45 minutes on your first setup.
 | **Python** | 3.8+ | Disk image creation script |
 | **Git** | 2.30+ | Source control |
 | **RAM** | 4GB min | Development environment needs breathing room |
+| **LLVM** *(Windows)* | 14+ | `libclang.dll` for bindgen-based crates (`littlefs2-sys`, etc.). `.cargo/config.toml` sets `LIBCLANG_PATH` automatically once LLVM is installed. |
+| **riscv-none-elf-gcc** | 15+ | C cross-compiler for bare-metal riscv64. `.cargo/config.toml` maps `CC_riscv64gc_unknown_none_elf` to this name so no manual env var needed. |
 
 ### Setup Steps
 
@@ -30,6 +32,15 @@ rustup target add riscv64gc-unknown-none-elf
 # Ubuntu: sudo apt install qemu-system-riscv64
 # macOS: brew install qemu
 # MSYS2: pacman -S mingw-w64-x86_64-qemu
+
+# 2b. (Windows only) Install LLVM — needed by bindgen (littlefs2-sys, etc.)
+#     .cargo/config.toml sets LIBCLANG_PATH = "C:\Program Files\LLVM\bin" automatically.
+winget install LLVM.LLVM
+
+# 2c. Install RISC-V cross-compiler (xpack riscv-none-elf-gcc)
+#     Download from: https://github.com/xpack-dev-tools/riscv-none-elf-gcc-xpack/releases
+#     Extract to C:\RISCV\riscv-none-elf-gcc-<ver>\bin and add to PATH.
+#     .cargo/config.toml sets CC_riscv64gc_unknown_none_elf automatically.
 
 # 3. Clone and enter repository
 git clone https://github.com/your-org/ViCell.git
@@ -240,7 +251,9 @@ riscv64-unknown-elf-gdb target/riscv64gc-unknown-none-elf/debug/ViCell-kernel
 |-------|-------|-----|
 | `can't find crate for 'core'` | Missing `rust-src` | `rustup component add rust-src` |
 | `qemu-system-riscv64: command not found` | QEMU not installed | See prerequisites table above |
-| `linker 'riscv64-unknown-elf-gcc' not found` | Missing cross-toolchain | `apt install gcc-riscv64-linux-gnu` |
+| `libclang shared library is not loaded` | LLVM not installed (Windows) | `winget install LLVM.LLVM` — `.cargo/config.toml` points to `C:\Program Files\LLVM\bin` |
+| `riscv-none-elf-gcc: program not found` | xpack RISC-V toolchain missing or not in PATH | Install xpack riscv-none-elf-gcc and add its `bin/` to PATH |
+| `linker 'riscv64-unknown-elf-gcc' not found` | Linux cross-toolchain missing | `apt install gcc-riscv64-unknown-elf` (or equivalent) |
 | Kernel boots then hangs | Disk image missing | Run `python3 create_ramdisk.py` |
 | `rustup: toolchain 'nightly-...' not installed` | Stale config | `rustup toolchain install nightly` |
 | Black screen (no output) | Missing `-nographic` flag | Verify QEMU command includes `-nographic` |

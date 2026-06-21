@@ -11,3 +11,6 @@ path = "src/main.rs"
 viui = { path = "../../../libs/viui" }
 ostd = { path = "../../../libs/ostd" }
 api  = { path = "../../../libs/api" }
+
+[build-dependencies]
+cell-build = { path = "../../../libs/cell-build" }

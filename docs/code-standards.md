@@ -345,11 +345,37 @@ pub use crate::types::{ViError, ViResult};
 
 **Order**: System → External → Internal → Re-exports.
 
-### File Size
+### File Size & Directory Organization
 
 - **Limit**: 200-300 LOC per file
 - **Exceeding**: Split into submodules
 - **Example**: `task.rs` (1000 LOC) → `task/scheduler.rs`, `task/syscall.rs`, `task/ipc.rs`
+
+### Cells Directory Structure
+
+ViCell organizes cells into 8 semantic groups (parallel to code, not functionality):
+
+```
+cells/
+├─ tools/        — System utilities (shell, init, sys-tools, net-tools, wasm)
+├─ apps/         — User applications (robot-dashboard)
+├─ demos/        — Demonstrations & graphical showcases (periph-demo, sensor-demo, doom, tetris*, audio-demo, etc.)
+├─ drivers/      — Hardware device drivers (gpio, i2c, spi, uart, etc.)
+├─ services/     — System services (vfs, net, input, compositor, silo, hypervisor, etc.)
+├─ runtimes/     — Scripting VMs (lua)
+├─ tests/        — Integration & stress test cells (bench, vfs-test, etc.)
+└─ guests/       — Hypervisor guests (silo-guest, aarch64-unknown-none)
+```
+
+**Classification rules:**
+- **tools/** — Always-running infrastructure (shell, init, system daemons)
+- **apps/** — Interactive/rich user applications with persistent UI (dashboards, productivity tools)
+- **demos/** — Showcases of system capabilities: hardware drivers, rendering, audio, scripting, games. Run on-demand from the shell; never auto-spawned at boot.
+- **drivers/** — Hardware devices + driver Cells (mapped via kernel Resource Registry or IPC)
+- **services/** — Long-lived stateful services with IPC servers (VFS, net, input, compositor)
+- **runtimes/** — Scripting language interpreters and VMs (Lua, MicroPython, WASM)
+- **tests/** — Integration test & benchmark cells spawned by CI or manual runs (disposable, single-purpose)
+- **guests/** — Hypervisor guest binaries (bare-metal or minimal OS images, non-x86/ARM64 targets)
 
 ### Visibility
 

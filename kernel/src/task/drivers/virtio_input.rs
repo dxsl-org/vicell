@@ -22,11 +22,18 @@ pub fn clear_input_cell_if(tid: usize) {
     INPUT_CELL_ID.compare_exchange(tid, 0, Ordering::AcqRel, Ordering::Relaxed).ok();
 }
 
+#[derive(Clone, Copy)]
 pub struct KeyboardEvent {
     pub event_type: u16,
     pub code: u16,
     pub value: u32,
 }
+
+/// Cap on buffered input events. The kernel retains undelivered events (see
+/// `dispatch_pending`) so none are lost while the focused app is busy rendering;
+/// this bounds growth if the app drains far slower than the user types — oldest
+/// events are dropped first, keeping the most recent input.
+const MAX_QUEUED_EVENTS: usize = 256;
 
 pub struct VirtIOInputDriver {
     pub input: VirtIOInput<VirtioHal, MmioTransport>,
@@ -104,6 +111,9 @@ pub fn poll_events() {
                 event.code,
                 event.value
             );
+            if driver.event_queue.len() >= MAX_QUEUED_EVENTS {
+                driver.event_queue.pop_front(); // drop oldest to bound growth
+            }
             driver.event_queue.push_back(KeyboardEvent {
                 event_type: event.event_type,
                 code: event.code,
@@ -129,55 +139,68 @@ pub fn dispatch_pending() {
 
     use crate::task::drivers::input_map::{EV_ABS, EV_KEY, EV_REL};
 
-    const MAX_BATCH: usize = 16;
-    let mut batch = [(0u8, 0u16, 0u32); MAX_BATCH];
-    let mut count = 0usize;
+    // IPC is a rendezvous with no queue: ipc_send(0, …) delivers only when the
+    // input service is parked in Recv, returning Ok(0); otherwise Ok(1) and the
+    // event is NOT delivered (caller_id 0 has no task to park in Sending).
+    //
+    // We therefore peek the front event and dequeue it ONLY on confirmed delivery.
+    // While the input service is busy (blocked forwarding the previous event to the
+    // focused app), events stay buffered in event_queue and retry on the next tick —
+    // so keystrokes are never silently lost while an app is mid-render. At most one
+    // event is delivered per call: a successful send leaves the input service Ready
+    // (no longer in Recv), so any further send this tick would fail anyway.
+    loop {
+        let front = {
+            let guard = KEYBOARD_DRIVER.lock();
+            guard.as_ref().and_then(|d| d.event_queue.front().copied())
+        }; // lock released before ipc_send (avoids inversion with SCHEDULER)
+        let Some(ev) = front else { return };
 
-    {
-        let mut guard = KEYBOARD_DRIVER.lock();
-        if let Some(drv) = guard.as_mut() {
-            while count < MAX_BATCH {
-                let Some(ev) = drv.event_queue.pop_front() else { break };
-                batch[count] = (ev.event_type as u8, ev.code, ev.value);
-                count += 1;
-            }
-        }
-    } // KEYBOARD_DRIVER lock released before ipc_send (avoids lock inversion with SCHEDULER)
-
-    for i in 0..count {
-        let (ev_type, code, value) = batch[i];
-        let opcode: u8 = if ev_type == EV_KEY as u8 {
+        let opcode: u8 = if ev.event_type as u8 == EV_KEY as u8 {
             0
-        } else if ev_type == EV_REL as u8 {
+        } else if ev.event_type as u8 == EV_REL as u8 {
             1
-        } else if ev_type == EV_ABS as u8 {
+        } else if ev.event_type as u8 == EV_ABS as u8 {
             2
         } else {
+            // Unknown event type — drop it so it can't wedge the queue head.
+            let mut guard = KEYBOARD_DRIVER.lock();
+            if let Some(d) = guard.as_mut() { d.event_queue.pop_front(); }
             continue;
         };
         let mut msg = [0u8; 9];
         msg[0] = opcode;
-        msg[1..5].copy_from_slice(&(code as u32).to_le_bytes());
-        msg[5..9].copy_from_slice(&value.to_le_bytes());
+        msg[1..5].copy_from_slice(&(ev.code as u32).to_le_bytes());
+        msg[5..9].copy_from_slice(&ev.value.to_le_bytes());
+
         // ipc_send copies msg into the target cell's Recv buffer (a U-mode stack page).
         // Called from the timer ISR where SUM (Supervisor User Memory, sstatus bit 18)
         // is NOT set; set it here so the S-mode copy_nonoverlapping to the U-mode page
-        // does not fault with scause=15.  The syscall path (handle_syscall) already
-        // sets SUM for its own duration; we restore the previous SUM state after.
+        // does not fault with scause=15. Cleared immediately after via the guard's Drop.
         //
-        // SAFETY: SUM=1 allows S-mode to access U-mode pages; cleared immediately
-        // after ipc_send returns so no wider kernel code runs with SUM elevated.
-        #[cfg(target_arch = "riscv64")]
-        let _sum_guard = {
-            unsafe { core::arch::asm!("csrs sstatus, {0}", in(reg) 0x40000usize); }
-            struct SumGuard;
-            impl Drop for SumGuard {
-                fn drop(&mut self) {
-                    unsafe { core::arch::asm!("csrc sstatus, {0}", in(reg) 0x40000usize); }
+        // SAFETY: SUM=1 allows S-mode to access U-mode pages; cleared right after
+        // ipc_send so no wider kernel code runs with SUM elevated.
+        let delivered = {
+            #[cfg(target_arch = "riscv64")]
+            let _sum_guard = {
+                unsafe { core::arch::asm!("csrs sstatus, {0}", in(reg) 0x40000usize); }
+                struct SumGuard;
+                impl Drop for SumGuard {
+                    fn drop(&mut self) {
+                        unsafe { core::arch::asm!("csrc sstatus, {0}", in(reg) 0x40000usize); }
+                    }
                 }
-            }
-            SumGuard
+                SumGuard
+            };
+            matches!(crate::task::ipc_send(0, input_tid, msg.as_ptr() as usize, 9), Ok(0))
         };
-        let _ = crate::task::ipc_send(0, input_tid, msg.as_ptr() as usize, 9);
+
+        if delivered {
+            let mut guard = KEYBOARD_DRIVER.lock();
+            if let Some(d) = guard.as_mut() { d.event_queue.pop_front(); }
+        }
+        // Whether delivered (input now Ready) or not (input busy), stop here and
+        // resume next tick — at most one event leaves the queue per dispatch.
+        return;
     }
 }

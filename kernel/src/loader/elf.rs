@@ -27,21 +27,31 @@ pub struct ElfLoader;
 
 impl ElfLoader {
     /// Load loadable segments into memory.
-    /// This is not part of ElfParser trait but required for process loading.
+    ///
+    /// `load_base` is added to every segment's `p_vaddr` before mapping:
+    /// - For fixed-VA cells (ET_EXEC, non-PIE): pass `0` — uses p_vaddr directly.
+    /// - For PIE cells (ET_DYN): pass the VA base allocated by `va_alloc::alloc_cell_va`.
+    ///
+    /// Returns the list of mapped (va, frame) pairs so `CellSegments` can reclaim
+    /// them when the cell dies.
     pub fn load_segments(
         &self,
         data: &[u8],
         frame_allocator: &mut crate::memory::frame::FrameAllocator,
+        load_base: usize,
     ) -> ViResult<alloc::vec::Vec<(VAddr, PhysAddr)>> {
         let elf = ElfFile::new(data).map_err(|_| ViError::InvalidInput)?;
         // Record each mapped (vaddr, frame) so the cell's segment frames can be
         // reclaimed when it dies (see task::stack::CellSegments) — otherwise they leak.
-        let mut mapped: alloc::vec::Vec<(VAddr, PhysAddr)> = alloc::vec::Vec::new();
+        use crate::memory::paging::Flags;
+        let mut mapped: alloc::vec::Vec<(VAddr, PhysAddr, Flags)> = alloc::vec::Vec::new();
 
         for ph in elf.program_iter() {
             if let Ok(xmas_elf::program::Type::Load) = ph.get_type() {
                 let file_offset = ph.offset() as usize;
-                let vaddr = ph.virtual_addr() as usize;
+                // For PIE cells load_base relocates every segment; for fixed-VA
+                // cells load_base == 0 so p_vaddr is used verbatim.
+                let vaddr = (ph.virtual_addr() as usize).wrapping_add(load_base);
                 let mem_size = ph.mem_size() as usize;
                 let file_size = ph.file_size() as usize;
                 let ph_flags = ph.flags();
@@ -103,53 +113,68 @@ impl ElfLoader {
                 // Map pages
                 let mut current_page = start_page;
                 while current_page < end_page {
-                    // Overwrite guard (SAS silent-corruption defense): in the single
-                    // shared page table, mapping a VA that's ALREADY mapped silently
-                    // clobbers the existing PTE. Reject that — it means the cell's VA
-                    // window collides with a LIVE cell's segment OR a kernel MMIO
-                    // identity map (CLINT/PLIC/UART). This is exactly the class of bug
-                    // that (a) crashed init when bench's default layout hit 0x400000
-                    // and (b) had vfs/bench silently clobber CLINT/PLIC MMIO. A VA this
-                    // cell ALREADY mapped (in `mapped`) is just its own adjacent
-                    // PT_LOAD segments sharing a page boundary — allow that. Dead cells
-                    // unmap their VAs at death (CellSegments::eager_unmap), so a respawn
-                    // sees its VA free. Roll back this cell's partial mappings on reject.
-                    let already_ours = mapped.iter().any(|&(va, _)| va == current_page);
+                    // Overwrite guard: reject VA collision with kernel MMIO or a
+                    // *different* live cell. Allow shared pages from *this* cell's own
+                    // adjacent PT_LOAD segments (already_ours == true).
+                    //
+                    // PIE linker scripts may place adjacent sections (e.g. .text R-X
+                    // and .rodata R--) at non-page-aligned offsets so the two segments
+                    // share the same physical page.  In that case already_ours==true and
+                    // we reuse the frame, merging the new segment's flags into the page
+                    // rather than allocating a fresh one or blindly overwriting flags.
+                    let already_ours = mapped.iter().any(|(va, _, _)| *va == current_page);
                     if !already_ours && crate::memory::paging::virt_to_phys(current_page).is_some() {
                         log::error!(
                             "ELF: load VA 0x{:X} already mapped — rejecting spawn (VA collision with a live cell or kernel MMIO; fix the cell's linker script)",
                             current_page
                         );
-                        for &(va, fr) in &mapped {
+                        for &(va, fr, _) in &mapped {
                             let _ = crate::memory::paging::unmap_page(va);
                             frame_allocator.deallocate_frame(fr);
                         }
                         return Err(ViError::PermissionDenied);
                     }
 
-                    let buf_frame = frame_allocator
-                        .allocate_frame()
-                        .ok_or(ViError::OutOfMemory)?;
+                    // Get the backing frame's kernel-accessible VA for copying.
+                    let frame_virt = if already_ours {
+                        // Shared page from an earlier LOAD segment (e.g. .rodata R-- and
+                        // .data/RELRO RW- sharing a boundary page).  Reuse the existing
+                        // frame but OR the new segment's permission bits in so the page
+                        // satisfies both segments' access requirements.
+                        let phys = crate::memory::paging::virt_to_phys(current_page)
+                            .expect("already_ours but virt_to_phys returned None");
+                        if let Some(entry) = mapped.iter_mut().find(|(va, _, _)| *va == current_page) {
+                            let merged = Flags::from_bits(entry.2.bits() | flags.bits());
+                            if merged != entry.2 {
+                                entry.2 = merged;
+                                let _ = crate::memory::paging::map_page(frame_allocator, current_page, phys, merged);
+                            }
+                        }
+                        crate::memory::frame::phys_to_virt(phys)
+                    } else {
+                        let buf_frame = frame_allocator
+                            .allocate_frame()
+                            .ok_or(ViError::OutOfMemory)?;
 
-                    crate::memory::paging::map_page(
-                        frame_allocator,
-                        current_page,
-                        buf_frame,
-                        flags,
-                    )
-                    .map_err(|_| ViError::OutOfMemory)?;
+                        crate::memory::paging::map_page(
+                            frame_allocator,
+                            current_page,
+                            buf_frame,
+                            flags,
+                        )
+                        .map_err(|_| ViError::OutOfMemory)?;
 
-                    // Track for reclamation on cell death.
-                    mapped.push((current_page, buf_frame));
+                        // Track for reclamation on cell death.
+                        mapped.push((current_page, buf_frame, flags));
 
-                    // Zero the frame first (simplifies BSS and padding, and
-                    // prevents info-leak from previous frame owner).
-                    // Use phys_to_virt: on RISC-V it's a no-op (identity map);
-                    // on x86_64 physical RAM is only accessible via HHDM_BASE+phys.
-                    let frame_virt = crate::memory::frame::phys_to_virt(buf_frame);
-                    unsafe {
-                        core::ptr::write_bytes(frame_virt as *mut u8, 0, 4096);
-                    }
+                        // Zero the frame first (simplifies BSS and padding, and
+                        // prevents info-leak from previous frame owner).
+                        // Use phys_to_virt: on RISC-V it's a no-op (identity map);
+                        // on x86_64 physical RAM is only accessible via HHDM_BASE+phys.
+                        let fv = crate::memory::frame::phys_to_virt(buf_frame);
+                        unsafe { core::ptr::write_bytes(fv as *mut u8, 0, 4096); }
+                        fv
+                    };
 
                     // Intersection of [page, page+4096) AND [vaddr, vaddr+file_size)
                     let page_start_vaz = current_page;
@@ -188,7 +213,7 @@ impl ElfLoader {
                 );
             }
         }
-        Ok(mapped)
+        Ok(mapped.into_iter().map(|(va, phys, _)| (va, phys)).collect())
     }
 }
 

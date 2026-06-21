@@ -13,3 +13,6 @@ default = []
 
 [lib]
 crate-type = ["staticlib"]
+
+[build-dependencies]
+cell-build = { path = "../../../libs/cell-build" }

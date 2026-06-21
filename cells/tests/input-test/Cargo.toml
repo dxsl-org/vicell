@@ -1,0 +1,16 @@
+[package]
+name = "input-test"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+types = { path = "../../../libs/types" }
+api   = { path = "../../../libs/api" }
+ostd  = { path = "../../../libs/ostd" }
+
+[[bin]]
+name = "input-test"
+path = "src/main.rs"
+
+[build-dependencies]
+cell-build = { path = "../../../libs/cell-build" }

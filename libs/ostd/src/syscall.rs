@@ -601,7 +601,11 @@ pub fn sys_write(fd: usize, buffer: &[u8]) -> Result<usize, SyscallError> {
 pub fn sys_send(target: usize, msg: &[u8]) -> SyscallResult {
     unsafe {
         let ret = syscall(ViSyscall::Send, target, msg.as_ptr() as usize, msg.len(), 0);
-        SyscallResult::Ok(ret as usize)
+        if ret >= 0 {
+            SyscallResult::Ok(ret as usize)
+        } else {
+            SyscallResult::Err(SyscallError::Unknown)
+        }
     }
 }
 
@@ -787,6 +791,21 @@ pub fn sys_gpu_flush(pixels: &[u8], x: u32, y: u32, w: u32, h: u32) -> Result<()
         syscall(ViSyscall::GpuFlush, pixels.as_ptr() as usize, pixels.len(), xy, wh)
     };
     if ret >= 0 { Ok(()) } else { Err(SyscallError::Unknown) }
+}
+
+/// Play raw PCM frames on the VirtIO sound output device (blocking).
+///
+/// Frames must be signed 16-bit little-endian, 2 interleaved channels (L, R) at
+/// 44100 Hz — i.e. 4 bytes per frame. Blocks until every frame has been handed to
+/// the device. Returns the number of bytes played (0 when there is no sound
+/// device or the transfer failed). Requires `AudioPlay` in `declare_syscalls!`.
+pub fn sys_audio_play(pcm: &[u8]) -> usize {
+    // SAFETY: pcm is a valid immutable slice; the kernel validates the pointer and
+    // length, and reads exactly `pcm.len()` bytes from it.
+    let ret = unsafe {
+        syscall(ViSyscall::AudioPlay, pcm.as_ptr() as usize, pcm.len(), 0, 0)
+    };
+    if ret > 0 { ret as usize } else { 0 }
 }
 
 /// Set or move the VirtIO GPU hardware cursor.

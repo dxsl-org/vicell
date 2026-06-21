@@ -74,9 +74,13 @@ fn boots_to_shell_prompt() {
         qemu.output_contains("user_hello") || qemu.output_contains("U-mode"),
         "ring-3 user task did not run"
     );
-    // Phase 13/14/16: services spawned via SpawnFromPath.
-    assert!(qemu.output_contains("/bin/vfs"), "VFS service did not spawn");
-    assert!(qemu.output_contains("/bin/shell"), "shell did not spawn");
+    // Phase 13/14/16: services spawned via SpawnFromPath. Assert on the
+    // userspace service banners (emitted via print_user_log → direct UART),
+    // NOT the loader's "[loader] SpawnFromPath: /bin/..." line — that is a
+    // log::info the kernel suppresses once it drops to Warn after early boot,
+    // so it is absent from steady-state output.
+    assert!(qemu.output_contains("VFS Service"), "VFS service did not spawn");
+    assert!(qemu.output_contains("Shell Started"), "shell did not spawn");
 }
 
 /// Phase 04/13: the embedded FAT16 image must mount (regression guard for the
@@ -1493,6 +1497,10 @@ fn input_keyboard_e2e() {
     qemu.wait_for("ViCell >", BOOT_TIMEOUT)
         .unwrap_or_else(|e| panic!("shell not reached: {e}\n--- output ---\n{}", qemu.dump()));
 
+    // Spawn robot-dashboard manually from shell, as init no longer spawns it
+    // to avoid input focus conflict with DOOM.
+    qemu.send_line("robot-dashboard &");
+
     // Wait for robot-dashboard to claim input focus.
     // robot-dashboard logs "[robot-dashboard] input focus granted" after its
     // request_input_focus() loop succeeds.
@@ -1553,6 +1561,9 @@ fn input_bare_cell() {
     qemu.wait_for("ViCell >", BOOT_TIMEOUT)
         .unwrap_or_else(|e| panic!("shell not reached: {e}\n{}", qemu.dump()));
 
+    // Spawn input-test manually from shell
+    qemu.send_line("input-test &");
+
     // Wait for input-test to acquire focus (it retries until it steals from
     // robot-dashboard, which gets it first).
     qemu.wait_for("[input-test] focus granted", 20)
@@ -1600,7 +1611,7 @@ fn posix_shim_getentropy() {
 /// Tier 1b: BSD socket shims (socket / connect / send / recv / close) via Net IPC.
 ///
 /// Starts a TCP echo server on host port 10009 (matches `ECHO_PORT` hardcoded in
-/// `cells/apps/posix-shim-test/src/main.rs`). QEMU SLIRP routes guest→10.0.2.2:10009
+/// `cells/tests/posix-shim-test/src/main.rs`). QEMU SLIRP routes guest→10.0.2.2:10009
 /// to host→127.0.0.1:10009. Expects "[posix-shim] POSIX-NET: OK".
 #[test]
 fn posix_shim_net() {

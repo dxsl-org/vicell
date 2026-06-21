@@ -162,9 +162,12 @@ pub struct Task {
     /// Granted when manifest declares `hypervisor = true` AND the firmware reported H-ext.
     pub hypervisor_cap: Option<super::cap::HypervisorCap>,
 
-    /// MMIO peripheral access (GPIO or UART).  `true` if the ELF manifest
-    /// declared `gpio` or `uart` cap; grants access to `sys_request_mmio`.
-    pub mmio_cap: bool,
+    /// MMIO device-class capability bitmask (`DEV_GPIO` / `DEV_UART` from
+    /// [`crate::resource_registry`]). Set from the ELF manifest's `gpio`/`uart`
+    /// flags. A cell may `sys_request_mmio` only ranges whose device class is
+    /// present here — a GPIO-only cell cannot claim the UART window (this is the
+    /// parameterized form of the old `mmio_cap: bool`). `0` = no MMIO access.
+    pub mmio_devices: u8,
 
     /// Block-I/O partition range grants (Milestone 2.5 P03) — bitmask:
     /// bit 0 = P1 FAT32 (`MANIFEST_FLAG_PART_DATA`), bit 1 = P4 littlefs
@@ -246,7 +249,7 @@ impl Task {
             network_cap:    None,
             spawn_cap:      None,
             hypervisor_cap: None,
-            mmio_cap:       false,
+            mmio_devices:   0,
             block_regions:  0,
             priority: api::TaskPriority::Normal as u8,
             syscall_allowlist: u64::MAX, // permit-all until ELF section is read

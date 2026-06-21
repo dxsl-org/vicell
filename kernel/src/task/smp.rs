@@ -98,6 +98,15 @@ pub fn start_secondaries() {
 #[cfg(not(target_arch = "riscv64"))]
 pub fn start_secondaries() {}
 
+/// Returns `true` when the RT hart (hart 1) successfully came online.
+///
+/// Used by the scheduler to fall back to hart 0 on single-hart systems
+/// (e.g. QEMU without `-smp 2`) so RT-priority tasks still get scheduled.
+#[inline]
+pub fn is_rt_hart_online() -> bool {
+    HART_ONLINE[HART_RT].load(core::sync::atomic::Ordering::Relaxed)
+}
+
 /// Entry point for secondary harts, called from `_secondary_entry` asm.
 ///
 /// a0 = hart_id (set by OpenSBI per SBI HSM §9.1.1).

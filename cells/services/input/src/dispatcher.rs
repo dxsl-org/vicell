@@ -64,11 +64,6 @@ impl Dispatcher {
         if self.focused == 0 {
             return; // no focus — drop silently
         }
-        {
-            use alloc::format;
-            let msg = format!("[input-svc] dispatch to TID {}", self.focused);
-            ostd::io::println(&msg);
-        }
         let mut buf = [0u8; INPUT_EVENT_IPC_SIZE + 1];
         buf[0] = INPUT_EVENT_OPCODE;
         let mut payload = [0u8; INPUT_EVENT_IPC_SIZE];
@@ -77,9 +72,10 @@ impl Dispatcher {
 
         if let SyscallResult::Err(_) = sys_send(self.focused, &buf) {
             // Focused cell has exited — park (focused=0) until next SetFocus.
-            ostd::io::println("[input-svc] focused cell dead — clearing focus");
             self.focused = self.fallback_tid; // fallback_tid is 0
         }
+        // NOTE: no per-dispatch logging — it would print a line on the shared
+        // console for every keystroke, burying the shell prompt the user types at.
     }
 }
 

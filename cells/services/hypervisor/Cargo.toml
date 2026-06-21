@@ -12,3 +12,6 @@ types  = { path = "../../../libs/types" }
 api    = { path = "../../../libs/api" }
 ostd   = { path = "../../../libs/ostd" }
 vm-fdt = { workspace = true }
+
+[build-dependencies]
+cell-build = { path = "../../../libs/cell-build" }

@@ -2,7 +2,7 @@
 //!
 //! Boots a shell-test kernel (compiled with `app-shell --features shell_test`)
 //! and waits for the `[shell-test] ALL TESTS PASSED` marker.  The marker is
-//! printed by `cells/apps/shell/src/shell_test.rs` after all 9 scenarios pass.
+//! printed by `cells/tools/shell/src/shell_test.rs` after all 9 scenarios pass.
 //!
 //! Prerequisites:
 //!   bash scripts/build-shell-test-ci.sh

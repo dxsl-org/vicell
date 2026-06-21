@@ -61,12 +61,15 @@ impl SurfaceState {
     /// Used by `CREATE_SURFACE` before the app attaches a Grant.  Preserves
     /// compatibility with the legacy `WRITE_PIXELS` path.
     pub fn new(x: i32, y: i32, w: u32, h: u32, owner: usize) -> Self {
-        let len = (w * h * 4) as usize;
-        let pixels = alloc::vec![0u8; len].into_boxed_slice();
+        // No eager pixel buffer. The Grant path (attach_grant) is the standard flow
+        // and replaces `source` immediately after CREATE_SURFACE, so pre-allocating
+        // w*h*4 here is wasted — and for a full-screen surface (3 MiB at 1024×768) it
+        // would briefly sit on top of the compositor's own framebuffers and OOM its
+        // 8 MiB cell heap. The legacy WRITE_PIXELS path grows the buffer lazily.
         Self {
             x, y, w, h,
             fmt: PixelFormat::Bgra8888,
-            source: PixelSource::Owned(pixels),
+            source: PixelSource::Owned(alloc::vec::Vec::new().into_boxed_slice()),
             damage: None,
             owner,
         }
@@ -84,12 +87,14 @@ impl SurfaceState {
         self.source = PixelSource::Grant { ptr, reg_id };
     }
 
-    /// Detach the Grant and fall back to a blank Owned buffer.
+    /// Detach the Grant and fall back to an empty Owned buffer.
     ///
     /// Must be called when the app sends `DETACH_GRANT`, before it frees the Grant.
+    /// We do NOT eagerly allocate a full-screen replacement — a large surface would
+    /// OOM the compositor heap, and a surface is almost always destroyed right after
+    /// detach. The legacy WRITE_PIXELS path regrows the buffer lazily if reused.
     pub fn detach_grant(&mut self) {
-        let len = (self.w * self.h * 4) as usize;
-        self.source = PixelSource::Owned(alloc::vec![0u8; len].into_boxed_slice());
+        self.source = PixelSource::Owned(alloc::vec::Vec::new().into_boxed_slice());
     }
 
     /// Read access to pixel data — either from the Grant or the Owned buffer.
@@ -114,6 +119,14 @@ impl SurfaceState {
     /// Silently ignores writes on Grant surfaces — those are written directly by
     /// the app cell.
     pub fn write_pixels(&mut self, px: i32, py: i32, pw: u32, ph: u32, data: &[u8]) {
+        // Lazily allocate the legacy owned buffer to full surface size on first use
+        // (new()/detach_grant() leave it empty to avoid eager full-screen allocs).
+        let needed = (self.w * self.h * 4) as usize;
+        if let PixelSource::Owned(b) = &self.source {
+            if b.len() < needed {
+                self.source = PixelSource::Owned(alloc::vec![0u8; needed].into_boxed_slice());
+            }
+        }
         let buf = match &mut self.source {
             PixelSource::Owned(b) => b,
             PixelSource::Grant { .. } => return,

@@ -55,6 +55,10 @@ pub enum AuditEvent {
     /// A cell invoked a syscall not present in its `__ViCell_syscalls` allowlist.
     /// Payload: `encode_u32x2(caller_tid, allowlist_bit)`.
     SyscallDenied = 14,
+    /// A cell's ELF image was measured at spawn (integrity measurement, IMA-style).
+    /// Payload: `encode_u32x2(tid, sha256_prefix_le_u32)`. The full digest and the
+    /// rolling aggregate live in [`crate::measurement_log`].
+    CellMeasure = 15,
 }
 
 struct AuditRing {

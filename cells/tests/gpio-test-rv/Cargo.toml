@@ -1,0 +1,18 @@
+[package]
+name = "gpio-test-rv"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+types              = { path = "../../../libs/types" }
+api                = { path = "../../../libs/api" }
+ostd               = { path = "../../../libs/ostd" }
+driver-gpio-sifive = { path = "../../drivers/gpio-sifive" }
+hal-gpio           = { path = "../../../hal/traits/gpio" }
+
+[[bin]]
+name = "gpio-test-rv"
+path = "src/main.rs"
+
+[build-dependencies]
+cell-build = { path = "../../../libs/cell-build" }

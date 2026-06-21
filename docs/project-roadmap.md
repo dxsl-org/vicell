@@ -3,7 +3,7 @@
 **Project**: ViCell (Jarvis Hybrid OS)  
 **Current Version**: 0.2.1-dev (Mycelium Era)  
 **Current Phase**: Phase 1 - Core Stability (Phase 23 complete) · **Active Stage**: G1 (Robot & Embedded)
-**Last Updated**: 2026-06-13 (Phase 32 SMP, TLS, RTC, MMC, Compositor, Milestone 2.1/2.5 VFS all marked complete; ARM64 + x86_64 full bring-up verified)
+**Last Updated**: 2026-06-21 (§G Security Platform expanded with TWO deep dives: hardware-isolation — CFI/MPK-PKS/WorldGuard-Smmtt/IOMMU-IOPMP/confidential-computing + 🔴 IOMMU-passthrough DMA gap; and §G.2 permission-model + attestation — parameterized caps/delegation/revocation/operator-policy/DICE/OpenTitan. See docs/research/research-hardware-isolation.md + research-cell-security-permissions.md)
 
 ---
 
@@ -67,8 +67,10 @@ ViCell ships in two product stages defined by target hardware. The mapping princ
 | WASM Tier-2 MVP (wasmi + 4 vi.* imports + fuel) | Phase 28 | ⚠️ experimental only — DROPPED from official stack 2026-06-06; revisit G2 multi-tenant only | G1 (legacy) |
 | WASM WASI 2.0 Component Model (+ePMP) | Phase 28/31 | ⚠️ dropped — same decision | **G2 (dropped)** |
 | 🆕 Tier 3 kernel prep — H-extension HS-mode boot (RISC-V) | *new* | ✅ COMPLETE (2026-06-07) — cpu_features.rs DTB detection + HypervisorCap ZST + TCB field; see .agents/260607-1420-h-ext-hypervisor-cap/ | **G1 prep** (non-breaking) |
-| 🆕 Tier 3a Security Silo (Stage-2 fenced bare-metal guest) | *new* | 📋 | G1-optional |
+| 🆕 Hardware Key Isolation (Silo — Tier 1 ext., G2 ARM64/x86) | *new* | ✅ COMPLETE 2026-06-16 — SiloHandle API shipped; reclassified from Tier 3a → Tier 1 capability (not a VM tier) | G2 |
 | 🆕 Tier 3b Linux VM — ARM64 EL2 VMM (all 10 phases) | Phase 31 | ✅ COMPLETE 2026-06-16 — EL2 hypervisor boots Alpine 3.21.3 aarch64, multi-arch ENOSYS stubs, CI smoke job | **G2** |
+| 🆕 **Tier 3b VirtIO-GPU Backend** (Linux VM Graphics / Browser Support) | M2.4 ext. | 📋 | **G2** |
+| 🆕 **Enterprise App Isolation** — Wine/Proton-in-Linux-VM Cell + bare Windows VM Cell | new | 📋 G3 on-demand (gated on paying customer + virtio-gpu) | **G3** |
 | 🆕 **SMP multi-core scheduler + work-stealing** | Phase 32 | ✅ COMPLETE 2026-06-09 — SBI HSM hart_start/send_ipi, per-hart ViHartLocal via tp CSR, per-hart ready queues + work stealing, RT cells pinned to hart 1, WaitForEvent (217) | **G2** |
 | Compositor + GPU desktop (full) + mouse | M2.4 + M2.2 full | 📋 | G2 |
 | 🆕 **ViUI v1** (Elm model, FramebufferCanvas, GlyphAtlas, P01–P07) | new | ✅ Done 2026-06-08 — foundation only, design superseded | **G2 prep** |
@@ -123,9 +125,8 @@ End-to-end loop: sensor read → compute → actuator write over GPIO/CAN, with 
 **Status**: 🆕 DESIGNED — spec at [specs/05-application.md §4](specs/05-application.md)
 **VMM**: Custom **minimal VMM** (~9K LOC Rust, built from scratch as Tier 1 cell). microvm profile — MMIO bus, no PCI. VirtIO blk/net/console backends forward to ViCell VFS/Net IPC. No tokio, no mmap — SAS-native. (crosvm fork rejected: ~75K LOC, tokio+mmap incompatible with SAS cell constraints.)
 
-Three sub-items:
+Two sub-items (Silo reclassified — see Hardware Key Isolation entry above):
 - **Tier 3 kernel prep** `[G1-prep, non-breaking]`: RISC-V H-extension detect + HS-mode boot path (`hal/arch/riscv/hypervisor.rs`, ~200 LOC). `HypervisorCap` ZST token gates hypervisor syscalls (follows existing BlockIoCap/NetworkCap pattern). Transparent fallback to S-mode if H-ext absent.
-- **Tier 3a Security Silo** `[G1-optional]`: bare-metal Rust no_std guest in Stage-2 fenced memory. No Linux needed. Robot TLS private key isolation use case.
 - **Tier 3b Linux VM** `[G2, Phase 31]`: minimal VMM, boot Alpine Linux, VirtIO → ViCell IPC. Enables `apt install nginx`. CPU overhead ~5-10% (H-extension hardware virt), disk I/O ~20-40% (VirtIO roundtrip) — acceptable for management plane.
 
 > See [specs/05-application.md §6](specs/05-application.md) for wrong-path list (no QEMU-as-cell, no Type-1 hyp, no crosvm fork, no Android in G2).
@@ -163,6 +164,24 @@ SMP scales across N cores · windowed desktop + mouse · hot migration with no d
 - 🆕 **P0 UART input delivery to apps** `[G1]` — ✅ COMPLETE (2026-06-15). UART bytes now relayed to input service via EV_ASCII opcode (0x04) on all arches; ARM64 integration test green. Apps can register for input focus and receive keyboard events. See [.agents/260615-p0-uart-input-delivery/](../agents/) for details.
 - **Display / GUI** — 📋 see Milestone 2.4 (compositor/GPU, HMI feature-gate). Blocks user-facing graphical apps.
 
+#### Shell-on-screen: 3 tiers (hiện tại shell chỉ trên UART serial — cần build thêm để hiện trên màn hình HDMI)
+
+> **Tại sao cần**: trên board thật cắm màn hình, shell tương tác hiện tại yêu cầu USB-UART adapter. Các tier dưới đây giải phóng board khỏi serial cable.
+
+- 📋 **Mức A — fb_console keyboard relay** `[G1-ext]` — Kernel `fb_console` đọc key events từ input service → relay sang UART shell. Màn hình hiện output shell (font cố định, không scroll). Nhanh: ~1 tuần, không cần Terminal Cell. Dùng cho kiosk/panel không cần cable.
+  - Phụ thuộc: input service ✅, fb_console ✅ (chỉ cần nối keyboard relay)
+  - Giới hạn: font cố định, không scroll, không ANSI color — "shell trên TV" cơ bản.
+
+- 📋 **Mức B — Terminal Emulator Cell (VT100)** `[G2 Desktop]` — App cell VT100 emulator: render text lên compositor surface (ViUI font rendering + scrollback), nhận keyboard từ input service, IPC pipe output shell qua relay syscall. Tương đương `xterm` trên Linux — full ANSI color, resize, scrollback.
+  - Phụ thuộc: Mức A + compositor grant surfaces ✅ + ViUI text rendering ✅
+  - Effort: ~3-4 tuần
+  - Mở khóa: shell tương tác đầy đủ trên HDMI không cần cable, đúng nghĩa "shell như Linux trên màn hình".
+
+- 📋 **Mức C — SSH remote access** `[G2 Server]` — Tier 3b Alpine Linux VM cài `dropbear`/`tinyssh`; forward cổng SSH qua VirtIO net. Remote shell từ PC khác qua mạng.
+  - Phụ thuộc: Tier 3b Linux VM ✅ + VirtIO net ✅
+  - Effort: ~1 tuần (cấu hình, không code kernel)
+  - Không cần nếu đã có Mức B (Mức C chỉ thêm remote access).
+
 ### C. Real-world connectivity `[G1 priority · shared]`
 - 🆕 **TLS 1.3 for the net stack** `[shared, G1-priority]` — ✅ COMPLETE (Phase TLS-01). Network service now supports TLS 1.3 client handshake via sys_get_random(214) entropy + three TLS IPC opcodes (0x30/0x31/0x32). HTTPS demo cell connects to example.com:443, validates cert chain, issues HTTP GET. Foundation for MQTT over TLS, secure device communication, IoT protocols.
 - 🆕 **RTC / wall-clock time** `[G1]` — ✅ COMPLETE (2026-06-07). Goldfish RTC (RISC-V/ARM64) + CMOS RTC (x86_64); GetTime op=2/3 for epoch_ns/epoch_secs; date binary shows real UTC time with fallback to uptime. See [.agents/260607-1719-rtc-wall-clock/plan.md](.agents/260607-1719-rtc-wall-clock/plan.md)
@@ -179,9 +198,11 @@ SMP scales across N cores · windowed desktop + mouse · hot migration with no d
 - ✅ **`embedded-io` traits for ostd** `[shared, COMPLETE 2026-06-15]` — `embedded_io::Read` impl'd for `ostd::fs::File` + `Stdin`; `embedded_io::Write` impl'd for `Stdout` + `File` (via `VfsRequest::Append` IPC, chunked at 400B). Opens the no_std embedded-crate ecosystem. **Gate for high-level cell libraries: cleared.**
 - ✅ **`HashMap` in ostd prelude** `[shared, COMPLETE 2026-06-15]` — `hashbrown` already in `libs/ostd/Cargo.toml`; `ostd::collections::HashMap`/`HashSet` exported; re-exported in `ostd::prelude`. Was already shipped — roadmap was stale.
 - 🆕 **ViCell App SDK** `[shared, G1-tail]` — 📋 Apps today write raw syscall boilerplate (declare_manifest, sys_recv dispatch loop, manual service lookup). Need a structured application framework layer on top of `ostd`: `AppContext` (unified entry, service discovery, lifecycle), typed event loop (`AppEvent::Message/Shutdown`), ergonomic IPC patterns. The threading model (Cell spawn = Actor, not `std::thread`) must be documented clearly. This is the primary unlock for "real native apps" — equivalent to what SwiftUI/Android lifecycle did for mobile. Effort: ~2 weeks. Depends on: Name service (registry/lookup) + embedded-io traits.
+- 🆕 **Cell `--help` / help UI** `[shared, G1-tail]` — 📋 No cell currently documents itself at runtime. Standard: CLI cells parse `--help` as the first spawn arg and print usage/description to stdout then exit; GUI cells (robot-dashboard, compositor) show a Help overlay or menu. Prerequisite: `ostd::args()` helper that reads the spawn-args buffer set by `sys_set_spawn_args` — currently a raw `[u8; 64]` with no typed accessor. Service cells (vfs, net, input) are not user-facing and do not need `--help`. Effort: ~1 day (ostd helper ~30 LOC; each CLI cell adds a `match args[0] { "--help" => { ... } }` guard).
 
 ### E. Ecosystem / distribution `[G2]`
 - ✅ **Tier 1b C library integration** `[shared, COMPLETE 2026-06-13]` — link vendor C/C++ libraries (NPU SDK, mbedTLS, SQLite, legacy firmware) into Rust cells via `vicell-libc` (Newlib + POSIX shim). Shim in `libs/api/src/posix.rs`: malloc/free, strings, file I/O, time → ViSyscall, getentropy → `ViSyscall::GetRandom` (op 214), socket/connect/send/recv/close → typed Net IPC (postcard). ARM64 `svc #0` ABI added; send() postcard decode bug fixed; `_time()` op code fixed (op=3 = epoch seconds). Integration tests: `posix_shim_getentropy` + `posix_shim_net` in `tests/integration/tests/boot.rs`. No `fork` by design. Primary use case: hardware NPU SDKs (RKNN/Hailo/K230). Plan: `.agents/260613-0520-tier1b-posix-shims/`. See [specs/05-application.md §3](specs/05-application.md).
+- 🆕 **Tier 1b Zig Support** `[G1/G2]` — 📋 Support compiling freestanding Zig binaries linking to `vicell-libc` (POSIX shim) via C-Interop. Validates the SAS architecture by running a modern memory-safe language natively alongside C/C++. First target: Tetris.zig port.
 - ✅ **C Runtime: picolibc libm cherry-pick** `[G1, COMPLETE 2026-06-17]` — 9-module split of posix.rs (alloc/strings/sysio/entropy/net/math/stdio_fmt/stdio/setjmp), 96+ C99 math symbols via libm crate, full stdio family (FILE/fopen/fclose/fread/fwrite), naked-asm setjmp/longjmp for RV64/ARM64 (wasm32 stub). Zero picolibc dependency. Enables: DOOM, codec libs (zlib/libpng), MicroPython/Lua math. c-math-smoke cell (12 scenarios) verifies all three stacks end-to-end.
 - 🆕 **C Runtime: mlibc migration** `[G2]` — 📋 Replace `posix.rs` surface with [mlibc](https://github.com/managarm/mlibc) (MIT, purpose-built for new OSes). Implement ~20 mlibc `sysdeps/` functions mapping ViCell primitives (`vm_map` → frame allocator, `open/read/write` → VFS IPC, `clock_get` → sys_get_time, `socket` → Net IPC). posix.rs code is reused as sysdeps — not a rewrite. mlibc provides: correct printf/scanf (Grisu3 float), full stdio, pthread stubs, locale. **Does NOT unlock fork-based software** — nginx/PostgreSQL/CPython full → always Tier 3 VM (fork is architecturally incompatible with SAS). Unlocks: broader single-process C apps, C-native ViCell app development. Effort: ~1–2 weeks.
 - **WASM Tier-2** — Phase 28 MVP ✅ (wasmi + 4 imports). **Tier 2 dropped from official stack** (2026-06-06). Phase 28 code retained under `feature = "wasm-experimental"` only — Phase 28-5 and WASI 2.0 migration cancelled. Revisit only if G2 becomes multi-tenant platform (Cloudflare Workers–style) after WASI 1.0 freezes (late 2026/early 2027).
@@ -242,7 +263,112 @@ MANAGEMENT PLANE (ecosystem, Tier 3b):
 
 See also: [.agents/reports/brainstorm-260606-2016-g2-riscv-server-strategy.md](.agents/reports/brainstorm-260606-2016-g2-riscv-server-strategy.md) · [docs/research/research-arm64-g2-hardware.md](research/research-arm64-g2-hardware.md) · [docs/research/research-riscv-ai-ecosystem.md](research/research-riscv-ai-ecosystem.md)
 
-### G. Chipset & Driver Support Matrix
+### G. Security Platform `[G2]`
+
+> Added 2026-06-19 after Security Model design session. Expanded 2026-06-21 with two deep dives.
+> **Full menu + status + citations:**
+> [research-hardware-isolation.md](research/research-hardware-isolation.md) — *memory* isolation (Cell can't read another Cell's memory; rated vs the SAS "no-TLB-flush-per-Cell-switch" criterion), and
+> [research-cell-security-permissions.md](research/research-cell-security-permissions.md) — *permission* model + hardware attestation (Cell can only do what it's granted + can prove its identity).
+> The two are orthogonal axes.
+
+**Three-layer model:**
+```
+Layer 1 — LBI (Rust compiler)       → Cell↔Cell isolation            [DONE]
+Layer 2 — Hardware supplement        → spatial + CFI + DMA + Spectre  [G2 backlog]
+Layer 3 — Silo / VM (Stage-2 hw)    → Key/VM isolation from kernel    [DONE, G2]
+```
+
+> **Memory-safety needs 3 axes, not 1.** The original list (MTE/MPK/PMP) is all *spatial*. Forward-edge **CFI**
+> and **DMA isolation** are equally load-bearing — and CFI is a *prerequisite* for MPK (see CFI item below).
+
+**🔴 CRITICAL gap (already in code):**
+- 📋 **DMA isolation — IOMMU is in passthrough mode** `[G1-hw / G2]` — Track B shipped IOMMU/VT-d as `DDTP MODE=1`
+  bare passthrough (IOVA==PA) = **zero DMA isolation**. In SAS the Cell *is* the driver: a Cell holding a
+  DMA-capable peripheral can read/write all physical memory with no `unsafe`. **MMIO ownership ≠ DMA
+  authorization** — track DMA capability separately. Work: IOMMU → translate mode + per-device IOVA→PA tables;
+  `sys_grant_dma(device, phys, size)`; RISC-V **IOPMP** for on-chip DMA engines that bypass the SMMU. Must land
+  before any Cell gets a real DMA peripheral on hardware. (Thunderclap NDSS'19 bypassed *enabled* IOMMUs.)
+
+**Backlog items:**
+
+- 📋 **rustc TCB documentation** `[immediate]` — Document that rustc IS the Trusted Computing Base. Add to `docs/specs/00-context.md`. A compromised compiler bypasses all LBI guarantees — this must be explicit in threat model.
+- 📋 **Forward-edge CFI (BTI / CET-IBT)** `[G2, prerequisite for MPK]` — Spatial protection doesn't stop a corrupted indirect branch. PAC covers backward edge only; pair with **BTI** (ARM `+bti,+pac-ret`) / **CET IBT+Shadow Stack** (x86 `CONFIG_X86_KERNEL_IBT`) / **Zicfilp+Zicfiss** (RISC-V, ratified 2024, await silicon). ⚠️ **MPK is NOT a security boundary without CFI**: `WRPKRU` is unprivileged; a JOP gadget defeats all keys (ERIM / PKU-Pitfalls). Enable CFI *before* any MPK domain.
+- 📋 **ARM64 MTE (Memory Tagging Extension)** `[G2]` — Pointer tags detect use-after-free. Requires RK3588/ARMv8.5-A. HAL trait `ViMte::tag_region(vaddr, color)` + kernel integration. No virtualization — Tier 1. ⚠️ **Hardening only, not a boundary** — probabilistic (1/16) and defeated by speculative gadgets (TikTag 2024). Prior art: SPARC ADI (2015).
+- 📋 **x86 MPK/PKU + PKS** `[G2]` — Coarse **tier** domains (3 keys: kernel-trusted / service / app), NOT per-Cell (16-key hard limit → use tiers or libmpk multiplexing). `WRPKRU` ~20 cycle, no TLB flush. **PKS** (Intel Ice Lake+) protects kernel metadata (Cell Registry, Frame Allocator). AMD has no PKS → feature-gate. Requires CFI (above).
+- 📋 **RISC-V PMP / Smepmp** `[G1-ext / G2]` — Under `satp=Bare` (ViCell SAS), PMP writes need **no** `sfence.vma` → SAS-safe; cost is O(N) CSR writes/switch. Smepmp (ratified) adds M-mode self-protection (MML/MMWP). Per-Cell PMP for C-tier (Tock/Hubris dual-tier model: Rust Cells = no PMP, C-tier = PMP-gated).
+- 📋 **RISC-V WorldGuard / Smmtt** `[G2 future, watch]` — Beyond PMP, both isolate domains in one address space **without TLB flush**. **WorldGuard** (SiFive→RISC-V Int'l, QEMU 4/2025): 1 WID CSR write/switch, ≤32 worlds, propagates to bus fabric (covers DMA too). **Smmtt/Smsdid** (draft): per-SDID physical-page access control, SDID switch + MTT-fence (lighter than SATP). Design Cell scheduling + grant API to be SDID/WID-aware now. Available when SiFive P/E-series silicon ships.
+- 📋 **Confidential computing for Tier 3** `[G2/G3]` — TDX/SEV-SNP (x86), **ARM CCA/RME/GPT** (ARMv9.3, Fujitsu Monaka ~FY2027) protect against a *compromised kernel/hypervisor* — a threat LBI does NOT cover. Make the Tier 3 `VmHandle` ABI CC-neutral now so attested multi-tenant slots in without protocol redesign (extends the Silo "safe even if kernel compromised" principle).
+- 📋 **Cell binary signing** `[G2]` — Ed25519/P-256 signature per Cell ELF verified by loader before spawn. `kernel/src/loader.rs` is the gate. Signing key management via Key Management Service (KMS) Cell using Silo API.
+- 📋 **Key Management Service (KMS Cell)** `[G2]` — Tier 1 service cell wrapping `SiloHandle`. Exposes `sys_lookup_service(service::KMS)` + typed IPC for Wrap/Unwrap/Derive keys. First client: TLS stack (replace hardcoded keys).
+
+#### G.2 Permission model + attestation `[G1/G2 — needs its own plan]`
+
+> Added 2026-06-21 from the per-Cell security deep dive ([research-cell-security-permissions.md](research/research-cell-security-permissions.md)).
+> Current state: the manifest is one `flags: u8` (FULL), coarse, granted all-at-spawn, no scoping/delegation/revocation/consent — i.e. **Android pre-6.0 install-time model**. The four capability-OS invariants (no ambient authority · explicit delegation · monotonic downgrade · revocable) are all violated today. Reference: Fuchsia `.cml` routing, seL4 badges, Genode session-args, Capsicum one-way ratchet.
+> ⚠️ **Headless-robot reframe:** consent dialogs are a UX primitive, not a security primitive. G1 (headless) → signed **operator/fleet policy** (ROS 2 SROS2-style), NOT dialogs. G2 HMI → optional TCC-style consent for *sensitive caps only*, with anti-fatigue rules.
+> Hard invariant: manifest = **ceiling not floor** (iOS entitlement lesson); **only the kernel enforces** (consent feeds the syscall-boundary check — where TCC repeatedly failed); LBI already closes the TCC "permission-laundering via injection" hole.
+
+- 🟡 **Parameterized capabilities** `[G1, no Law 1]` — Attach scope params so a cap carries WHICH resource, not just yes/no (= Genode session-args / Capsicum CAP_IOCTL whitelist).
+  - ✅ **Device-scoped MMIO (2026-06-21)** — `mmio_cap: bool` → `mmio_devices: u8` (`DEV_GPIO`/`DEV_UART` in `resource_registry`); `request_mmio` now requires the range's device class ∈ the cell's declared devices. Closes the gap where a GPIO-only cell could claim the UART window. Kernel-only, no ABI change (manifest already separates gpio/uart). Compiles clean on riscv64 + aarch64. Files: `resource_registry.rs`, `task/tcb.rs`, `loader.rs`, `task/syscall.rs`.
+  - 📋 BLOCK_IO `lba_range` — partly present (`block_regions` partition bitmask + `check_block_access`); extend to arbitrary LBA ranges if needed.
+  - 📋 NETWORK `proto_mask + host/port allowlist` — enforced in the net **service** cell (not kernel — net is a service), so it ships with net-cell work, not here.
+  - ⚠️ **GPIO per-pin is NOT kernel-enforceable** — cells own the GPIO MMIO directly (app-owns-MMIO, no broker), so the kernel cannot gate individual pins without a GPIO broker cell (deliberately rejected). Device-class is the enforceable granularity.
+  - 📋 General `__ViCell_cap_args` ELF section — only needed for params the kernel can't derive from existing flags; deferred until a concrete case appears.
+- 📋 **Spawn-time cap intersection (delegation)** `[G1]` — `sys_spawn(path, granted)` → kernel grants `min(granted, spawner_caps)`; a Cell cannot hand a child a cap it lacks → chain-of-custody, kills confused-deputy (Fuchsia/Genode monotonic downgrade). `init` holds the routing table (`.cml`/`init.xml` analog).
+- 📋 **Runtime revocation** `[G1/G2]` — `CapHandle` kernel object; `sys_cap_revoke(handle)` clears `task.cap`; next syscall → `ViError::CapRevoked`; Cell gets `AppEvent::CapRevoked`. Simpler than seL4 CDT (no cap-to-cap derivation yet).
+- 📋 **Operator-policy consent (G1)** `[G1]` — Operator signs a policy file (TOML+Ed25519) at fleet provision; kernel verifies vs fleet root CA (VIFS1) and spawns with `manifest ∩ policy`. Revoke = push new policy + hot-revoke. SROS2 semantics at the kernel level. No dialog.
+- 📋 **Consent-broker Cell (G2 HMI)** `[G2]` — Trusted Cell renders TCC-style dialog for *sensitive caps only* (camera/mic/storage), purpose-string required, signed consent-db; anti-fatigue (first-use only, one-time option, auto-revoke after N days). After ViUI HMI stable.
+- ✅ **Per-Cell measurement (2026-06-21)** `[G1]` — `spawn_from_path()` now hashes the ELF (`SHA256`) before the cell is scheduled and records it in an append-only measurement log + rolling aggregate (`agg = SHA256(agg‖hash)`, the value a future DICE/EAT token signs). Linux IMA model. New files: `kernel/src/sha256.rs` (self-contained, NIST-vector-verified), `kernel/src/measurement_log.rs`; audit event `CellMeasure = 15`. Evidence only (orthogonal to Cell-signing enforcement). Compiles clean riscv64 + aarch64.
+- 📋 **DICE/RIoT attestation chain** `[G1/G2]` — TPM-free layered attestation (`CDI_n = HKDF(CDI_{n-1}, HASH(layer_n))`), AliasKey signs an EAT (RFC 9711) per RATS (RFC 9334). No Rust no_std DICE crate yet → build from `hkdf`+`ed25519-dalek`+`coset`. Fleet verifier = ARM **Veraison** (open-source). Sealed storage: AEAD key from `CDI_final` held in **Silo** (closes the CDI-in-RAM hole).
+- 📋 **Hardware RoT — OpenTitan backing for Silo** `[G2/G3]` — `ostd::silo::SiloHandle` API stays; backend evolves from Stage-2 mailbox → **OpenTitan** (Earl Grey discrete over SPI, or Darjeeling IP in a custom SoC). OpenTitan (Apache 2.0, RISC-V Ibex, production silicon) is the open-source hardware realization of what Silo approximates in software. Caliptra (DICE measurement) complements it for custom SoCs.
+
+> **Sequencing:** P1 parameterized caps → P2 delegation → P3 per-Cell measurement → P4 DICE+sealed storage → P5 operator policy → P6 consent-broker (G2) → P7 remote attestation. Hardware secure-boot (eFuse) is G2 (untestable on QEMU — do not block G1). **Needs a dedicated `/hc-plan`** (touches kernel + ABI + multi-phase).
+
+### H. Enterprise App Isolation `[G3 — on-demand]`
+
+> Added 2026-06-21. Chỉ triển khai khi có khách hàng doanh nghiệp/chính phủ cam kết với contract. Đây là compliance bridge, không phải product feature. Cả hai track đều gated trên `virtio-gpu` (G2) và G2 graduation.
+
+**Nguyên lý cốt lõi:** App nguy hiểm/không tin tưởng chạy trong VM Cell. Nếu app crash hoặc bị exploit → chỉ VM Cell đó chết, ViCell kernel và các Cell khác hoàn toàn không bị ảnh hưởng. Hardware EPT/Stage-2 MMU bảo vệ — đây là hardware isolation thực sự, không phải LBI.
+
+```
+[ViCell kernel]
+  └── [VM Cell — hardware EPT boundary]
+        └── [Linux guest + Wine/Proton]   (Track H1)
+              └── [Windows app]
+        └── [Windows guest]               (Track H2)
+              └── [Windows app + USB token passthrough]
+```
+
+#### H1. Wine/Proton in Linux VM Cell
+- **Status:** 📋 G3 on-demand
+- **Isolation:** hardware EPT/Stage-2 — identical to existing Tier 3b Linux VM guarantee
+- **App compatibility:** ~70% Windows apps (Wine regression list applies)
+- **Hard blockers:** USB token (chữ ký số) PKCS#11 fatal; HTKK .NET crypto không chạy được qua Wine
+- **Use case:** Sandbox Windows apps thông thường không cần token signing
+
+#### H2. Bare Windows VM Cell
+- **Status:** 📋 G3 on-demand
+- **Isolation:** hardware EPT/VT-x hoặc EL2 Stage-2 — cùng level với H1
+- **App compatibility:** ~100% (native Windows guest, không qua Wine)
+- **USB token:** ✅ passthrough qua IOMMU (đã complete Track B 2026-06-16)
+- **Use case:** HTKK + chữ ký số USB + toàn bộ enterprise/compliance app Windows
+- **VMM additions:** ~14-16K LOC (ACPI table gen, UEFI/OVMF pflash, VirtIO-PCI transport, Hyper-V enlightenments)
+- **Feasibility ref:** Cloud Hypervisor (Intel, ~106K LOC Rust) đã boot Windows 10/11 thành công
+- **License:** VDA E3 ≈ $10/user/tháng (hypervisor-neutral) hoặc Windows Server Datacenter
+
+**Điều kiện để build (ALL required):**
+1. `virtio-gpu` shipped (G2) — không có display thì không có GUI app
+2. Khách hàng ký contract và cam kết thanh toán trước
+3. G2 graduation criteria met
+4. Thỏa thuận rõ về licensing model (VDA vs Server DC)
+
+**Không phải:**
+- ❌ Giải pháp né bản quyền Windows — license vẫn cần
+- ✅ Hardware-isolated sandbox: app bị compromised → chỉ VM Cell chết
+
+---
+
+### I. Chipset & Driver Support Matrix
 
 > Decided 2026-06-06. Full analysis: `.agents/reports/brainstorm-260606-2205-chipset-driver-strategy.md`
 
@@ -257,6 +383,17 @@ See also: [.agents/reports/brainstorm-260606-2016-g2-riscv-server-strategy.md](.
 | G2 | x86_64 | QEMU x86_64 virt | x86 PC (when G2 starts) |
 | G3 | ARM64 | Same as G2 demo board (RK3588) | — |
 | G3 | RV64 | — | C930 SoC (2027+, IF H-ext confirmed) |
+
+#### Extended Hardware Testing (Post-Primary Boards)
+
+After validation on the primary boards, ViCell will expand testing to the following hardware to ensure maximum portability and community adoption:
+
+| Stage | CPU arch | Target Board | Purpose |
+|-------|----------|--------------|---------|
+| G1 sub-track | RV64/RV32 | **Milk-V Duo / LicheeRV (Cvitek CV1800B)** | Ultra-low cost embedded testing, dual-core asymmetrical RV64/RV32. |
+| G1 | ARM64 | **Raspberry Pi 4 / 5** | Widespread community adoption, rich I/O driver validation. |
+| G1 | ARM64 | **Pine64 / Quartz64** | Open-source friendly, alternative ARM64 driver validation. |
+| G1 sub-track | RV32 | **ESP32-C3 / ESP32-C6** | Deeply-embedded IoT integration, RTOS determinism on Wi-Fi/MCU boards. |
 
 **QEMU-first policy (G1):** Develop and validate peripheral Driver Cells on QEMU ARM virt (PL061 GPIO, PL011 UART, VirtIO) before buying real SBCs. HAL traits (`ViGpio`, `ViUart`) must be **board-agnostic** from v1 so real-board support adds only a new impl, zero kernel changes.
 
@@ -313,7 +450,7 @@ G3 Level C  →  sys_grant_tensor + TensorBuffer       — needs sys_grant_pages
 
 ---
 
-### H. G2 Application Platform Layers `[G2 — post-G1 foundation]`
+### J. G2 Application Platform Layers `[G2 — post-G1 foundation]`
 
 > **Context (2026-06-14):** Setelah G1 graduation, ViCell sẽ có kernel rất solid nhưng application platform gần như trống. Chỉ kernel team mới viết được app hiệu quả. G2 không chỉ là thêm tính năng kernel — mà là xây dựng toàn bộ platform layer, giống hành trình Linux từ 1991 (kernel) đến 2000 (LAMP stack).
 >
@@ -349,9 +486,29 @@ G3 Level C  →  sys_grant_tensor + TensorBuffer       — needs sys_grant_pages
 | **Python R&D** | Tier 3: full CPython in Linux VM (`apt install python3 pip numpy`) |
 | **Rich apps / ecosystem (G2)** | Tier 1b SDK libs → name service → display → Tier 3 Linux VM |
 | **Real native Rust apps (non-toy)** | ✅ `embedded-io` traits → ✅ `HashMap` in prelude → ✅ App SDK (L1: CellRuntime + app_entry! + typed clients) |
-| **DOOM (proof-of-concept, G1 QEMU)** | verify VirtIO keyboard dispatch → enable `posix` feature flag → link picolibc libm.a → doomgeneric 6-hook port (~1 week) |
+| **DOOM (proof-of-concept, G1 QEMU)** | ✅ **DONE 2026-06-18** — boots + renders first frame on QEMU RV64; doomgeneric 6-hook port; fixed by posix `fseek`/`ftell` + `vsnprintf` `%.Nd` precision + fatfs short-read loop; WAD=Freedoom Phase 1; init auto-spawns compositor+doom |
+| **Tetris-C (scaffold, G1 QEMU)** | 📋 SCAFFOLD DONE 2026-06-19 — Banaxi-Tech/Tetris-OS port via platform hooks (same as DOOM pattern); binary `/bin/tetris-c` (0x44000000 VA); awaits git clone of Tetris-OS source to build; gameplay blocked on source dependency |
 | **nginx / PostgreSQL / CPython full** | Tier 3: Linux VM only (fork/dlopen incompatible with SAS — no libc can fix this) |
 | **Single-process C apps (SQLite, curl, codecs)** | Tier 1b + picolibc libm (G1) or mlibc sysdeps (G2) |
+| **Single-process Zig apps (Games, utils)** | Tier 1b + vicell-libc (C-Interop) |
+
+---
+
+### K. Game Porting & OS Validation Strategy `[Testing]`
+
+Porting simple games using the **C → Lua → Rust** progression is the official strategy to stress-test different layers of the ViCell architecture: `vicell-libc` (Tier 1b), Scripting Runtime (Lua), and the Native App SDK (Rust).
+
+**Roadmap for Game Porting:**
+
+1. **Tetris / Snake (ASCII Terminal Game)**
+   - **Phase 1 (C)**: Port an ASCII version of Tetris or Snake. Tests `vicell-libc` POSIX shim, `stdio`, `malloc`, ANSI escape sequences, **and crucially: non-blocking input (`kbhit`) and timers (`usleep`)**.
+   - **Phase 2 (Lua)**: Rewrite in Lua. Tests VFS file loading, interpreter performance, and event loop polling on SAS.
+   - **Phase 3 (Rust)**: Rewrite in Rust Native. Tests `ostd` and App SDK logic.
+2. **Flappy Bird (Framebuffer 2D)**
+   - **Phase 1 (C)**: Port a simple C version using a shim for `sys_grant_pages`. Tests Compositor zero-copy surfaces and Priority Scheduler latency/jitter.
+   - **Phase 2 (Rust)**: Rewrite natively using ViUI v2 (Reactive Signal Tree).
+3. **Space Invaders (Advanced 2D)**
+   - **Phase 1 (C/Rust)**: Tests handling of multiple concurrent objects, continuous input loops, and higher framerate rendering.
 
 ---
 
@@ -906,6 +1063,7 @@ Note: QEMU TCG VirtIO throughput ~30 MB/s. Sub-100 ms on QEMU requires memory-ba
 - Compositor Cell (window management)
 - Wayland-like protocol
 - 2D graphics rendering
+- **Shell-on-screen** (phụ thuộc compositor): xem "Shell-on-screen: 3 tiers" ở mục B. Interaction trong Application Platform Gaps — Mức A (fb_console relay, G1-ext) → Mức B (Terminal Cell VT100, G2) → Mức C (SSH via Tier 3b, G2)
 
 **Effort**: 150 hours
 

@@ -4,16 +4,7 @@
 #
 # Install (WSL2): sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 #
-# Usage (WSL2, from third_party/mlibc/):
-#   meson setup build-aarch64 \
-#     --cross-file=../../scripts/mlibc-aarch64.cross \
-#     -Dsysdeps=vicell \
-#     -Ddefault_library=static \
-#     -Dposix_option=disabled \
-#     -Dlinux_option=disabled \
-#     -Dheaders_only=false
-#   ninja -C build-aarch64
-#   cp build-aarch64/libc.a build-aarch64/libc.a  # libc-aarch64.a target in build-mlibc.sh
+# Usage: bash scripts/build-mlibc.sh (handles clone + patch automatically)
 
 [binaries]
 c       = 'aarch64-linux-gnu-gcc'
@@ -29,7 +20,7 @@ cpu_family = 'aarch64'
 cpu        = 'cortex-a57'
 endian     = 'little'
 
-[properties]
+[built-in options]
 # -mgeneral-regs-only: no NEON/FP in the C library kernel-interface layer
 c_args   = ['-mgeneral-regs-only']
 cpp_args = ['-mgeneral-regs-only']

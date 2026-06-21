@@ -110,12 +110,6 @@ fn handle_kernel_event(
     let code  = u32::from_le_bytes([buf[1], buf[2], buf[3], buf[4]]);
     let value = u32::from_le_bytes([buf[5], buf[6], buf[7], buf[8]]);
 
-    // Single atomic log so the test probe "[input-svc] key event X" is one line.
-    {
-        use alloc::format;
-        let msg = format!("[input-svc] key event {}", buf[0]);
-        ostd::io::println(&msg);
-    }
     match buf[0] {
         EV_KEY => {
             let state = key_state_from_evdev(value);
@@ -151,12 +145,21 @@ fn handle_kernel_event(
         EV_ASCII => {
             // UART byte relayed by the kernel console driver.
             // `code` carries the raw ASCII code point; skip scancode translation.
+            // Map C0 control chars to semantic KeySyms so GUI apps get proper events
+            // regardless of whether input originates from VirtIO or UART terminal.
             let state = if value > 0 { KeyState::Pressed } else { KeyState::Released };
+            let (keysym, character) = match code {
+                0x1B        => (KeySym::Escape,    0),
+                0x0D | 0x0A => (KeySym::Return,    code),
+                0x08 | 0x7F => (KeySym::Backspace, code),
+                0x09        => (KeySym::Tab,        code),
+                _           => (KeySym::Printable,  code),
+            };
             dispatcher.dispatch(&InputEvent::Key(KeyEvent {
                 timestamp_ticks: sys_get_time(),
                 scancode: 0,
-                keysym: KeySym::Printable,
-                character: code,
+                keysym,
+                character,
                 modifiers: modifiers.snapshot(),
                 state,
                 _pad: [0; 2],

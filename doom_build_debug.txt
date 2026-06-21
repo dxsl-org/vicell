@@ -1,0 +1,50 @@
+   Compiling doom v0.1.0 (D:\ViCell\cells\apps\doom)
+warning: field `0` is never read
+  --> libs\ostd\src\heap.rs:31:18
+   |
+31 | struct HeapArena([u8; HEAP_SIZE]);
+   |        --------- ^^^^^^^^^^^^^^^
+   |        |
+   |        field in this struct
+   |
+   = help: consider removing this field
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `ostd` (lib) generated 1 warning
+warning: doom@0.1.0: riscv-none-elf-ar: 'D:\ViCell\target\riscv64gc-unknown-none-elf\release\build\doom-a13b75c9c39d1764\out\libdoom.a': No such file
+error: failed to run custom build command for `doom v0.1.0 (D:\ViCell\cells\apps\doom)`
+
+Caused by:
+  process didn't exit successfully: `D:\ViCell\target\release\build\doom-12b6c18618215ec6\build-script-build` (exit code: 1)
+  --- stdout
+  cargo:rerun-if-env-changed=CC_FORCE_DISABLE
+  CC_FORCE_DISABLE = None
+  cargo:rerun-if-env-changed=ARFLAGS
+  ARFLAGS = None
+  cargo:rerun-if-env-changed=TARGET_ARFLAGS
+  TARGET_ARFLAGS = None
+  cargo:rerun-if-env-changed=ARFLAGS_riscv64gc_unknown_none_elf
+  ARFLAGS_riscv64gc_unknown_none_elf = None
+  cargo:rerun-if-env-changed=ARFLAGS_riscv64gc-unknown-none-elf
+  ARFLAGS_riscv64gc-unknown-none-elf = None
+  cargo:rerun-if-env-changed=CC_ENABLE_DEBUG_OUTPUT
+  running: "riscv-none-elf-ar" "sD" "D:\\ViCell\\target\\riscv64gc-unknown-none-elf\\release\\build\\doom-a13b75c9c39d1764\\out\\libdoom.a"
+  exit code: 1
+  cargo:rerun-if-env-changed=ARFLAGS
+  ARFLAGS = None
+  cargo:rerun-if-env-changed=TARGET_ARFLAGS
+  TARGET_ARFLAGS = None
+  cargo:rerun-if-env-changed=ARFLAGS_riscv64gc_unknown_none_elf
+  ARFLAGS_riscv64gc_unknown_none_elf = None
+  cargo:rerun-if-env-changed=ARFLAGS_riscv64gc-unknown-none-elf
+  ARFLAGS_riscv64gc-unknown-none-elf = None
+  running: "riscv-none-elf-ar" "s" "D:\\ViCell\\target\\riscv64gc-unknown-none-elf\\release\\build\\doom-a13b75c9c39d1764\\out\\libdoom.a"
+  cargo:warning=riscv-none-elf-ar: 'D:\ViCell\target\riscv64gc-unknown-none-elf\release\build\doom-a13b75c9c39d1764\out\libdoom.a': No such file
+  exit code: 1
+
+  --- stderr
+
+
+  error occurred in cc-rs: command did not execute successfully (status code exit code: 1): "riscv-none-elf-ar" "s" "D:\\ViCell\\target\\riscv64gc-unknown-none-elf\\release\\build\\doom-a13b75c9c39d1764\\out\\libdoom.a"
+
+

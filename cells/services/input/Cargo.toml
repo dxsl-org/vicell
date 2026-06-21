@@ -11,3 +11,6 @@ ostd = { path = "../../../libs/ostd" }
 [[bin]]
 name = "service-input"
 path = "src/main.rs"
+
+[build-dependencies]
+cell-build = { path = "../../../libs/cell-build" }

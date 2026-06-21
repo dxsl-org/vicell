@@ -1,6 +1,15 @@
 # Build artifacts
 /target
+# Nested crate build artifacts (tools/*/target, vi-build-test/target, …)
+target/
 Cargo.lock
+
+# Hook / scratch logs (per-directory .logs/)
+.logs/
+
+# Scratch QEMU capture dumps
+qemu_*.txt
+*.err
 
 # IDE
 .vscode/
@@ -51,3 +60,9 @@ tools/limine-riscv64
 # VisionFive2 build artifacts
 scripts/limine-cache/
 
+
+# mlibc upstream source clone (populated by scripts/setup-mlibc.ps1 or build-mlibc.sh)
+third_party/mlibc-src/
+# mlibc build outputs
+third_party/mlibc/build/
+third_party/mlibc/build-aarch64/

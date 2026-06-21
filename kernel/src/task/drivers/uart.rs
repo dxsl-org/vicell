@@ -83,6 +83,17 @@ impl fmt::Write for DirectWriter {
     }
 }
 
+/// Write a string straight to the console UART, bypassing the `log` level filter.
+///
+/// USER stdout (cell `println`/`sys_log`) MUST always appear regardless of the
+/// kernel's `log::max_level` — it is application output, not kernel debug chatter.
+/// Routing it through `log::info!` (as `print_user_log` once did) meant lowering
+/// the kernel log level to silence boot spam also silenced the shell prompt.
+pub fn write_console(s: &str) {
+    use fmt::Write;
+    let _ = DirectWriter.write_str(s);
+}
+
 // Logger integration
 struct SimpleLogger;
 

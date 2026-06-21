@@ -28,28 +28,41 @@ use alloc::collections::BTreeMap;
 use types::{CellId, ViError, ViResult};
 
 // ---------------------------------------------------------------------------
+// Device-class tags (parameterized MMIO capability)
+// ---------------------------------------------------------------------------
+
+/// UART serial device window. Set in a cell's `mmio_devices` when its manifest
+/// declares `uart = true`.
+pub const DEV_UART: u8 = 1 << 0;
+/// GPIO controller window. Set when the manifest declares `gpio = true`.
+pub const DEV_GPIO: u8 = 1 << 1;
+
+// ---------------------------------------------------------------------------
 // Allowlist (per QEMU machine, v1 hardcoded)
 // ---------------------------------------------------------------------------
 
-/// `(base, len)` pairs that a Driver Cell may request.
+/// `(base, len, device_class)` triples a Driver Cell may request. The device
+/// class scopes the capability: a cell may claim a range only if it declared
+/// the matching device (manifest gpio/uart flag), so a GPIO-only cell cannot
+/// grab the UART window and vice-versa.
 #[cfg(target_arch = "aarch64")]
-const ALLOWED: &[(usize, usize)] = &[
-    (0x0900_0000, 0x1000), // PL011 UART0  — QEMU ARM virt
-    (0x0903_0000, 0x1000), // PL061 GPIO   — QEMU ARM virt
+const ALLOWED: &[(usize, usize, u8)] = &[
+    (0x0900_0000, 0x1000, DEV_UART), // PL011 UART0  — QEMU ARM virt
+    (0x0903_0000, 0x1000, DEV_GPIO), // PL061 GPIO   — QEMU ARM virt
 ];
 
 /// SiFive GPIO0 for QEMU `sifive_u` machine (FU540/FU740).
 /// The kernel serial driver owns NS16550 at 0x1000_0000 — excluded from allowlist.
 #[cfg(target_arch = "riscv64")]
-const ALLOWED: &[(usize, usize)] = &[
-    (0x1001_2000, 0x1000), // SiFive GPIO0 — QEMU sifive_u machine
+const ALLOWED: &[(usize, usize, u8)] = &[
+    (0x1001_2000, 0x1000, DEV_GPIO), // SiFive GPIO0 — QEMU sifive_u machine
 ];
 
 #[cfg(target_arch = "x86_64")]
-const ALLOWED: &[(usize, usize)] = &[];
+const ALLOWED: &[(usize, usize, u8)] = &[];
 
 #[cfg(not(any(target_arch = "aarch64", target_arch = "riscv64", target_arch = "x86_64")))]
-const ALLOWED: &[(usize, usize)] = &[];
+const ALLOWED: &[(usize, usize, u8)] = &[];
 
 // ---------------------------------------------------------------------------
 // Registry state
@@ -77,15 +90,17 @@ pub unsafe fn force_unlock_locks() {
 /// Returns:
 /// - `Ok(())` — range is now owned by the caller; construct `MmioRegion` and
 ///   hand it to the Cell.
-/// - `Err(PermissionDenied)` — range not in allowlist.
+/// - `Err(PermissionDenied)` — range not in allowlist, or its device class is
+///   not among `allowed_devices` (the cell's declared `mmio_devices`).
 /// - `Err(AlreadyExists)` — range overlaps an already-granted region.
 /// - `Err(InvalidInput)` — arithmetic overflow in `base + len`.
-pub fn request_mmio(cell_id: CellId, base: usize, len: usize) -> ViResult<()> {
-    // 1. Allowlist check
+pub fn request_mmio(cell_id: CellId, base: usize, len: usize, allowed_devices: u8) -> ViResult<()> {
+    // 1. Allowlist check — the range must fall inside a known device window
+    //    AND that window's device class must be one the cell declared.
     let end = base.checked_add(len).ok_or(ViError::InvalidInput)?;
-    let in_allowlist = ALLOWED.iter().any(|&(ab, al)| {
+    let in_allowlist = ALLOWED.iter().any(|&(ab, al, class)| {
         let ae = ab + al; // allowlist range end (no overflow — hardcoded values)
-        base >= ab && end <= ae
+        base >= ab && end <= ae && (class & allowed_devices != 0)
     });
     if !in_allowlist {
         return Err(ViError::PermissionDenied);

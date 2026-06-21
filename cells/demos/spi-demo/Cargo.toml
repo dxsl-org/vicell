@@ -1,0 +1,20 @@
+[package]
+name = "spi-demo"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+types            = { path = "../../../libs/types" }
+api              = { path = "../../../libs/api" }
+ostd             = { path = "../../../libs/ostd" }
+driver-gpio      = { path = "../../drivers/gpio" }
+driver-spi-gpio  = { path = "../../drivers/spi-gpio" }
+hal-gpio         = { path = "../../../hal/traits/gpio" }
+hal-spi          = { path = "../../../hal/traits/spi" }
+
+[[bin]]
+name = "spi-demo"
+path = "src/main.rs"
+
+[build-dependencies]
+cell-build = { path = "../../../libs/cell-build" }

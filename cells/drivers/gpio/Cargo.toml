@@ -12,3 +12,6 @@ hal-gpio = { path = "../../../hal/traits/gpio" }
 [lib]
 # rlib (default): can be imported as Rust dep by periph-demo and future driver Cells.
 
+[build-dependencies]
+cell-build = { path = "../../../libs/cell-build" }
+

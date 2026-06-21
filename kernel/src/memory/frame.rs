@@ -9,6 +9,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 
 // Define PAGE_SIZE to avoid circular dependency with paging.rs
 const PAGE_SIZE: usize = 4096;
+const KERNEL_HEAP_PAGES: usize = 4096;
 
 /// Physical-to-virtual address offset.
 /// - RISC-V: 0 (identity-mapped before activate_paging, SATP disabled)

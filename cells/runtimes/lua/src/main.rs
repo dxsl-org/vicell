@@ -31,6 +31,29 @@ mod ffi;
 #[cfg(not(lua_c_unavailable))]
 mod repl_session;
 
+// Bundled Lua scripts embedded at compile time; installed to /tmp at startup.
+// Scripts are sourced from cells/runtimes/lua/scripts/ (MIT-licensed libraries
+// and ViCell-authored tests).
+#[cfg(not(lua_c_unavailable))]
+const JSON_LUA:        &[u8] = include_bytes!("../scripts/json.lua");
+#[cfg(not(lua_c_unavailable))]
+const JSON_TEST_LUA:   &[u8] = include_bytes!("../scripts/json_test.lua");
+#[cfg(not(lua_c_unavailable))]
+const CORO_TEST_LUA:   &[u8] = include_bytes!("../scripts/coroutine_test.lua");
+
+/// Install bundled Lua scripts into `/tmp` so `require()` can find them.
+///
+/// Called once at cell startup before the Lua state is created.  Overwrites
+/// any stale copies from a previous run (idempotent — /tmp is RamFS).
+/// Silent on VFS error: if VFS is not yet ready the scripts will simply be
+/// missing (unlikely; VFS starts before the shell spawns Lua).
+#[cfg(not(lua_c_unavailable))]
+fn install_bundled_scripts() {
+    bindings_vfs::write_bytes("/tmp/json.lua",            JSON_LUA);
+    bindings_vfs::write_bytes("/tmp/json_test.lua",       JSON_TEST_LUA);
+    bindings_vfs::write_bytes("/tmp/coroutine_test.lua",  CORO_TEST_LUA);
+}
+
 #[cfg(not(lua_c_unavailable))]
 /// Read file content from VFS into an owned `Vec<u8>`.
 ///
@@ -62,10 +85,27 @@ unsafe fn inject_io_setup(L: *mut ffi::LuaState) {
 io.write = function(...)
   for _, v in ipairs({...}) do ViCell_io_write(tostring(v)) end
 end
-io.popen  = nil
+io.popen   = nil
 os.execute = nil
-debug = nil
-if package then package.loadlib = nil end
+debug      = nil
+if package then
+  package.loadlib = nil
+  -- Override the file-system searcher to use VFS-backed io.open instead of
+  -- C fopen (which calls ViSyscall::Open, not in this cell's allowlist).
+  -- Scripts are installed to /tmp at startup via install_bundled_scripts().
+  package.path = '/tmp/?.lua'
+  package.searchers = {
+    package.searchers[1],
+    function(name)
+      local path = '/tmp/' .. name:gsub('%.', '/') .. '.lua'
+      local f = io.open(path, 'r')
+      if not f then return 'module ' .. name .. ' not found at ' .. path end
+      local src = f:read('*a')
+      f:close()
+      return load(src, '@' .. path)
+    end,
+  }
+end
 io.open = function(path, mode)
   mode = mode or 'r'
   if mode == 'r' or mode == 'rb' then
@@ -139,6 +179,9 @@ extern "C" fn main() -> usize {
     // read a second rapid spawn races and both cells receive the later cell's args.
     let mut argbuf_early = [0u8; 512];
     let args_early_len = ostd::syscall::sys_spawn_args(&mut argbuf_early);
+
+    // Install bundled Lua libraries to /tmp so require() finds them.
+    install_bundled_scripts();
 
     // Create the state with Lua's default allocator. It routes through the C
     // malloc family, whose heap is backed by our `__wrap__sbrk` (the glue's

@@ -4,6 +4,321 @@
 
 ---
 
+## [2026-06-21] Security: per-Cell integrity measurement (IMA-style, P3)
+
+### Summary
+The loader now measures every cell's ELF image at spawn (roadmap §G.2 P3). `spawn_from_path()`
+computes `SHA-256(elf_bytes)` BEFORE the cell is scheduled and records it in an append-only
+measurement log with a rolling aggregate (`agg = SHA256(agg ‖ entry_hash)`) — the single value a
+future DICE/EAT remote-attestation token will sign to prove the exact software that ran (see
+research-cell-security-permissions.md §3.6). This is *evidence* (measurement), orthogonal to and
+complementary with the planned signature-based *enforcement* (Cell binary signing); together they
+give "measured + verified launch". SHA-256 is a self-contained, zero-dependency implementation
+(the PIC kernel build has no crypto crate) verified against four NIST FIPS 180-4 vectors
+(empty, "abc", 56-byte two-block, 1e6×'a').
+
+### Changes
+- `kernel/src/sha256.rs` (new) — minimal `no_std` SHA-256; `#[cfg(test)]` NIST vectors.
+- `kernel/src/measurement_log.rs` (new) — `Spinlock`-guarded append-only log (soft cap 256 entries)
+  + rolling aggregate; `measure()`, `aggregate()`, `entry_count()`, `force_unlock_locks()`.
+- `kernel/src/main.rs` — register `sha256` + `measurement_log` modules.
+- `kernel/src/loader.rs` — call `measurement_log::measure(tid, path, &elf_bytes)` after spawn,
+  before the cell can run.
+- `kernel/src/audit.rs` — new event `CellMeasure = 15` (payload: tid + hash prefix).
+- `kernel/src/task.rs` — added `measurement_log::force_unlock_locks()` to the fault-path teardown.
+
+### Verification
+- `cargo check --release -p vicell-kernel` clean on riscv64 (default) + `aarch64-unknown-none-softfloat`.
+- SHA-256 correctness: identical logic run on host against 4 NIST vectors → ALL PASS.
+
+### Docs Updated
+- `docs/project-roadmap.md` §G.2 P3 — marked complete.
+
+---
+
+## [2026-06-21] Security: device-scoped MMIO capability (parameterized cap, P1)
+
+### Summary
+First increment of the per-Cell permission-model evolution (roadmap §G.2 P1). The MMIO capability
+was a single `mmio_cap: bool` — a cell that declared only `gpio` could still `sys_request_mmio` the
+UART window (and vice-versa), because both ranges sit in the same hardcoded allowlist. The cap is now
+**device-scoped**: it records WHICH device classes the cell declared and the kernel rejects requests
+for a device the cell did not declare. This is the parameterized-capability principle (Genode
+session-args / Capsicum rights) applied to MMIO, with no ABI change (the manifest already separates
+`gpio`/`uart` flags).
+
+GPIO per-pin scoping is intentionally NOT attempted: cells own the GPIO MMIO directly (app-owns-MMIO,
+no broker cell), so device-class is the granularity the kernel can actually enforce.
+
+### Changes
+- `kernel/src/resource_registry.rs` — added `DEV_UART`/`DEV_GPIO` constants; `ALLOWED` entries tagged
+  with device class `(base, len, class)`; `request_mmio()` gains an `allowed_devices: u8` arg and
+  requires the matched window's class ∈ allowed.
+- `kernel/src/task/tcb.rs` — `mmio_cap: bool` → `mmio_devices: u8`.
+- `kernel/src/loader.rs` — manifest `gpio`/`uart` flags now set `DEV_GPIO`/`DEV_UART` bits separately.
+- `kernel/src/task/syscall.rs` — `RequestMmio` handler reads `mmio_devices` and passes it to `request_mmio`.
+
+### Verification
+- `cargo check --release -p vicell-kernel` clean on riscv64 (default) + `aarch64-unknown-none-softfloat`.
+- No cell regression: every cell declaring `gpio`/`uart` requests only its declared device's window
+  (driver cells, periph-demo/test declare both; sensor/spi/pwm/robot demos declare gpio only).
+
+### Docs Updated
+- `docs/project-roadmap.md` §G.2 P1 — marked partial complete.
+- `docs/research/research-cell-security-permissions.md` — design reference for the full §G.2 roadmap.
+
+---
+
+## [2026-06-19] Refactor: dissolve cells/games/ — games are demos, not a separate category
+
+### Summary
+The `cells/games/` directory was removed. All games (doom, tetris, tetris-c, tetris-lua) moved
+to `cells/demos/`. Rationale: in an OS codebase a "game" is a graphical demo of system
+capabilities — there is no meaningful architectural distinction between a game and a demo. The
+`games/` category added naming overhead without semantic value. `cells/demos/` now covers both
+hardware feature demos and graphical showcases.
+
+DOOM is no longer auto-spawned at boot: it grabs keyboard focus, serves no functional purpose
+for the system, and conflicts with other demos. Run on-demand from the shell: `doom`.
+
+### Changes
+- `cells/games/doom/` → `cells/demos/doom/`
+- `cells/games/tetris/` → `cells/demos/tetris/`
+- `cells/games/tetris-c/` → `cells/demos/tetris-c/`
+- `cells/games/tetris-lua/` → `cells/demos/tetris-lua/`
+- `cells/games/` directory removed
+- `Cargo.toml` — `cells/games/doom` entry moved to Demos section as `cells/demos/doom`
+- `gen_disk.ps1` — `$doom_src` updated to `cells\demos\doom\...`
+- `cells/tools/init/src/main.rs` — DOOM auto-spawn commented out; tetris auto-spawn removed
+
+### Docs Updated
+- `docs/system-architecture.md` — removed Games section; Demos section expanded with doom/tetris/audio-demo
+- `docs/code-standards.md` — classification rules updated: 8→8 groups (games merged into demos)
+
+---
+
+## [2026-06-19] Fix: four boot/runtime regressions from the scheduler+async rework
+
+### Summary
+A full re-check after the scheduler rewrite and cells refactor surfaced four
+regressions that broke cell loading and DOOM. All fixed; the scheduler rewrite
+itself is kept (it cut context-switch p50 from ~54 ms to ~15 µs — the root of the
+earlier input lag). Verified headless: DOOM boots and renders, 0 CPU faults, 0
+panics, WAD header reads correctly ("IWAD").
+
+### Changes
+- **`kernel/src/task.rs` (`file_read`)** — reverted the async transformation back
+  to a synchronous read. The async path set `state=Polling` + a `pending_future`
+  and returned a dummy `0`, but the future was never driven to completion, so a
+  blocking reader (DOOM's WAD load) got 0 bytes and an uninitialized buffer
+  ("Wad file doesn't have IWAD or PWAD id"). `read_async` called straight back into
+  the same sync `read()` anyway — no real async benefit, only a broken contract.
+- **`kernel/src/task/syscall.rs` (`free_grant_pages` + `alloc_grant_pages` fail
+  path)** — restore the boot identity mapping (kernel RWX, USER bit dropped) for
+  freed grant frames instead of unmapping them. In the SAS model every Usable frame
+  must stay identity-mapped so the cell loader can zero a reused frame through its
+  identity address. Unmapping left freed frames with no PTE → store page-fault
+  (`scause=15`) when a later cell load zeroed BSS into a reused frame. Exposed by
+  DOOM's 3 MiB fullscreen grant (768 high frames) freed on exit.
+- **`kernel/src/task/stack.rs` (`Stack::drop`)** — same fix for stack frames: the
+  guard frame is unmapped in `new()`, so on free we restore the kernel-RWX identity
+  mapping rather than leaving it (or a wrong-perm remap) dangling.
+- **`kernel/src/task/drivers/console_drv.rs`** — removed the VirtIO dispatch block
+  that double-drained the input queue and `ipc_send`'d without setting SUM (carried
+  over from the prior input-loss fix; `dispatch_pending` is the sole, SUM-safe
+  owner).
+- **`cells/tools/shell` allowlist** — `SetTimer` added (the reworked
+  `executor::sleep` calls `sys_set_timer`; without the cap the shell spun ~45k
+  denied calls/boot, starving the CPU).
+- **`gen_disk.ps1`** — point `$doom_src` at the new `cells/games/doom/...`
+  location (DOOM moved in the cells refactor); the stale path silently skipped the
+  DOOM build and shipped a stale binary.
+
+---
+
+## [2026-06-19] Refactor: cells/ directory reorganized into 8 semantic groups + tetris-c scaffold
+
+### Summary
+The flat `cells/apps/` layout was reorganized into 8 purpose-driven subdirectories to improve navigation and clarify cell roles:
+- **cells/tools/** — system infrastructure (shell, init, sys-tools, net-tools)
+- **cells/apps/** — user applications (robot-dashboard only, rich/complex apps)
+- **cells/games/** — entertainment (doom, tetris-c scaffold)
+- **cells/demos/** — feature demonstrations & proof-of-concepts (periph-demo, sensor-demo, robot-demo, viui-demo, etc.)
+- **cells/drivers/** — hardware device drivers (gpio, i2c, spi, uart)
+- **cells/services/** — system services (vfs, net, input, compositor, silo, hypervisor)
+- **cells/runtimes/** — scripting VMs (lua)
+- **cells/tests/** — integration test cells (bench, vfs-test, etc.)
+- **cells/guests/** — hypervisor guests (silo-guest)
+
+This reorganization improves CI clarity, onboarding, and dependency analysis (e.g., "which demo uses SPI?") without changing build or functionality.
+
+### Changes
+- Moved 30+ directories under 8 subdirectories per the classification rules in `docs/code-standards.md`
+- **cells/games/** created with doom + tetris-c scaffold (tetris-c not yet playable, awaiting git clone of Tetris-OS source)
+- **tetris-c cell** added as Banaxi-Tech/Tetris-OS port via platform hooks pattern (same as DOOM). Binary: `/bin/tetris-c`. Scaffold is complete; gameplay blocked on source dependency.
+- All Cargo.toml workspace members updated to reflect new paths (no functional changes)
+- Shell `init.rs` updated: spawn `/bin/doom` and `/bin/tetris-c` (best-effort, after bench)
+
+### Verification
+- Workspace compiles clean (all targets)
+- All cell binaries relink at new VA bases
+- Init spawns both games on boot (fallback: continue if either absent)
+- No logic changes — pure reorganization
+
+### Files Changed
+- `Cargo.toml` — workspace members paths updated (e.g., `cells/apps/shell` → `cells/tools/shell`)
+- `cells/tools/Cargo.toml`, `cells/apps/Cargo.toml`, `cells/games/Cargo.toml`, etc. — new workspace roots (empty, member re-exports)
+- `cells/games/tetris-c/` — NEW scaffold (same structure as doom, awaits source import)
+- `cells/games/doom/` — moved from `cells/apps/`
+- All other cells reorganized per 8-group classification
+- `docs/code-standards.md` — documented classification rules
+
+### Docs Updated
+- `docs/system-architecture.md` § "Cell Types" — 8 groups with directory listing per category
+- `docs/code-standards.md` § "Cells Directory Structure" — classification rules + semantics
+
+---
+
+## [2026-06-18] Fix: kernel SUM store-fault when forwarding input from the timer ISR
+
+### Summary
+After the input-loss fix, pressing many keys in fullscreen DOOM crashed the
+compositor with a kernel store page-fault (`scause=15`, `sepc`=`memcpy`, SUM=0,
+SPP=1). Root cause was a regression introduced by that fix: the non-destructive
+`dispatch_pending` now *leaves* events in the driver queue, which reactivated a
+previously-dead code path in `console_drv::poll()` that also drained the same
+queue and called `ipc_send` into the input service's user buffer **without
+setting SUM** (sstatus bit 18). Running from the timer ISR with SUM clear, the
+S-mode store to that U=1 page faulted. (Attributed to whatever cell was current
+when the timer fired — here the compositor.)
+
+### Changes
+- **`kernel/src/task/drivers/console_drv.rs`** — removed the VirtIO
+  keyboard/mouse dispatch block from `poll()`. `virtio_input::dispatch_pending`
+  (called earlier in the same timer tick) is now the sole owner of virtio event
+  delivery: it drains the queue with a proper SUM guard and non-destructive
+  semantics. The UART paths retained here use `relay_ascii_to_input`, which is
+  already SUM-safe.
+
+### Verification
+Headless smoke test under UART input load: DOOM renders, **0 scause faults, 0
+panics, 0 fault-terminated cells**.
+
+### Note on responsiveness (QEMU TCG)
+Input throughput is bounded by the focused app's poll rate (rendezvous IPC), and
+DOOM's poll rate equals its frame rate. Fullscreen rendering (~4 full-screen
+pixel passes/frame: DOOM scale + compositor blit + staging copy + GPU flush) is
+slow under QEMU TCG, so input feels very laggy (~1 event/frame). This is a TCG
+limitation, not event loss — responsive on real hardware. A smaller (non-full)
+DOOM scale trades size for TCG responsiveness.
+
+---
+
+## [2026-06-18] Fix: input events no longer lost while an app is rendering
+
+### Summary
+After fullscreen + focus fixes, keystrokes still had no effect in DOOM. Root
+cause: ViCell IPC is a **rendezvous with no queue**, and the kernel's
+`dispatch_pending` (virtio-keyboard → input service) *popped* each event and
+dropped it whenever the input service wasn't parked in `Recv` — which it almost
+never is, because it block-sends each event to the focused app and that app
+(DOOM) spends nearly all its time rendering. Every event generated during a frame
+was permanently lost.
+
+### Changes
+- **`kernel/src/task/drivers/virtio_input.rs`** — `dispatch_pending` is now
+  non-destructive: it *peeks* the front event and dequeues it only on confirmed
+  delivery (`ipc_send` → `Ok(0)`). Undelivered events stay buffered in the driver
+  queue and retry on the next 10 ms tick, so no keystroke is lost while an app is
+  mid-render. At most one event is delivered per call (a successful send leaves the
+  service `Ready`, not `Recv`). `KeyboardEvent` is now `Copy`; the queue is capped
+  at 256 events (drop-oldest) to bound growth if an app drains slower than typing.
+- **`cells/services/input/src/main.rs` + `dispatcher.rs`** — removed the
+  per-event `[input-svc] key event` / `dispatch to TID` debug `println`s. Each was
+  a kernel-log IPC on the hot path, throttling event throughput and flooding the
+  console.
+
+### Verification
+Headless smoke test: DOOM renders, 0 CPU faults, virtio-input probed, zero
+input-service log spam. Actual key delivery requires the GTK window (headless
+QEMU generates no virtio-keyboard events) — to be confirmed by the user.
+
+### Known limitation
+Under QEMU TCG (software emulation, no KVM on Windows) DOOM renders slowly, so
+input is delivered at the app's frame rate — responsive on real hardware, laggy
+in TCG. If unacceptable, the follow-up is compositor-side scaling so DOOM can
+keep a cheap 320×200 surface and poll input far more often.
+
+---
+
+## [2026-06-18] Fix: DOOM fullscreen + exclusive keyboard focus
+
+### Summary
+Follow-up to the DOOM boot/render milestone: DOOM now fills the screen and owns
+the keyboard. Two integration issues were fixed plus one compositor heap bug.
+
+### Changes
+- **`cells/apps/doom/src/main.rs`** — DOOM creates a screen-sized surface
+  (1024×768) and nearest-neighbour scales its 320×200 framebuffer up into it each
+  frame (precomputed column map; 320×200 → 1024×768 is correct 4:3). Calls
+  `raise()` to own the z-order. Previously it rendered a native 320×200 surface
+  at the screen origin — a small box beside the dashboard.
+- **`cells/apps/init/src/main.rs`** — no longer auto-spawns `robot-dashboard`
+  (800×480 surface + grabs focus) or `input-test` (grabs focus). The input
+  service is single-focus (last `SetFocus` wins) and there is no window manager,
+  so these stole keyboard focus from DOOM and cluttered the screen. Both remain
+  launchable from the shell.
+- **`cells/services/compositor/src/surface_table.rs`** — `CREATE_SURFACE`
+  (`SurfaceState::new`) and `DETACH_GRANT` no longer eagerly allocate a full
+  `w*h*4` Owned buffer. For a fullscreen (3 MiB) surface that temporary, stacked
+  on the compositor's own framebuffers, exhausted its 8 MiB cell heap (OOM →
+  exit 238 → restart loop). The Grant path is zero-copy and standard; the legacy
+  WRITE_PIXELS buffer now grows lazily on first write.
+
+### Verification
+Headless QEMU: DOOM reaches `I_InitGraphics` and renders the first fullscreen
+frame; compositor stays up (0 OOM exits, 0 CPU faults). The
+kernel→input-service→focused-cell path was confirmed correct in code
+(virtio-input probed at boot, events forwarded per 10 ms tick, dispatcher routes
+opcode 0x10 to the focused TID); with focus competitors removed, DOOM holds focus.
+
+---
+
+## [2026-06-18] Feature: DOOM port boots and renders (G1 milestone)
+
+### Summary
+The doomgeneric DOOM port now completes full engine startup and renders its
+first frame to the compositor on QEMU RISC-V. Two POSIX-shim bugs were blocking
+it: a missing `fseek` (so the WAD lump directory at offset 28744468 was never
+reached) and a `vsnprintf` integer-precision gap (so font lump names like
+`STCFN033` were mis-built as `STCFN33`). Verified end-to-end headless:
+W_Init → R_Init (PNAMES/textures) → P_Init/S_Init/HU_Init/ST_Init →
+I_InitGraphics (320×200) → `DG_DrawFrame` first frame, with zero CPU faults.
+
+### Changes
+- **`libs/api/src/posix/stdio.rs`** — added `fseek`/`ftell`/`rewind`. DOOM's
+  `W_StdC_Read` seeks before every lump read; without our own `fseek`, picolibc's
+  version mis-read the fd from our simple `FILE*` and never repositioned the file.
+- **`libs/api/src/posix/stdio_fmt.rs`** — `vsnprintf` now applies C integer
+  precision (`%.3d` zero-pads to a minimum digit count) for `d/i/u/x/X/o`; the
+  `0` flag is correctly suppressed when precision is present. Previously precision
+  was parsed but only honored for `%s`/`%f`.
+- **`kernel/src/fs/fat.rs`** — `FatFile::read` loops over fatfs cluster-boundary
+  short reads to fill the whole buffer (restructured via `?` to satisfy the
+  borrow checker on the `fs_lock` lifetime).
+- **`cells/apps/doom/src/main.rs`** — corrected the `DG_Init` comment (runs
+  before `W_Init`); one-shot first-frame log for render confirmation.
+
+### Notes
+- The shareware WAD shipped on the FAT image is **Freedoom Phase 1** (a valid,
+  freely-distributable IWAD), identified as "Ultimate Doom" behavior.
+- `init` auto-spawns `/bin/compositor` then `/bin/doom`; `DG_Init` waits on the
+  compositor internally — no shell interaction needed.
+- Compositor no longer faults on the DOOM path (the earlier dangling-grant crash
+  was triggered by DOOM's premature `I_Error` exit at the font lump, now fixed).
+
+---
+
 ## [2026-06-17] Feature: mlibc Tier B C library integration (sysdeps + Cargo shim + smoke cell)
 
 ### Summary

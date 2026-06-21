@@ -19,15 +19,15 @@ pub mod resource_registry;
 pub mod fast_ipc; // Kernel-owned fast-IPC dispatch table (canonical instance)
 pub mod fs; // Filesystem
 pub mod loader;
+pub mod measurement_log; // Per-Cell integrity measurement (IMA-style, TPM-free)
 pub mod memory;
+pub mod sha256; // Self-contained SHA-256 for measurement
 pub mod snapshot;
 pub mod task; // Renamed from 'process'
               // pub mod arch; // Moved to HAL
 pub extern crate hal; // HAL (Architecture specific)
 use boot::BootInfo;
 use hal::Arch;
-#[cfg(target_arch = "riscv64")]
-use api::posix::_putchar;
 
 // Internal utilities
 mod cpu_features;
@@ -323,7 +323,7 @@ pub extern "C" fn kmain(hartid: usize, dtb: usize) -> ! {
     // 4. Heap Allocator (Global) - MUST be after paging but before any allocations
     // 32 MiB = 8192 frames. Sized to hold:
     //   - embedded RAM disk copy (~4 MiB), VirtIO GPU framebuffer (~4 MiB), cell ELFs + kernel structures
-    const HEAP_FRAMES: usize = 8_192;
+    const HEAP_FRAMES: usize = 4_096;
     let heap_start = {
         let mut allocator_guard = memory::frame::FRAME_ALLOCATOR.lock();
         let allocator = allocator_guard.as_mut().expect("Frame allocator not initialized");
@@ -453,7 +453,7 @@ pub extern "C" fn kmain(hartid: usize, dtb: usize) -> ! {
         // Copy to Vec to ensure alignment (include_bytes! is align 1, parsing needs align 8)
         let init_data = alloc::vec::Vec::from(INIT_ELF);
         match task::spawn_from_mem(&init_data, "init", types::CellId(1), alloc::vec![]) {
-            Ok(init_tid) => {
+            Ok((init_tid, _load_base)) => {
                 log_info("Successfully spawned init");
                 // Grant SpawnCap to init: it uses sys_spawn_from_path (a syscall) to
                 // boot vfs/config/shell. Without SpawnCap the syscall returns PermissionDenied.
@@ -492,6 +492,12 @@ pub extern "C" fn kmain(hartid: usize, dtb: usize) -> ! {
 
     // 9. Start multitasking
     log_info("Starting scheduler...");
+
+    // Quiet the shared console for interactive use. Kernel bring-up is done; the
+    // remaining Info chatter is per-spawn noise ([loader] SpawnFromPath, Spawn:,
+    // ELF LOAD) that floods the UART and buries the shell prompt. WARN/ERROR still
+    // surface real problems. Raise back to Info when debugging the spawn path.
+    log::set_max_level(log::LevelFilter::Warn);
 
     // Enable interrupts before entering the idle loop.
     // RISC-V: set SPP=1 and SIE=1 in sstatus (0x102).

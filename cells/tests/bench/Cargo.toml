@@ -1,0 +1,20 @@
+[package]
+name = "app-bench"
+version = "0.1.0"
+edition = "2021"
+description = "ViCell performance benchmark cell — measures context-switch, IPC, syscall, and memory targets"
+
+[dependencies]
+ostd = { path = "../../../libs/ostd" }
+api  = { path = "../../../libs/api" }
+
+[[bin]]
+name = "bench"
+path = "src/main.rs"
+
+[[bin]]
+name = "bench-probe"
+path = "src/bench-probe.rs"
+
+[build-dependencies]
+cell-build = { path = "../../../libs/cell-build" }

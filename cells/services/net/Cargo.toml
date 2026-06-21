@@ -26,3 +26,6 @@ smoltcp = { version = "0.11", default-features = false, features = [
 [[bin]]
 name = "service-net"
 path = "src/main.rs"
+
+[build-dependencies]
+cell-build = { path = "../../../libs/cell-build" }

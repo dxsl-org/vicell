@@ -1,0 +1,19 @@
+[package]
+name    = "viui-demo"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "viui-demo"
+path = "src/main.rs"
+
+[dependencies]
+viui = { path = "../../../libs/viui" }
+ostd = { path = "../../../libs/ostd" }
+api  = { path = "../../../libs/api" }
+
+# viui-build compiles for HOST (build-dependencies always use host target).
+# It finds counter.vi, generates counter.rs into $OUT_DIR.
+[build-dependencies]
+viui-build = { path = "../../../tools/viui-build" }
+cell-build = { path = "../../../libs/cell-build" }

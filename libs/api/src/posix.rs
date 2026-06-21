@@ -33,6 +33,8 @@ pub mod stdio;
 pub mod strings;
 #[cfg(not(feature = "mlibc"))]
 pub mod sysio;
+#[cfg(not(feature = "mlibc"))]
+pub mod cxxabi;
 
 // Re-export the public API that was previously in the monolithic posix.rs,
 // so existing callers (api::posix::getentropy, api::posix::socket, etc.) still compile.

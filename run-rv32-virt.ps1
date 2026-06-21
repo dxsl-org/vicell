@@ -32,7 +32,7 @@ Write-Host "[run-rv32] Starting QEMU riscv32 virt..."
 & "C:\Program Files\qemu\qemu-system-riscv32.exe" `
     -machine virt `
     -cpu rv32 `
-    -m 128M `
+    -m 256M `
     -bios default `
     -kernel $KernelElf `
     -nographic `

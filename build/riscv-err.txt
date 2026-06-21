@@ -1,0 +1,21 @@
+    Blocking waiting for file lock on build directory
+   Compiling vicell-kernel v0.2.0 (D:\ViCell\kernel)
+warning: vicell-kernel@0.2.0: Could not strip kernel_fs.img (no strip tool available)
+warning: unused import: `api::posix::_putchar`
+  --> kernel\src\main.rs:28:5
+   |
+28 | use api::posix::_putchar;
+   |     ^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `puts` is never used
+  --> kernel\src\memory\paging.rs:40:4
+   |
+40 | fn puts(s: &str) {
+   |    ^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `vicell-kernel` (bin "vicell-kernel") generated 2 warnings (run `cargo fix --bin "vicell-kernel" -p vicell-kernel` to apply 1 suggestion)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 6.65s

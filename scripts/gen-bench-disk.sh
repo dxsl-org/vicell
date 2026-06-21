@@ -21,7 +21,7 @@ DISK="${2:-bench-disk.img}"
 
 echo "[gen-bench-disk] Writing cell bootstrap table (/bin/bench)..."
 touch "$DISK"
-python3 tools/write-cell-table.py "$DISK" "/bin/bench=$BENCH_BIN"
+python3 tools/write-cell-table.py "$DISK" "/bin/bench=$BENCH_BIN" "/bin/bench-probe=${BENCH_BIN}-probe"
 
 DISK_MB=$(( $(stat -c%s "$DISK") / 1024 / 1024 ))
 echo "[gen-bench-disk] Done: $DISK (${DISK_MB} MB)"

@@ -1,0 +1,57 @@
+[package]
+name = "app-sys-tools"
+version = "0.1.0"
+edition = "2021"
+description = "ViCell system administration utilities: ls, cat, echo, ps, kill, env, uname, date, free, shutdown"
+
+[dependencies]
+ostd  = { path = "../../../libs/ostd" }
+api   = { path = "../../../libs/api" }
+types = { path = "../../../libs/types" }
+
+[[bin]]
+name = "ls"
+path = "src/bin/ls.rs"
+
+[[bin]]
+name = "cat"
+path = "src/bin/cat.rs"
+
+[[bin]]
+name = "echo"
+path = "src/bin/echo.rs"
+
+[[bin]]
+name = "ps"
+path = "src/bin/ps.rs"
+
+[[bin]]
+name = "kill"
+path = "src/bin/kill.rs"
+
+[[bin]]
+name = "env"
+path = "src/bin/env.rs"
+
+[[bin]]
+name = "uname"
+path = "src/bin/uname.rs"
+
+[[bin]]
+name = "date"
+path = "src/bin/date.rs"
+
+[[bin]]
+name = "free"
+path = "src/bin/free.rs"
+
+[[bin]]
+name = "shutdown"
+path = "src/bin/shutdown.rs"
+
+[[bin]]
+name = "hotswap"
+path = "src/bin/hotswap.rs"
+
+[build-dependencies]
+cell-build = { path = "../../../libs/cell-build" }

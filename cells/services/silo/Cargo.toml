@@ -11,3 +11,6 @@ path = "src/main.rs"
 types  = { path = "../../../libs/types" }
 api    = { path = "../../../libs/api" }
 ostd   = { path = "../../../libs/ostd" }
+
+[build-dependencies]
+cell-build = { path = "../../../libs/cell-build" }

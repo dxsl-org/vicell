@@ -1,0 +1,16 @@
+[package]
+name = "tetris"
+version = "0.1.0"
+edition = "2021"
+description = "Tetris — canonical native Rust implementation for ViCell"
+
+[[bin]]
+name = "tetris"
+path = "src/main.rs"
+
+[dependencies]
+api  = { path = "../../../libs/api" }
+ostd = { path = "../../../libs/ostd" }
+
+[build-dependencies]
+cell-build = { path = "../../../libs/cell-build" }

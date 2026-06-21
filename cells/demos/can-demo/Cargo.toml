@@ -1,0 +1,18 @@
+[package]
+name = "can-demo"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+types               = { path = "../../../libs/types" }
+api                 = { path = "../../../libs/api" }
+ostd                = { path = "../../../libs/ostd" }
+driver-can-loopback = { path = "../../drivers/can-loopback" }
+hal-can             = { path = "../../../hal/traits/can" }
+
+[[bin]]
+name = "can-demo"
+path = "src/main.rs"
+
+[build-dependencies]
+cell-build = { path = "../../../libs/cell-build" }

@@ -9,6 +9,10 @@ exclude = [
     "tools/viui-build",
     "third_party/redoxfs",   # vendored fork — own resolver; consumed via path dep
     "third_party/mlibc",     # mlibc vendored copy — built with Meson, not Cargo
+    # cell-build is a build-script helper (uses std) — it compiles only for the host
+    # as a [build-dependency]; excluding it keeps `cargo check` from trying to
+    # compile it for the bare-metal target (riscv64gc-unknown-none-elf).
+    "libs/cell-build",
 ]
 members = [
     "kernel",
@@ -42,8 +46,6 @@ members = [
     "cells/drivers/disk",
     "cells/drivers/gpio",
     "cells/drivers/gpu",
-    "cells/drivers/input",
-    "cells/drivers/net",
     "cells/drivers/i2c-gpio",
     "cells/drivers/spi-gpio",
     "cells/drivers/pwm-gpio",
@@ -64,41 +66,51 @@ members = [
     "cells/services/silo",
     "cells/services/httpd",
 
-    # Cells - Apps
-    "cells/apps/init",
-    "cells/apps/shell",
-    "cells/apps/bench",
-    "cells/apps/vfs-test",
-    "cells/apps/srv-test",
-    "cells/apps/wasm",
-    "cells/apps/hello",
-    "cells/apps/periph-demo",
-    "cells/apps/periph-test",
-    "cells/apps/sensor-demo",
-    "cells/apps/spi-demo",
-    "cells/apps/pwm-demo",
-    "cells/apps/adc-demo",
-    "cells/apps/can-demo",
-    "cells/apps/hypervisor-test",
-    "cells/apps/gpio-test-rv",
-    "cells/apps/robot-demo",
-    "cells/apps/sys-tools",
-    "cells/apps/net-tools",
-    "cells/apps/https-demo",
-    "cells/apps/posix-shim-test",
-    "cells/apps/c-math-smoke",
-    "cells/apps/mlibc-smoke",
-    "cells/apps/test-isolation",
-    "cells/apps/viui-demo",
+    # Cells - Tools (system + CLI)
+    "cells/tools/init",
+    "cells/tools/shell",
+    "cells/tools/sys-tools",
+    "cells/tools/net-tools",
+    "cells/tools/wasm",
+
+    # Cells - Apps (user applications)
     "cells/apps/robot-dashboard",
-    "cells/apps/doom",
+
+    # Cells - Demos (hardware/feature demos + games)
+    "cells/demos/doom",
+    "cells/demos/tetris",
+    "cells/demos/tetris-c",
+    "cells/demos/tetris-lua",
+    "cells/demos/hello",
+    "cells/demos/hello-cell",
+    "cells/demos/periph-demo",
+    "cells/demos/sensor-demo",
+    "cells/demos/spi-demo",
+    "cells/demos/pwm-demo",
+    "cells/demos/adc-demo",
+    "cells/demos/can-demo",
+    "cells/demos/robot-demo",
+    "cells/demos/https-demo",
+    "cells/demos/viui-demo",
+    "cells/demos/sdk-demo",
+    "cells/demos/audio-demo",
+
+    # Cells - Tests
+    "cells/tests/bench",
+    "cells/tests/vfs-test",
+    "cells/tests/srv-test",
+    "cells/tests/hypervisor-test",
+    "cells/tests/gpio-test-rv",
+    "cells/tests/periph-test",
+    "cells/tests/posix-shim-test",
+    "cells/tests/c-math-smoke",
+    "cells/tests/mlibc-smoke",
+    "cells/tests/test-isolation",
+    "cells/tests/input-test",
+    "cells/tests/silo-test",
 
     # Cells - Runtimes
     "cells/runtimes/lua",
-    "cells/apps/sdk-demo",
-    "cells/apps/hello-cell",
-    "cells/apps/input-test",
-    "cells/apps/silo-test",
 
 ]
 

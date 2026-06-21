@@ -23,13 +23,13 @@ fn main() {
                 println!("cargo:warning=  CC_x86_64_unknown_none=x86_64-elf-gcc");
             }
             println!("cargo:warning=  Lua cell will build as a no-op stub for this target.");
-            emit_linker_script(&target);
+            cell_build::emit_linker_script();
             return;
         }
     }
 
     compile_lua_c(&target);
-    emit_linker_script(&target);
+    cell_build::emit_linker_script();
 
     // riscv64: link picolibc for C runtime symbols not yet covered by posix.rs
     // (strtod, _impure_ptr, libc internals). arm64 + x86_64 use posix.rs directly.
@@ -97,20 +97,6 @@ fn compile_lua_c(target: &str) {
 
     println!("cargo:rerun-if-changed={src_dir}");
     println!("cargo:rerun-if-changed={glue_dir}");
-}
-
-fn emit_linker_script(target: &str) {
-    // Arch-specific linker script — places the cell at VA 0x1C000000 (above MMIO,
-    // below RAM) while handling arch-specific ABI details (__global_pointer$ on RV64).
-    let ld = if target.contains("aarch64") {
-        "cells/runtimes/lua/lua-arm64.ld"
-    } else if target.contains("x86_64") {
-        "cells/runtimes/lua/lua-x86_64.ld"
-    } else {
-        "cells/runtimes/lua/lua.ld"  // riscv64 (default)
-    };
-    println!("cargo:rustc-link-arg=-T{ld}");
-    println!("cargo:rerun-if-changed={ld}");
 }
 
 /// Returns true if an ELF-capable C compiler is available for `target`.

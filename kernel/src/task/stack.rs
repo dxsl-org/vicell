@@ -80,22 +80,8 @@ impl Stack {
         // Then we hope subsequent calls are contiguous. If not, we panic/fail for now
         // (until VMA is implemented).
 
-        let base_frame = allocator.allocate_frame().ok_or(ViError::OutOfMemory)?;
-        let mut frames = Vec::with_capacity(total_pages);
-        frames.push(base_frame);
-
-        for i in 1..total_pages {
-            let frame = allocator.allocate_frame().ok_or(ViError::OutOfMemory)?;
-            if frame != base_frame + (i * PAGE_SIZE) {
-                // If not contiguous, we are in trouble for Identity Mapping SAS.
-                // We'd need to free previous and retry or have a better allocator.
-                // For this task, we log warning and fail.
-                error!("Stack allocation failed: Non-contiguous frames in Identity Map SAS.");
-                return Err(ViError::OutOfMemory);
-            }
-            frames.push(frame);
-        }
-
+        let base_frame = allocator.allocate_contiguous(total_pages).ok_or(ViError::OutOfMemory)?;
+        
         let base_addr = base_frame; // Identity Map
 
         // 2. Map Pages
@@ -172,19 +158,41 @@ impl Stack {
 impl Drop for Stack {
     fn drop(&mut self) {
         trace!("Dropping Stack at 0x{:X}", self.base);
+
         let total_pages = if self.has_guard {
             self.pages + 1
         } else {
             self.pages
         };
+
+        // Restore each frame to the BOOT identity mapping (kernel RWX) before
+        // returning it to the allocator. This is load-bearing in the SAS model:
+        // the cell loader zeroes a freshly-allocated frame through its identity
+        // address (`phys_to_virt(frame)` == frame on RISC-V, elf.rs), so EVERY
+        // free frame must be identity-mapped. Stack::new unmaps the guard frame
+        // (overflow protection) and maps usable frames with USER flags; without
+        // this restore, a freed guard frame stays unmapped → the next owner's
+        // BSS memset store-faults, and a freed USER frame carries stale perms →
+        // wrong-page reads (garbage WAD). Unmap-then-map lands every frame in a
+        // clean, uniform kernel-RWX PTE regardless of its prior state.
+        let kernel_rwx = paging::Flags::from_bits(
+            paging::Flags::VALID
+                | paging::Flags::READ
+                | paging::Flags::WRITE
+                | paging::Flags::EXECUTE
+                | paging::Flags::ACCESSED
+                | paging::Flags::DIRTY,
+        );
         let mut frame_guard = FRAME_ALLOCATOR.lock();
         if let Some(allocator) = frame_guard.as_mut() {
             for i in 0..total_pages {
                 let frame = self.base + (i * PAGE_SIZE);
-                // Unmap first so the PTE doesn't dangle after the frame is freed.
                 let _ = paging::unmap_page(frame);
+                let _ = paging::map_page(allocator, frame, frame, kernel_rwx);
                 allocator.deallocate_frame(frame);
             }
+
+            paging::tlb_flush_all();
         }
     }
 }
@@ -199,11 +207,14 @@ impl Drop for Stack {
 #[derive(Debug)]
 pub struct CellSegments {
     pages: alloc::vec::Vec<(types::VAddr, types::PhysAddr)>,
+    /// VA base allocated by `va_alloc::alloc_cell_va` for PIE cells; `0` for
+    /// fixed-VA cells.  Returned to the allocator's free list on drop.
+    pie_va_base: usize,
 }
 
 impl CellSegments {
-    pub fn new(pages: alloc::vec::Vec<(types::VAddr, types::PhysAddr)>) -> Self {
-        Self { pages }
+    pub fn new(pages: alloc::vec::Vec<(types::VAddr, types::PhysAddr)>, pie_va_base: usize) -> Self {
+        Self { pages, pie_va_base }
     }
 
     /// Unmap this cell's segment VAs immediately at death — WITHOUT freeing the
@@ -244,6 +255,10 @@ impl Drop for CellSegments {
                 }
                 allocator.deallocate_frame(frame);
             }
+        }
+        // Return the PIE VA slot to the allocator so it can be reused.
+        if self.pie_va_base != 0 {
+            crate::loader::va_alloc::free_cell_va(self.pie_va_base);
         }
     }
 }

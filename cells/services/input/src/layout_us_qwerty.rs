@@ -130,14 +130,14 @@ pub static LAYOUT: [LayoutEntry; 128] = [
     /* 0x63 */ LayoutEntry::ctrl(KeySym::Unknown),
     /* 0x64 */ LayoutEntry::ctrl(KeySym::Unknown),
     /* 0x65 */ LayoutEntry::ctrl(KeySym::Unknown),
-    /* 0x66 */ LayoutEntry::ctrl(KeySym::Unknown),
-    /* 0x67 */ LayoutEntry::ctrl(KeySym::Unknown),
-    /* 0x68 */ LayoutEntry::ctrl(KeySym::Unknown),
-    /* 0x69 */ LayoutEntry::ctrl(KeySym::Unknown),
-    /* 0x6A */ LayoutEntry::ctrl(KeySym::Unknown),
-    /* 0x6B */ LayoutEntry::ctrl(KeySym::Unknown),
-    /* 0x6C */ LayoutEntry::ctrl(KeySym::Unknown),
-    /* 0x6D */ LayoutEntry::ctrl(KeySym::Unknown),
+    /* 0x66 */ LayoutEntry::ctrl(KeySym::Home),     // evdev KEY_HOME     (102)
+    /* 0x67 */ LayoutEntry::ctrl(KeySym::Up),       // evdev KEY_UP       (103)
+    /* 0x68 */ LayoutEntry::ctrl(KeySym::PageUp),   // evdev KEY_PAGEUP   (104)
+    /* 0x69 */ LayoutEntry::ctrl(KeySym::Left),     // evdev KEY_LEFT     (105)
+    /* 0x6A */ LayoutEntry::ctrl(KeySym::Right),    // evdev KEY_RIGHT    (106)
+    /* 0x6B */ LayoutEntry::ctrl(KeySym::End),      // evdev KEY_END      (107)
+    /* 0x6C */ LayoutEntry::ctrl(KeySym::Down),     // evdev KEY_DOWN     (108)
+    /* 0x6D */ LayoutEntry::ctrl(KeySym::PageDown), // evdev KEY_PAGEDOWN (109)
     /* 0x6E */ LayoutEntry::ctrl(KeySym::Unknown),
     /* 0x6F */ LayoutEntry::ctrl(KeySym::Unknown),
     /* 0x70 */ LayoutEntry::ctrl(KeySym::Unknown),

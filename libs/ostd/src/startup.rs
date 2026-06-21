@@ -12,6 +12,17 @@ pub unsafe extern "C" fn _start() -> ! {
         "la gp, __global_pointer$",
         ".option pop",
         "andi sp, sp, -16",
+        // Use callee-saved s0/s1 as iterators — a0/a1 are caller-saved and
+        // would be clobbered by any constructor called via jalr.
+        "la   s0, __init_array_start",
+        "la   s1, __init_array_end",
+        "1:",
+        "beq  s0, s1, 2f",
+        "ld   t0, 0(s0)",
+        "jalr t0",
+        "addi s0, s0, 8",
+        "j    1b",
+        "2:",
         "call main",
         "li a7, 60",   // ViSyscall::Exit
         "li a0, 0",    // exit code = 0 in a0 (ViCell ABI: syscall nr in a7, arg in a0)
@@ -22,6 +33,15 @@ pub unsafe extern "C" fn _start() -> ! {
     // Stack is kernel-aligned on entry; skip re-alignment to avoid clobbering sp.
     #[cfg(target_arch = "aarch64")]
     core::arch::naked_asm!(
+        "ldr  x19, =__init_array_start",
+        "ldr  x20, =__init_array_end",
+        "1:",
+        "cmp  x19, x20",
+        "b.eq 2f",
+        "ldr  x21, [x19], #8",
+        "blr  x21",
+        "b    1b",
+        "2:",
         "bl   main",
         "mov  x0, #60",   // ViSyscall::Exit
         "mov  x1, #0",    // exit code = 0
@@ -35,6 +55,15 @@ pub unsafe extern "C" fn _start() -> ! {
     #[cfg(target_arch = "x86_64")]
     core::arch::naked_asm!(
         "and rsp, -16",
+        "lea rbx, [rip + __init_array_start]",
+        "lea r12, [rip + __init_array_end]",
+        "1:",
+        "cmp rbx, r12",
+        "je 2f",
+        "call [rbx]",
+        "add rbx, 8",
+        "jmp 1b",
+        "2:",
         "call main",
         "mov rax, 60",    // ViSyscall::Exit
         "xor rdi, rdi",   // exit code = 0

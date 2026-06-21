@@ -1,0 +1,15 @@
+[package]
+name = "audio-demo"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+api   = { path = "../../../libs/api" }
+ostd  = { path = "../../../libs/ostd" }
+
+[[bin]]
+name = "audio-demo"
+path = "src/main.rs"
+
+[build-dependencies]
+cell-build = { path = "../../../libs/cell-build" }

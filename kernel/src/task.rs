@@ -203,6 +203,7 @@ unsafe fn force_unlock_all_kernel_locks() {
     crate::task::drivers::mmc::force_unlock_locks();
     crate::task::drivers::blk_nvme::force_unlock_locks();
     crate::resource_registry::force_unlock_locks();
+    crate::measurement_log::force_unlock_locks();
 }
 
 /// Terminate the currently-executing Cell due to a hardware fault.
@@ -382,12 +383,28 @@ pub fn spawn_with_arg(
     }
 }
 
+/// Detect whether an ELF binary is PIE (ET_DYN, e_type == 3).
+///
+/// Reads e_type directly from the ELF header bytes (offset 16, 2 bytes LE).
+/// A return value of `true` means the ELF was compiled with
+/// `-C relocation-model=pic` and must be loaded at a dynamically allocated VA.
+fn elf_is_pie(data: &[u8]) -> bool {
+    // ELF64 header: bytes [16..18] = e_type (u16 LE).  ET_DYN == 3.
+    data.len() >= 18 && u16::from_le_bytes([data[16], data[17]]) == 3
+}
+
+/// Spawn a cell from an ELF image already in memory.
+///
+/// Returns `(tid, load_base)` where `load_base` is:
+/// - `0` for fixed-VA (non-PIE) cells — load address comes from the ELF itself.
+/// - The allocated VA base for PIE cells — callers must pass this to
+///   `reloc::apply_relocations` after this function returns.
 pub fn spawn_from_mem(
     data: &[u8],
     name: &str,
     cell_id: CellId,
     allowed_drivers: alloc::vec::Vec<usize>,
-) -> core::result::Result<usize, ViError> {
+) -> core::result::Result<(usize, usize), ViError> {
     use crate::loader::{ElfLoader, ElfParser};
 
     // 1. Check Magic
@@ -415,47 +432,67 @@ pub fn spawn_from_mem(
     let loader = ElfLoader;
     let header = loader.parse_header(elf_data)?;
 
-    // 3. Load Segments — capture the mapped (vaddr, frame) pairs so the cell's
+    // 3. Determine load base.
+    //    PIE cells (ET_DYN) get a fresh VA slot; fixed-VA cells use p_vaddr.
+    let load_base: usize = if elf_is_pie(elf_data) {
+        crate::loader::va_alloc::alloc_cell_va().ok_or_else(|| {
+            log::error!("Spawn: cell VA space exhausted");
+            ViError::OutOfMemory
+        })?
+    } else {
+        0
+    };
+
+    // 4. Load Segments — capture the mapped (vaddr, frame) pairs so the cell's
     // segment frames are reclaimed when it dies (see stack::CellSegments).
     let seg_pages = {
         let mut frame_guard = crate::memory::frame::FRAME_ALLOCATOR.lock();
         let frame_allocator = frame_guard.as_mut().ok_or(ViError::OutOfMemory)?;
-        loader.load_segments(elf_data, frame_allocator)?
+        loader.load_segments(elf_data, frame_allocator, load_base)
+            .map_err(|e| {
+                // If segment loading fails after allocating a PIE VA slot,
+                // return the slot so it can be reused.
+                if load_base != 0 {
+                    crate::loader::va_alloc::free_cell_va(load_base);
+                }
+                e
+            })?
     };
 
-    // 4. Spawn Task
+    // 5. Pre-allocate all per-task resources BEFORE touching the scheduler.
+    //    Rust Drop ensures cleanup on any error path — no manual free needed here.
+    //    load_base is transferred into CellSegments (pie_va_base field), so after
+    //    this point the VA slot is freed by segments.drop(), not manually.
+    let entry_va       = header.entry.wrapping_add(load_base);
+    let segments       = crate::task::stack::CellSegments::new(seg_pages, load_base);
+    let kstack         = crate::task::stack::Stack::new_kernel(STACK_PAGES)
+        .map_err(|_| ViError::OutOfMemory)?;
+    let ustack         = crate::task::stack::Stack::new_user(STACK_PAGES)
+        .map_err(|_| ViError::OutOfMemory)?;
+    let kstack_top     = kstack.top;
+    let user_stack_top = ustack.top;
+
+    // 6. Spawn Task — creates scheduler entry.  Resources above drop on failure.
     let tid = spawn(name, cell_id, allowed_drivers);
     if tid == 0 {
+        // segments/kstack/ustack all drop here → frames, VA slot, stacks freed ✅
         return Err(ViError::Unknown);
     }
 
-    // 5. Update Task Context
+    // 7. Wire pre-allocated resources into the task under the scheduler lock.
+    //    Option::take() transfers ownership; untaken Somes drop at end of scope.
+    let mut segments_o = Some(segments);
+    let mut kstack_o   = Some(kstack);
+    let mut ustack_o   = Some(ustack);
+    let mut setup_ok   = false;
     if let Some(sched) = SCHEDULER.lock().as_mut() {
         if let Some(task) = sched.tasks.get_mut(&tid) {
             log::info!("Spawn: Setting up context for Task {}...", tid);
-            // Own the segment frames so they're freed when this Task is reaped.
-            task.segment_mem = Some(crate::task::stack::CellSegments::new(seg_pages));
-            task.trap_frame.sepc = header.entry as _;
-            task.trap_frame.sstatus = 0x20; // SPIE=1, SPP=0 (User)
-
-            // Allocate Kernel Stack
-            let kstack = match crate::task::stack::Stack::new_kernel(STACK_PAGES) {
-                Ok(s) => s,
-                Err(_) => return Err(ViError::OutOfMemory),
-            };
-
-            // Allocate User Stack
-            let ustack = match crate::task::stack::Stack::new_user(STACK_PAGES) {
-                Ok(s) => s,
-                Err(_) => return Err(ViError::OutOfMemory),
-            };
-
-            // Use Stacks
-            let kstack_top = kstack.top;
-            let user_stack_top = ustack.top;
-
-            task.kernel_stack = Some(kstack);
-            task.user_stack = Some(ustack);
+            task.segment_mem  = segments_o.take();
+            task.kernel_stack = kstack_o.take();
+            task.user_stack   = ustack_o.take();
+            task.trap_frame.sepc = entry_va as _;
+            task.trap_frame.sstatus = 0x20; // placeholder; overwritten per-arch below
 
             // Setup TrapFrame on KERNEL Stack
             let tf_ptr = kstack_top - TRAP_FRAME_SIZE;
@@ -500,12 +537,24 @@ pub fn spawn_from_mem(
               task.context.kernel_trap_sp = tf_ptr as u64; }
 
             info!(
-                "Spawned ELF task '{}' (ID {}) from memory at entry 0x{:X}",
-                name, tid, header.entry
+                "Spawned ELF task '{}' (ID {}) from memory at entry 0x{:X} (load_base=0x{:X})",
+                name, tid, entry_va, load_base
             );
+            setup_ok = true;
         }
     }
-    Ok(tid)
+
+    if !setup_ok {
+        // Scheduler or task entry not found (shouldn't happen after a successful spawn,
+        // but be safe).  Untaken options drop here → frames/VA/stacks freed. ✅
+        // Kill the orphaned task so it never runs without a context.
+        if let Some(sched) = SCHEDULER.lock().as_mut() {
+            sched.exit_task(tid, 0xff);
+        }
+        return Err(ViError::Unknown);
+    }
+
+    Ok((tid, load_base))
 }
 
 pub fn spawn_from_file(path: &str) -> core::result::Result<usize, ViError> {
@@ -627,55 +676,26 @@ pub fn file_read(fd: usize, buf: &mut [u8]) -> usize {
             return 0;
         }
 
-        loop {
-            // Poll console
-            let mut cons = crate::task::drivers::console_drv::CONSOLE.lock();
-            cons.poll();
-            let b = cons.read_byte();
-            if let Some(byte) = b {
-                buf[0] = byte;
-                // Echo back to stdout
-                crate::task::print_user_log(core::str::from_utf8(&[byte]).unwrap_or("?"));
-                return 1;
-            }
-            drop(cons);
-            // Yield if no input
-            yield_cpu();
+        let mut cons = crate::task::drivers::console_drv::CONSOLE.lock();
+        cons.poll();
+        let b = cons.read_byte();
+        if let Some(byte) = b {
+            buf[0] = byte;
+            return 1;
         }
+        return 0;
     }
 
-    // File Read (Async Transformation)
+    // File Read — synchronous. The VIFS1 ramdisk is synchronous, and the async
+    // path (read_async → pending_future + state=Polling) called straight back into
+    // this same sync `read()` anyway. But it returned a dummy 0 to the caller while
+    // the future was never driven to completion, so a blocking reader (e.g. DOOM's
+    // WAD load) received 0 bytes and an uninitialized buffer ("doesn't have IWAD").
+    // Read directly under the SCHEDULER lock and return the real byte count.
     if let Some(sched) = SCHEDULER.lock().as_mut() {
         if let Some(task) = sched.current_task_mut() {
-            // Take the file handle out of the map (Ownership Passing)
-            // We need to remove it because `read_async` consumes `Box<Self>`.
-            // We will put it back when the future completes.
-            if let Some(handle) = task.open_files.remove(&fd) {
-                // Unwrap the FileHandle to get Box<dyn ViFile>
-                // We assume FileHandle wraps a Box<dyn ViFile>
-                // Wait, FileHandle struct in tcb.rs is just a wrapper.
-                // We need `handle.file`. If private, we added `into_inner()` or public access.
-                // `FileHandle` defined in `api/fs.rs` has public `file` field or similar?
-                // I updated `api/fs.rs` to have `pub file`.
-
-                let file_box = handle.into_inner();
-
-                // Get buffer pointer and length
-                let buf_ptr = buf.as_mut_ptr() as usize;
-                let buf_len = buf.len();
-
-                // Create the future
-                let future = file_box.read_async(buf_ptr, buf_len);
-
-                // Store in task
-                task.pending_future = Some(SyscallFuture::FileRead(fd, future));
-
-                // Set state to Polling
-                task.state = TaskState::Polling;
-
-                // Return dummy value (0). The actual return value will be written
-                // to trap frame when future completes.
-                return 0;
+            if let Some(handle) = task.open_files.get_mut(&fd) {
+                return handle.read(buf).unwrap_or(0);
             }
         }
     }
@@ -818,7 +838,9 @@ pub fn ipc_send(
 ) -> core::result::Result<usize, ()> {
     if let Some(sched) = SCHEDULER.lock().as_mut() {
         if !sched.tasks.contains_key(&target_id) {
-            warn!("IPC: Target Task {} not found!", target_id);
+            // Expected: caller sends to a cell that already exited (e.g. input service
+            // dispatching to a focused cell that called sys_exit).  Not a system error.
+            log::debug!("IPC: Target Task {} not found (cell exited)", target_id);
             return Err(());
         }
 
@@ -1165,11 +1187,44 @@ pub fn futex_wake(_caller_id: usize, addr: VAddr, count: usize) -> core::result:
     Ok(woken)
 }
 
+/// Tracks whether the console cursor is at the start of a line, so the "USER: "
+/// prefix is emitted ONCE per line rather than once per `sys_log` call. Without
+/// this, `print()` (no trailing newline — used for the shell prompt and per-key
+/// echo) would force a prefix+newline on every byte, so typing "help" rendered as
+/// four "USER: h/e/l/p" lines instead of an inline "USER: help".
+static USER_LOG_AT_LINE_START: core::sync::atomic::AtomicBool =
+    core::sync::atomic::AtomicBool::new(true);
+
 pub fn print_user_log(msg: &str) {
-    // If msg ends with newline, trim it because info! adds one.
-    // Actually, userprintln! sends newline.
-    // We want "USER: " prefix.
-    info!("USER: {}", msg.trim_end());
+    use core::sync::atomic::Ordering;
+    // USER stdout must ALWAYS reach the console, independent of the kernel log
+    // level — it is cell application output, not kernel debug chatter. Writing
+    // straight to the UART (not via info!) lets us quiet boot-time kernel Info
+    // spam without also silencing the shell prompt / cell output.
+    //
+    // Emit the raw bytes verbatim (no trim, no synthesised newline) so the
+    // distinction between print() and println() at the ostd layer is preserved:
+    // print() concatenates inline; println() ends the line. The "USER: " prefix
+    // is injected only at each line start, keeping log scrapers/tests matching
+    // while making interactive echo behave like a real terminal.
+    let mut rest = msg;
+    while !rest.is_empty() {
+        if USER_LOG_AT_LINE_START.load(Ordering::Relaxed) {
+            crate::task::drivers::uart::write_console("USER: ");
+            USER_LOG_AT_LINE_START.store(false, Ordering::Relaxed);
+        }
+        match rest.find('\n') {
+            Some(i) => {
+                crate::task::drivers::uart::write_console(&rest[..=i]);
+                USER_LOG_AT_LINE_START.store(true, Ordering::Relaxed);
+                rest = &rest[i + 1..];
+            }
+            None => {
+                crate::task::drivers::uart::write_console(rest);
+                rest = "";
+            }
+        }
+    }
 }
 
 /// Spawns a synthetic task for testing User Mode without filesystem

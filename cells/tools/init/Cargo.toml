@@ -1,0 +1,19 @@
+[package]
+name = "app-init"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+types = { path = "../../../libs/types" }
+api = { path = "../../../libs/api" }
+ostd = { path = "../../../libs/ostd" }
+
+[features]
+default = []
+# When enabled, init spawns /bin/vfs-test after the main service stack is up.
+# Only used in CI test-hooks kernel builds — never in production.
+test-hooks = []
+
+[build-dependencies]
+cell-build = { path = "../../../libs/cell-build" }
+

@@ -1,0 +1,368 @@
+warning: unknown and unstable feature specified for `-Ctarget-feature`: `red-zone`
+  |
+  = note: it is still passed through to the codegen backend, but use of this feature might be unsound and the behavior of this feature can change in the future
+  = help: consider filing a feature request
+
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+warning: `types` (lib) generated 1 warning
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+warning: `hal-paging` (lib) generated 1 warning (1 duplicate)
+warning: `hal-arch-trait` (lib) generated 1 warning (1 duplicate)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+warning: `hal-x86` (lib) generated 1 warning (1 duplicate)
+warning: `hal-uart` (lib) generated 1 warning (1 duplicate)
+warning: `hal-display` (lib) generated 1 warning (1 duplicate)
+warning: `hal-interrupt` (lib) generated 1 warning (1 duplicate)
+warning: `hal-timer` (lib) generated 1 warning (1 duplicate)
+warning: `hal-traits-mmc` (lib) generated 1 warning (1 duplicate)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+warning: `hal-core` (lib) generated 1 warning (1 duplicate)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+warning: `api` (lib) generated 1 warning (1 duplicate)
+   Compiling vicell-kernel v0.2.0 (D:\ViCell\kernel)
+warning: vicell-kernel@0.2.0: Could not strip kernel_fs.img (no strip tool available)
+warning: unused import: `hal::traits::PageTableTrait`
+   --> kernel\src\memory\paging.rs:228:9
+    |
+228 |     use hal::traits::PageTableTrait;
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `vaddr`
+   --> kernel\src\memory\paging.rs:227:21
+    |
+227 | pub fn virt_to_phys(vaddr: VAddr) -> Option<PhysAddr> {
+    |                     ^^^^^ help: if this is intentional, prefix it with an underscore: `_vaddr`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `t0`
+  --> kernel\src\snapshot\mod.rs:94:9
+   |
+94 |     let t0 = 0u64;
+   |         ^^ help: if this is intentional, prefix it with an underscore: `_t0`
+
+warning: unused variable: `t_restore_start`
+   --> kernel\src\snapshot\mod.rs:253:9
+    |
+253 |     let t_restore_start = 0u64;
+    |         ^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_t_restore_start`
+
+warning: unused variable: `c`
+  --> kernel\src\task\drivers\uart.rs:74:13
+   |
+74 |         for c in s.bytes() {
+   |             ^ help: if this is intentional, prefix it with an underscore: `_c`
+
+warning: unused variable: `t0`
+   --> kernel\src\task\drivers\virtio_blk.rs:123:13
+    |
+123 |         let t0 = 0usize;
+    |             ^^ help: if this is intentional, prefix it with an underscore: `_t0`
+
+warning: unused variable: `t0`
+   --> kernel\src\task\drivers\virtio_blk.rs:151:13
+    |
+151 |         let t0 = 0usize;
+    |             ^^ help: if this is intentional, prefix it with an underscore: `_t0`
+
+warning: unused variable: `gp`
+   --> kernel\src\task\scheduler.rs:195:14
+    |
+195 |         let (gp, tp) = crate::task::get_kernel_gp_tp();
+    |              ^^ help: if this is intentional, prefix it with an underscore: `_gp`
+
+warning: unused variable: `tp`
+   --> kernel\src\task\scheduler.rs:195:18
+    |
+195 |         let (gp, tp) = crate::task::get_kernel_gp_tp();
+    |                  ^^ help: if this is intentional, prefix it with an underscore: `_tp`
+
+warning: unused variable: `gp`
+   --> kernel\src\task\scheduler.rs:256:18
+    |
+256 |             let (gp, tp) = crate::task::get_kernel_gp_tp();
+    |                  ^^ help: if this is intentional, prefix it with an underscore: `_gp`
+
+warning: unused variable: `tp`
+   --> kernel\src\task\scheduler.rs:256:22
+    |
+256 |             let (gp, tp) = crate::task::get_kernel_gp_tp();
+    |                      ^^ help: if this is intentional, prefix it with an underscore: `_tp`
+
+warning: constant `SECONDARY_BOOT_TIMEOUT_TICKS` is never used
+  --> kernel\src\task\smp.rs:26:7
+   |
+26 | const SECONDARY_BOOT_TIMEOUT_TICKS: usize = 50;
+   |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: constant `DEFAULT_UART_BASE` is never used
+  --> kernel\src\platform.rs:14:7
+   |
+14 | const DEFAULT_UART_BASE:  usize = 0x1000_0000;
+   |       ^^^^^^^^^^^^^^^^^
+
+warning: constant `DEFAULT_UART_IRQ` is never used
+  --> kernel\src\platform.rs:15:7
+   |
+15 | const DEFAULT_UART_IRQ:   u32   = 10;
+   |       ^^^^^^^^^^^^^^^^
+
+warning: constant `DEFAULT_PLIC_BASE` is never used
+  --> kernel\src\platform.rs:16:7
+   |
+16 | const DEFAULT_PLIC_BASE:  usize = 0x0C00_0000;
+   |       ^^^^^^^^^^^^^^^^^
+
+warning: constant `DEFAULT_PLIC_SIZE` is never used
+  --> kernel\src\platform.rs:18:7
+   |
+18 | const DEFAULT_PLIC_SIZE:  usize = 0x400_0000;
+   |       ^^^^^^^^^^^^^^^^^
+
+warning: constant `DEFAULT_CLINT_BASE` is never used
+  --> kernel\src\platform.rs:19:7
+   |
+19 | const DEFAULT_CLINT_BASE: usize = 0x0200_0000;
+   |       ^^^^^^^^^^^^^^^^^^
+
+warning: constant `DEFAULT_RTC_BASE` is never used
+  --> kernel\src\platform.rs:21:7
+   |
+21 | const DEFAULT_RTC_BASE:   usize = 0x0010_1000;
+   |       ^^^^^^^^^^^^^^^^
+
+warning: associated function `qemu_defaults` is never used
+  --> kernel\src\platform.rs:48:8
+   |
+47 | impl PlatformInfo {
+   | ----------------- associated function in this implementation
+48 |     fn qemu_defaults() -> Self {
+   |        ^^^^^^^^^^^^^
+
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+'-red-zone' is not a recognized feature for this target (ignoring feature)
+warning: `vicell-kernel` (bin "vicell-kernel") generated 20 warnings (1 duplicate) (run `cargo fix --bin "vicell-kernel" -p vicell-kernel` to apply 11 suggestions)
+    Finished `release` profile [optimized] target(s) in 3.17s

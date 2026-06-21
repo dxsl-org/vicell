@@ -1,0 +1,16 @@
+[package]
+name = "app-c-math-smoke"
+version = "0.1.0"
+edition = "2021"
+description = "Smoke test for posix math/stdio/setjmp shim (verify-only, not shipped to disk image)"
+
+[[bin]]
+name = "c-math-smoke"
+path = "src/main.rs"
+
+[dependencies]
+api  = { path = "../../../libs/api" }
+ostd = { path = "../../../libs/ostd" }
+
+[build-dependencies]
+cell-build = { path = "../../../libs/cell-build" }

@@ -241,11 +241,11 @@ def create_fat32_image(output_path: str, files: list):
             return ((fs + 31) // 32) * 32                     # align to 16 KB
 
         fat_sectors = fat_sectors_for(sector_count)
+        # data_start must match the BPB-implied value so the fatfs crate and this
+        # script agree on where cluster 2 begins.  FAT16 does not require the data
+        # area to start on a cluster boundary — keeping it equal to the BPB formula
+        # (reserved + fats*fat_size + root_dir_sectors) is the only correct choice.
         data_start  = RESERVED + FATS * fat_sectors + root_dir_sectors
-        # Round data_start up to a cluster boundary so sector offsets stay aligned.
-        cluster_boundary = ((data_start + sectors_per_cluster - 1)
-                            // sectors_per_cluster) * sectors_per_cluster
-        data_start = cluster_boundary
         data_sectors = sector_count - data_start
         data_clusters = data_sectors // sectors_per_cluster
 

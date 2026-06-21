@@ -3,8 +3,8 @@ ENTRY(_start)
 
 MEMORY
 {
-    /* 128MB RAM starting at 0x80200000 (OpenSBI jump address) */
-    ram (wxa) : ORIGIN = 0x80200000, LENGTH = 128M
+    /* 256MB RAM starting at 0x80200000 (OpenSBI jump address) */
+    ram (wxa) : ORIGIN = 0x80200000, LENGTH = 256M
 }
 
 SECTIONS

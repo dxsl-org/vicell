@@ -1,0 +1,24 @@
+# Meson cross file for mlibc targeting ViCell riscv64 — Windows native build.
+# Uses the xpack riscv-none-elf-gcc toolchain installed to C:\RISCV.
+# No WSL2 required; build with scripts/build-mlibc.ps1.
+#
+# Toolchain install: https://xpack.github.io/riscv-none-elf-gcc/install/
+# Expected location: C:\RISCV\xpack-riscv-none-elf-gcc-15.2.0-1\
+
+[binaries]
+c       = 'C:\RISCV\xpack-riscv-none-elf-gcc-15.2.0-1\bin\riscv-none-elf-gcc.exe'
+cpp     = 'C:\RISCV\xpack-riscv-none-elf-gcc-15.2.0-1\bin\riscv-none-elf-g++.exe'
+ar      = 'C:\RISCV\xpack-riscv-none-elf-gcc-15.2.0-1\bin\riscv-none-elf-ar.exe'
+ld      = 'C:\RISCV\xpack-riscv-none-elf-gcc-15.2.0-1\bin\riscv-none-elf-ld.exe'
+strip   = 'C:\RISCV\xpack-riscv-none-elf-gcc-15.2.0-1\bin\riscv-none-elf-strip.exe'
+objcopy = 'C:\RISCV\xpack-riscv-none-elf-gcc-15.2.0-1\bin\riscv-none-elf-objcopy.exe'
+
+[host_machine]
+system     = 'vicell'
+cpu_family = 'riscv64'
+cpu        = 'riscv64'
+endian     = 'little'
+
+[built-in options]
+c_args   = ['-march=rv64imac_zicsr', '-mabi=lp64']
+cpp_args = ['-march=rv64imac_zicsr', '-mabi=lp64']

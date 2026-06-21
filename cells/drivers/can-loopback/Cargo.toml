@@ -5,3 +5,6 @@ edition = "2021"
 
 [dependencies]
 hal-can = { path = "../../../hal/traits/can" }
+
+[build-dependencies]
+cell-build = { path = "../../../libs/cell-build" }

@@ -1,3 +1,4 @@
+#![no_std]
 //! mlibc-shim — link-only crate.
 //!
 //! This crate has no Rust code.  Its build.rs emits `cargo:rustc-link-*`

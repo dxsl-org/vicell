@@ -1,0 +1,22 @@
+[package]
+name = "app-vfs-test"
+version = "0.2.0"
+edition = "2021"
+
+[features]
+# Enables the quota-limit scenario, which only passes against a service-vfs
+# built with its own `test-hooks` feature (2 KiB quota). The integration-test
+# kernel builds both crates with test-hooks.
+test-hooks = []
+
+[[bin]]
+name = "vfs-test"
+path = "src/main.rs"
+
+[dependencies]
+types = { path = "../../../libs/types" }
+api   = { path = "../../../libs/api" }
+ostd  = { path = "../../../libs/ostd" }
+
+[build-dependencies]
+cell-build = { path = "../../../libs/cell-build" }

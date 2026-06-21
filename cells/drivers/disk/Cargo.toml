@@ -11,3 +11,6 @@ ostd = { path = "../../../libs/ostd" }
 [lib]
 # Dual output: rlib for Rust deps, staticlib for final Cell linking
 crate-type = ["rlib", "staticlib"]
+
+[build-dependencies]
+cell-build = { path = "../../../libs/cell-build" }

@@ -1,6 +1,6 @@
 # ViCell Architecture: Application Tiers
-**Version**: 0.8 (Tier 3b ARM64 EL2 VMM shipped — Alpine boots + apt works)
-**Status**: Definitive — updated 2026-06-16 after Tier 3b Phase 10 completion
+**Version**: 0.9 (Security Silo reclassified from Tier 3a → Tier 1 hardware capability)
+**Status**: Definitive — updated 2026-06-19
 
 ---
 
@@ -28,6 +28,45 @@ Dành cho kernel, drivers, services, RT control — bất cứ thứ gì cần h
 - Isolation: Rust type system (Language-Based Isolation)
 - Bắt buộc: `#![forbid(unsafe_code)]` cho Cells; `unsafe` chỉ trong kernel/HAL
 - Không giới hạn file count — full Cargo crate với submodules
+
+### 2.1 Tier 1 Hardware Extensions (G2 ARM64/x86)
+
+Một số capabilities yêu cầu hardware support nhưng vẫn là **Tier 1 API** — không phải Tier 3, không cần hypervisor.
+
+#### Hardware Key Isolation (Silo)
+
+```
+Layer: ostd::silo::SiloHandle (Tier 1 API)
+Hardware: ARM64 Stage-2 / x86 VT-x (G2 only — not RISC-V)
+Purpose: TLS private keys an toàn ngay cả khi ViCell kernel bị compromise
+```
+
+Silo không phải là một VM tier. Nó là một Tier 1 Rust API consume một hardware fence:
+
+```rust
+// cells/apps/silo-test/src/main.rs
+let handle = ostd::silo::SiloHandle::connect()?;
+handle.init_key(&entropy)?;
+let sig = handle.sign(&sha256_digest)?;        // P-256 ECDSA
+let (our_pub, shared) = handle.ecdh(&peer_pub)?;  // ECDH key agreement
+```
+
+Implementation: `silo-guest` binary (~10KB bare-metal AArch64 no_std) chạy trong Stage-2 fenced memory, dispatch bằng mailbox page. Đây là **kernel infrastructure firmware**, không phải app tier.
+
+#### Hardware Supplement to LBI (Planned G2)
+
+LBI (Rust type system) alone có 3 limitations:
+1. **rustc là TCB** — compiler correctness là load-bearing; compromised compiler bypass toàn bộ guarantee
+2. **Spectre/Meltdown** — shared L1/L2 cache là side channel dù có LBI
+3. **Mutable statics** — `static mut` = ambient authority (Midori finding)
+
+Hardware supplement (Tier 1, G2 roadmap — no virtualization):
+
+| Platform | Mechanism | Effect |
+|---|---|---|
+| ARM64 | MTE (Memory Tagging Extension) | Pointer tags, Spectre mitigation |
+| x86 | MPK (Memory Protection Keys) | 16 per-Cell access domains, no TLB flush |
+| RISC-V | PMP (Physical Memory Protection) | M-mode fence cho high-value Cells |
 
 ---
 
@@ -114,7 +153,7 @@ See `docs/mlibc-build.md` for the full Tier B build guide.
 
 ---
 
-## 4. Tier 3: Virtualization (Legacy & Security)
+## 4. Tier 3: Virtualization (Linux Ecosystem)
 
 ### 4.1 Tại sao cần Tier 3
 
@@ -124,36 +163,9 @@ Tier 1 + Tier 1b tốt cho code tin cậy nhưng thiếu ecosystem. G2 target (s
 
 Analogy: WSL2 trên Windows — chạy Windows + Linux side-by-side, Linux disk/net nối vào Windows.
 
-### 4.2 Hai flavors — khác nhau hoàn toàn
+> **Note**: Security Silo đã được reclassify sang §2.1 (Tier 1 Hardware Extensions). Silo KHÔNG phải Tier 3 — nó là Tier 1 API không cần hypervisor, không phải VM tier.
 
-#### Tier 3a — Security Silo [G1-optional] **✅ COMPLETE (2026-06-16)**
-
-```
-Mục đích: Chạy code cực nhạy cảm (private keys, crypto) trong vùng phần cứng cô lập
-Guest: bare-metal Rust binary no_std (~10KB) — không cần OS
-Interface: 1 shared memory page (ngoài Stage-2 fence) + notification channel
-Boot time: <1ms
-```
-
-Use case thực tế G1: robot lưu TLS private key trong Silo — ngay cả kernel ViCell
-bị compromise cũng không đọc được key (Stage-2 hardware fence).
-
-Không cần device emulation, không cần Linux. Reuse Stage-2 primitives của Tier 3b.
-
-**Implementation Status:**
-- **P01** — Guest binary (`cells/guests/silo-guest/`): aarch64-unknown-none-softfloat, p256 ECDSA/ECDH, mailbox protocol ✅
-- **P02** — Silo service cell (`cells/services/silo/`): VMM-lite, embedded guest, IPC handlers (Sign/Ecdh/GetPub) ✅
-- **P03A** — ostd SiloHandle API (`libs/ostd/src/silo.rs`): connect/init_key/sign/ecdh/get_public_key ✅
-- **P03B** — Net Cell HsmCryptoProvider: DEFERRED (pending TLS plan Phase 03 embedded-tls integration)
-- **P04** — Integration test cell (`cells/apps/silo-test/`): T1–T6 tests all passing ✅
-  - T1: Service lookup
-  - T2: Key initialization + GetPub
-  - T3: ECDSA sign round-trip verification
-  - T4: ECDH shared secret verification
-  - T5: Fault recovery
-  - T6: Capability isolation enforcement
-
-#### Tier 3b — Linux VM [G2]
+### 4.2 Tier 3b — Linux VM [G2]
 
 ```
 Mục đích: Chạy Linux ecosystem (apt install nginx → works)

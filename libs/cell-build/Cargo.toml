@@ -1,0 +1,5 @@
+[package]
+name        = "cell-build"
+version     = "0.2.0"
+edition     = "2021"
+description = "Build helper for ViCell Cells — generates per-arch PIE linker scripts"

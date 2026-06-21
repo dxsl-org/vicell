@@ -1,0 +1,77 @@
+vbe: Initialising...
+vbe: Version: 3.0
+vbe: OEM: SeaBIOS VBE(C) 2011
+vbe: Graphics vendor: SeaBIOS Developers
+vbe: Product name: SeaBIOS VBE Adapter
+vbe: Product revision: Rev. 1
+edid: Success.
+vbe: EDID detected screen resolution of 1280x800
+vbe: Found matching mode 0x17a, attempting to set...
+vbe: Framebuffer address: 0xfd000000
+edid: Success.
+limine: Loading executable `boot():/boot/kernel.elf`...
+limine: Physical base:   0xf48a000
+limine: Virtual base:    0xffffffff80000000
+limine: Slide:           0x0
+limine: ELF entry point: 0xffffffff80000000
+limine: Base revision:   3
+limine: Requests count:  5
+limine: Top of HHDM:     0x40000000
+vbe: Initialising...
+vbe: Version: 3.0
+vbe: OEM: SeaBIOS VBE(C) 2011
+vbe: Graphics vendor: SeaBIOS Developers
+vbe: Product name: SeaBIOS VBE Adapter
+vbe: Product revision: Rev. 1
+edid: Success.
+vbe: EDID detected screen resolution of 1280x800
+vbe: Found matching mode 0x17a, attempting to set...
+vbe: Mode was already set, perfect!
+vbe: Framebuffer address: 0xfd000000
+edid: Success.
+paging: 1GiB pages are not supported!
+[ViCell] kernel boot v0.2.1
+Kernel started (Hart: 0, DTB: ...)
+[boot] kernel_phys_base=0x000000000f48a000
+[INFO] Frame allocator initialized
+[INFO] Initializing x86_64 paging (kernel PML4)...
+[INFO] x86_64 paging initialized
+[INFO] Activating x86_64 paging (mov cr3)...
+PAHC1oKn[INFO] x86_64 timers initialized (HPET + LAPIC)
+[INFO] Heap initialized
+[INFO] RT heap initialized
+[INFO] HAL initialized (PLIC enabled)
+[ INFO] RAM Disk: Initializing Mutable Storage...
+[ INFO] RAM Disk: Embedded FAT32 image loaded into Heap
+[ INFO]   Size: 4096 KB (8192 sectors)
+[ INFO] UART Input Buffer Initialized
+[INFO] x86_64: ramdisk + UART RX IRQ initialised
+[ INFO] Filesystem: Initializing...
+[ INFO] Boot Sector Debug:
+[ INFO]   Signature: 0xAA55
+[ INFO]   Bytes/Sector: 512
+[ INFO]   Sectors/Cluster: 1
+[ INFO]   Reserved Sectors: 1
+[ INFO]   FAT Count: 2
+[ INFO]   Media: 0xF8
+[ INFO]   Total Sectors: 0
+[ INFO]   Sectors/FAT (FAT16): 64
+[ INFO]   Root Entry Count: 512
+[ INFO] Filesystem: FAT16 mounted successfully.
+[INFO] Kernel subsystems initialized successfully.
+[INFO] Initializing scheduler...
+[ INFO] Process: Initializing Scheduler...
+[INFO] Scheduler initialized
+[INFO] Spawning Embedded Init...
+[ INFO] Spawn: parsing elf from memory (17992 bytes)
+[ INFO] ELF LOAD: 0x400000-0x400589 flags=R-X
+[ INFO] ELF LOAD: 0x401000-0x40128F flags=R--
+[ INFO] ELF LOAD: 0x402000-0x403008 flags=R--
+[ INFO] Task 'init' (ID 1): Stack 0x210D000-0x214E000, Entry 0xFFFFFFFF80028181
+[ INFO] Spawn: Setting up context for Task 1...
+[ INFO] Spawned ELF task 'init' (ID 1) from memory at entry 0x400000
+[INFO] Successfully spawned init
+[INFO] Kernel initialization complete. Entering idle loop.
+[INFO] Starting scheduler...
+ZYTD[ INFO] USER: Init: Starting ViCell Orchestrator...
+S

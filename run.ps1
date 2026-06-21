@@ -42,11 +42,9 @@ Write-Host ""
 # 256 MB RAM: the C runtimes (Lua/MicroPython) carry multi-MB BSS arenas;
 # with 128 MB cumulative frame allocation reached the RAM ceiling and faulted.
 & $qemu -machine virt -m 256M -nographic -bios default -kernel $kernel `
-        -drive file=$disk,format=raw,id=hd0,if=none `
+        -drive "file=$disk,format=raw,id=hd0,if=none" `
         -device virtio-blk-device,drive=hd0 `
         -netdev user,id=net0 `
         -device virtio-net-device,netdev=net0 `
         -device virtio-keyboard-device `
-        -device virtio-gpu-device `
-        -object rng-random,id=rng0 `
-        -device virtio-rng-device,rng=rng0
+        -device virtio-gpu-device

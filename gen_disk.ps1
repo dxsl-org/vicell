@@ -45,15 +45,33 @@ cargo build --release -p app-net-tools 2>&1 | Select-Object -Last 3
 cargo build --release -p app-sys-tools 2>&1 | Select-Object -Last 3
 cargo build --release -p robot-demo -p robot-dashboard 2>&1 | Select-Object -Last 3
 cargo build --release -p input-test 2>&1 | Select-Object -Last 3
+cargo build --release -p audio-demo 2>&1 | Select-Object -Last 3   # VirtIO sound test tone
 
 # DOOM — only if doomgeneric sources have been cloned
-$doom_src = "cells\apps\doom\src\c\doomgeneric\doomgeneric"
+$doom_src = "cells\demos\doom\src\c\doomgeneric\doomgeneric"
 if (Test-Path $doom_src) {
     Write-Host "Building DOOM cell..."
     cargo build --release -p doom --target riscv64gc-unknown-none-elf -Z build-std=core,alloc 2>&1 | Select-Object -Last 3
 } else {
     Write-Host "Skipping DOOM (clone doomgeneric to $doom_src first)."
 }
+
+# Tetris (pure Rust) — no external deps, always buildable.
+Write-Host "Building Tetris (pure Rust)..."
+cargo build --release -p tetris 2>&1 | Select-Object -Last 3
+
+# Tetris-C — needs Banaxi-Tech/Tetris-OS cloned into src/c/tetris-os/.
+$tetris_os_src = "cells\demos\tetris-c\src\c\tetris-os"
+if (Test-Path $tetris_os_src) {
+    Write-Host "Building Tetris-C cell (Banaxi-Tech/Tetris-OS port)..."
+    cargo build --release -p tetris-c 2>&1 | Select-Object -Last 3
+} else {
+    Write-Host "Skipping Tetris-C (clone to $tetris_os_src first)."
+}
+
+# Tetris-Lua — embeds Lua 5.4 + tetris.lua via include_bytes!, shared C sources from lua runtime.
+Write-Host "Building Tetris-Lua cell..."
+cargo build --release -p tetris-lua 2>&1 | Select-Object -Last 3
 
 # 1b. Update kernel embedded cells (init, shell, vfs, config) from release builds.
 # These 4 cells are embedded in kernel_fs.img via include_bytes!.
@@ -73,6 +91,9 @@ $config_bin = "$rel_dir\service-config"
 $lua_bin    = "$rel_dir\lua"
 $doom_bin   = "$rel_dir\doom"              # DOOM cell (needs doomgeneric clone first)
 $doom_wad   = "doom1.wad"                  # shareware WAD — place at d:/ViCell/doom1.wad
+$tetris_bin     = "$rel_dir\tetris"        # Tetris — pure Rust, no external deps
+$tetris_c_bin   = "$rel_dir\tetris-c"     # Tetris-C — Banaxi-Tech/Tetris-OS port
+$tetris_lua_bin = "$rel_dir\tetris-lua"   # Tetris-Lua — Lua 5.4 embedded, tetris.lua included
 $upy_bin    = "$rel_dir\micropython"       # Phase 18: MicroPython runtime cell
 $bench_bin       = "$rel_dir\bench"             # Phase 22 benchmark cell
 $bench_probe_bin = "$rel_dir\bench-probe"      # bench probe/load child (VA 0x19000000)
@@ -88,6 +109,7 @@ $httpd_bin  = "$rel_dir\httpd"            # Phase U: HTTP server
 $mqtt_bin   = "$rel_dir\mqtt"             # Phase X-5: MQTT client
 $posix_shim_test_bin = "$rel_dir\posix-shim-test"  # Tier 1b POSIX shim test cell
 $input_test_bin      = "$rel_dir\input-test"       # P05 bare-cell input delivery test
+$audio_bin = "$rel_dir\audio-demo"   # VirtIO sound test-tone cell (shell: `audio-demo`)
 $ls_bin   = "$rel_dir\ls"    # M3.2 embedded debug utils
 $cat_bin  = "$rel_dir\cat"
 $echo_bin = "$rel_dir\echo"
@@ -107,26 +129,26 @@ foreach ($pair in @(
 }
 
 if (-not (Test-Path $lua_bin)) {
-    Write-Host "Warning: Lua binary not found — skipping Lua in FAT32 image."
+    Write-Host "Warning: Lua binary not found - skipping Lua in FAT32 image."
     $lua_bin = $null
 }
 
 if (-not (Test-Path $doom_bin)) {
-    Write-Host "Warning: DOOM binary not found — skipping DOOM in FAT32 image."
+    Write-Host "Warning: DOOM binary not found - skipping DOOM in FAT32 image."
     $doom_bin = $null
 }
 if (-not (Test-Path $doom_wad)) {
-    Write-Host "Warning: doom1.wad not found at $doom_wad — skipping WAD in FAT32 image."
+    Write-Host "Warning: doom1.wad not found at $doom_wad - skipping WAD in FAT32 image."
     $doom_wad = $null
 }
 
 if (-not (Test-Path $upy_bin)) {
-    Write-Host "Warning: MicroPython binary not found — skipping python in FAT32 image."
+    Write-Host "Warning: MicroPython binary not found - skipping python in FAT32 image."
     $upy_bin = $null
 }
 
 if (-not (Test-Path $bench_bin)) {
-    Write-Host "Warning: bench binary not found — run 'cargo build -p app-bench' first."
+    Write-Host "Warning: bench binary not found - run 'cargo build -p app-bench' first."
     $bench_bin = $null
 }
 
@@ -150,6 +172,10 @@ if ($lua_bin)   { $kfs_args += @($lua_bin,  "/bin/lua") }
 if ($upy_bin)   { $kfs_args += @($upy_bin,  "/bin/python") }
 if ($doom_bin)  { $kfs_args += @($doom_bin, "/bin/doom") }
 if ($doom_wad)  { $kfs_args += @($doom_wad, "/doom1.wad") }
+if (Test-Path $tetris_bin)     { $kfs_args += @($tetris_bin,     "/bin/tetris") }
+if (Test-Path $tetris_c_bin)   { $kfs_args += @($tetris_c_bin,   "/bin/tetris-c") }
+if (Test-Path $tetris_lua_bin) { $kfs_args += @($tetris_lua_bin, "/bin/tetris-lua") }
+if (Test-Path $audio_bin) { $kfs_args += @($audio_bin, "/bin/audio-demo") }
 if (Test-Path $ls_bin)   { $kfs_args += @($ls_bin,   "/bin/ls") }
 if (Test-Path $cat_bin)  { $kfs_args += @($cat_bin,  "/bin/cat") }
 if (Test-Path $echo_bin) { $kfs_args += @($echo_bin, "/bin/echo") }
@@ -187,7 +213,7 @@ if ($LASTEXITCODE -ne 0) { throw "MBR write failed" }
 #     65525+ data clusters at 8 sec/clus satisfy the FAT32 minimum.
 Write-Host "Formatting FAT32 partition P1 (LBA 2048 + 524288 sectors)..."
 python "$tools_dir\mkfat32_inplace.py" "disk_v3.img" 524288 2048 2>&1
-if ($LASTEXITCODE -ne 0) { throw "FAT32 format failed — disk_v3.img may be corrupt" }
+if ($LASTEXITCODE -ne 0) { throw "FAT32 format failed - disk_v3.img may be corrupt" }
 
 # 4. Append cell bootstrap table (for kernel early loader).
 # Only include the cells that the kernel early loader needs: VFS, config, shell.
@@ -215,6 +241,7 @@ if (Test-Path $httpd_bin) { $table_args += "/bin/httpd=$httpd_bin" }
 if (Test-Path $mqtt_bin)  { $table_args += "/bin/mqtt=$mqtt_bin" }
 if (Test-Path $posix_shim_test_bin) { $table_args += "/bin/posix-shim-test=$posix_shim_test_bin" }
 if (Test-Path $input_test_bin)      { $table_args += "/bin/input-test=$input_test_bin" }
+if (Test-Path $audio_bin) { $table_args += "/bin/audio-demo=$audio_bin" }
 if (Test-Path $ls_bin)   { $table_args += "/bin/ls=$ls_bin" }
 if (Test-Path $cat_bin)  { $table_args += "/bin/cat=$cat_bin" }
 if (Test-Path $echo_bin) { $table_args += "/bin/echo=$echo_bin" }

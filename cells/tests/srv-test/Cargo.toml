@@ -1,0 +1,16 @@
+[package]
+name = "app-srv-test"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "srv-test"
+path = "src/main.rs"
+
+[dependencies]
+types = { path = "../../../libs/types" }
+api   = { path = "../../../libs/api" }
+ostd  = { path = "../../../libs/ostd" }
+
+[build-dependencies]
+cell-build = { path = "../../../libs/cell-build" }

@@ -4,7 +4,7 @@
 //! at Milestone 2.1.  The old raw byte-opcode protocol (OP_READ=8, OP_WRITE=4…)
 //! was removed from the VFS cell and must not be used here.
 //!
-//! Reference pattern: `cells/apps/shell/src/cmd_fs.rs` (`vfs_req_ok`, `read_file_vfs`).
+//! Reference pattern: `cells/tools/shell/src/cmd_fs.rs` (`vfs_req_ok`, `read_file_vfs`).
 // `L` is the universal Lua C API convention for `lua_State*`.
 #![allow(non_snake_case)] // reason: L is the Lua C API convention for lua_State pointers
 
@@ -116,6 +116,12 @@ pub fn vfs_get_file_vec(path: &str) -> alloc::vec::Vec<u8> {
         }
         _ => alloc::vec![],
     }
+}
+
+/// Write raw bytes to `path` from Rust (not Lua). Used at startup to install
+/// bundled scripts into `/tmp` so `require()` can find them.
+pub fn write_bytes(path: &str, data: &[u8]) -> bool {
+    vfs_write_chunked(path, data, false)
 }
 
 /// Write `data` to `path`, chunking into MAX_CHUNK-byte IPC payloads.

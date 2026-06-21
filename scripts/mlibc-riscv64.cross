@@ -2,16 +2,7 @@
 # Used in WSL2 — the xpack riscv-none-elf-gcc toolchain lives under /mnt/c/RISCV.
 # Update the binary paths below if you installed the toolchain elsewhere.
 #
-# Usage (WSL2, from third_party/mlibc/):
-#   meson setup build-riscv64 \
-#     --cross-file=../../scripts/mlibc-riscv64.cross \
-#     -Dsysdeps=vicell \
-#     -Ddefault_library=static \
-#     -Dposix_option=disabled \
-#     -Dlinux_option=disabled \
-#     -Dheaders_only=false
-#   ninja -C build-riscv64
-#   cp build-riscv64/libc.a build-riscv64/libc.a  # already in place
+# Usage: bash scripts/build-mlibc.sh (handles clone + patch automatically)
 
 [binaries]
 c       = '/mnt/c/RISCV/riscv-none-elf-gcc-15.2.0-1/bin/riscv-none-elf-gcc'
@@ -29,6 +20,6 @@ cpu_family = 'riscv64'
 cpu        = 'riscv64'
 endian     = 'little'
 
-[properties]
+[built-in options]
 c_args   = ['-march=rv64imac_zicsr', '-mabi=lp64']
 cpp_args = ['-march=rv64imac_zicsr', '-mabi=lp64']
