@@ -30,7 +30,10 @@ api::declare_manifest!(block_io = false, network = false, spawn = false);
 api::declare_syscalls![Send, Recv, Log, LookupService];
 
 // ── Configuration ────────────────────────────────────────────────────────────
-// Plaintext by default (easiest to test). Flip to TLS for the secure path.
+// Plaintext (default): the NetClient.tcp_send contract bug (os-gap G16) is fixed
+// and the transport retries until the socket is Established. TLS is currently
+// avoided — the net cell's embedded-tls handshake faults on a real server
+// (os-gap G17, load page fault). Flip to true once G17 is resolved.
 const USE_TLS: bool = false;
 // 10.0.2.2 = QEMU user-net gateway = the host (pin the IP — os-gap G3).
 const PROXY_IP: [u8; 4] = [10, 0, 2, 2];

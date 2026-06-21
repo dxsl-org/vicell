@@ -38,12 +38,25 @@ fn plain(ip: [u8; 4], port: u16, request: &[u8]) -> Result<Vec<u8>, String> {
         .map_err(|_| String::from("TCP connect failed"))?;
     ostd::io::println("[gw] TCP connected; sending");
 
+    // tcp_send returns WouldBlock until the socket reaches Established (the
+    // handshake completes a few net-service poll cycles after connect). Retry
+    // each chunk with yields so the SYN-ACK has time to land.
     let mut sent = 0;
     while sent < request.len() {
         let end = (sent + CHUNK).min(request.len());
-        if nc.tcp_send(sock, &request[sent..end]).is_err() {
-            let _ = nc.tcp_close(sock);
-            return Err(String::from("tcp_send failed"));
+        let mut attempts = 0u32;
+        loop {
+            match nc.tcp_send(sock, &request[sent..end]) {
+                Ok(()) => break,
+                Err(_) => {
+                    attempts += 1;
+                    if attempts > 3000 {
+                        let _ = nc.tcp_close(sock);
+                        return Err(String::from("tcp_send failed (connect timeout?)"));
+                    }
+                    ostd::task::yield_now();
+                }
+            }
         }
         sent = end;
     }

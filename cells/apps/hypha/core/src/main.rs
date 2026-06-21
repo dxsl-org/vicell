@@ -17,7 +17,7 @@ use agent_proto::{LlmReply, LlmRequest};
 use alloc::string::String;
 use alloc::vec::Vec;
 use ostd::io::{print, println, stdin};
-use ostd::syscall::{sys_recv, sys_send, sys_spawn_from_path, SyscallResult};
+use ostd::syscall::{sys_exit, sys_recv, sys_send, sys_spawn_from_path, SyscallResult};
 
 api::declare_manifest!(block_io = false, network = false, spawn = true);
 api::declare_syscalls![Send, Recv, Read, Log, SpawnFromPath];
@@ -74,6 +74,10 @@ pub fn main() {
     }
 
     println("[hypha] bye");
+    // Cells must sys_exit, not return from main: a plain `#[no_mangle] main`
+    // that returns falls through to address 0 → instruction page fault
+    // (scause=0xc, sepc=0x0). Exit cleanly so the supervisor reaps us.
+    sys_exit(0);
 }
 
 /// Flatten the heap conversation into a single role-tagged transcript. P1 sends

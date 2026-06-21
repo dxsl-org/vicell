@@ -47,10 +47,28 @@ impl NetClient {
     }
 
     /// Send `data` over an established TCP socket.
+    ///
+    /// The net service replies `Data(n)` where `n` (4-byte LE) is the number of
+    /// bytes the socket accepted — `0` while the connection is still completing
+    /// its handshake (SynSent). Returns `WouldBlock` if not all bytes were
+    /// accepted so the caller can retry (after a yield) once the socket is
+    /// Established. `data` should be ≤ the socket's tx buffer (4 KiB) per call.
     pub fn tcp_send(&mut self, id: SocketId, data: &[u8]) -> ViResult<()> {
         let req = NetRequest::TcpSend { cap_id: id, data };
         let mut resp_buf = [0u8; IPC_BUF_SIZE];
         match self.svc.call::<NetRequest, NetResponse>(&req, &mut resp_buf)? {
+            NetResponse::Data(b) => {
+                let n = if b.len() >= 4 {
+                    u32::from_le_bytes([b[0], b[1], b[2], b[3]]) as usize
+                } else {
+                    0
+                };
+                if n == data.len() {
+                    Ok(())
+                } else {
+                    Err(ViError::WouldBlock)
+                }
+            }
             NetResponse::Ok => Ok(()),
             NetResponse::Err(code) => Err(vierr_from_code(code)),
             _ => Err(ViError::IO),
