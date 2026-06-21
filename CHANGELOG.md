@@ -7,7 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-### Added
+### 🚀 Improvements
 - hypha: native AI agent Cell, LLM gateway and chat loop
 - net: TLS server certificate verification via embedded-tls
 - ostd: http-core crate with HTTP/1.1 and JSON client
@@ -24,9 +24,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - bench: /bin/bench with 4 scenarios and perf CI integration
 - community: CODE_OF_CONDUCT.md and contributor dev tooling
 - doom: Freedoom Phase 1 port, boots and renders first frame
+- vfs: add OP_MKDIR, OP_RMDIR, OP_UNLINK to IPC protocol
+- kernel: add TryRecv, NetTx, NetRx, StateStash, StateRestore syscalls
+- performance: release builds for all bootstrap table entries
 
-### Fixed
-- hypha: switch llm-gateway to plaintext transport by default
+### 🐛 Fixes
+- hypha: plaintext transport workaround for net cell TLS crash
 - hypha: NetClient.tcp_send now handles Data reply correctly
 - hypha: foreground shell spawn now waits on child via sys_wait
 - net: boot loop caused by wrong WaitForEvent tick unit
@@ -35,37 +38,30 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - embedded-fs: emit FAT16 to fix CorruptedFileSystem on mount
 - rv32: gate rv64 module behind target_arch check
 - x86_64: AT&T syntax for global_asm, HHDM PDPT NX bit
-
-### Changed
-- git: untrack .logs/hook-log.jsonl from repository
-- vfs: add OP_MKDIR, OP_RMDIR, OP_UNLINK to IPC protocol
-- kernel: add TryRecv, NetTx, NetRx, StateStash, StateRestore syscalls
-- performance: release builds for all bootstrap table entries
+- git: untrack .logs/hook-log.jsonl causing perpetual dirty state
 
 ---
 
 ## [0.2.1] - 2026-06-08
 
-### Added
+### 🚀 Improvements
 - viui: RenderCtx bundles canvas and FontContext for paint calls
 - viui: FontContext with GlyphAtlas and 8x8 bitmap fallback
 - viui: touch events added to Event enum
 - viui: ProgressBar, Slider, TouchArea widgets
 - viui: Animatable trait, Tween, easing module, AnimatedSignal
 - viui: GpuCommandBuffer as struct field for allocation reuse
+- readme: accurate build targets and correct GitHub URL
 
-### Fixed
+### 🐛 Fixes
 - viui: Slider returns subscribe handle from collect_dirty_handles
 - viui: ProgressBar label uses font-aware char_width
-
-### Documentation
-- readme: accurate build targets and correct GitHub URL
 
 ---
 
 ## [0.2.0] - 2026-05-01 "Mycelium Alpha"
 
-### Added
+### 🚀 Improvements
 - rv64: SV39 paging, PLIC, SBI, UART, ELF loader with PIE
 - kernel: basic shell, VirtIO block device, VirtIO keyboard
 - hal: AArch64, x86_64, RV32, AArch32 HAL implementations
