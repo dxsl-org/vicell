@@ -1066,6 +1066,24 @@ pub fn sys_get_random(buf: &mut [u8]) -> usize {
     if ret > 0 { ret as usize } else { 0 }
 }
 
+/// Strip capabilities from a live running cell (runtime revocation).
+///
+/// `cap_mask` selects which capability classes to revoke — use the constants in
+/// `api::syscall::cap_mask` (e.g. `SPAWN`, `NETWORK`, `MMIO_MASK`).
+///
+/// # Errors
+/// - `PermissionDenied` if the caller lacks `SpawnCap`.
+/// - `PermissionDenied` if the target is a system cell (`block_io` / `network` holder).
+/// - `InvalidCommand` if `target_tid == caller` or target does not exist.
+///
+/// # Panics
+/// Never panics — all failures surface as `Err`.
+pub fn sys_cap_revoke(target_tid: usize, cap_mask: u32) -> Result<(), SyscallError> {
+    // SAFETY: pure register syscall; no raw memory pointers involved.
+    let ret = unsafe { syscall(ViSyscall::CapRevoke, target_tid, cap_mask as usize, 0, 0) };
+    if ret == 0 { Ok(()) } else { Err(SyscallError::PermissionDenied) }
+}
+
 /// Block until one or more bits in `mask` fire, or `timeout_ticks` 10ms ticks elapse.
 ///
 /// `timeout_ticks = 0` blocks indefinitely.  Returns the fired event bits (> 0) on

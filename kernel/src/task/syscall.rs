@@ -530,6 +530,8 @@ pub enum Syscall {
     GpuFlush { data_ptr: usize, data_len: usize, xy: usize, wh: usize },
     /// 218: AudioPlay — write raw PCM (S16LE/2ch/44100) to the VirtIO sound output.
     AudioPlay { buf_ptr: usize, buf_len: usize },
+    /// 219: CapRevoke — strip capabilities from a live cell at runtime.
+    CapRevoke { target_tid: usize, cap_mask: u32 },
     /// 301: GpuCursor — set sprite (op=0) or move (op=1) the VirtIO GPU hardware cursor.
     GpuCursor { op: usize, data_ptr: usize, xy: usize, hot: usize },
     /// 310: NetTx — transmit one Ethernet frame via the kernel VirtIO NIC.
@@ -685,7 +687,8 @@ fn syscall_to_vi(syscall: &Syscall) -> Option<api::syscall::ViSyscall> {
         | Syscall::Exit { .. }
         | Syscall::ForceExit { .. }
         | Syscall::NotifyOnExit { .. }
-        | Syscall::RegisterService { .. } => return None,
+        | Syscall::RegisterService { .. }
+        | Syscall::CapRevoke { .. } => return None,
         // Raw block-I/O (500-503): ZST BlockIoCap gated at dispatch.
         Syscall::BlkRead { .. }
         | Syscall::BlkWrite { .. }
@@ -1175,6 +1178,62 @@ pub fn handle_syscall(caller_id: usize, syscall: Syscall) -> SyscallResult {
             log::info!("[kernel] ForceExit: task {} killed by task {}", tid, caller_id);
 
             Ok(0) // non-blocking — caller keeps running; do NOT yield_cpu
+        }
+
+        Syscall::CapRevoke { target_tid, cap_mask } => {
+            use api::syscall::cap_mask as CM;
+
+            if target_tid == caller_id {
+                return Err(SyscallError::InvalidCommand);
+            }
+
+            if let Some(sched) = super::SCHEDULER.lock().as_mut() {
+                // Gate 1: caller must hold SpawnCap (same authority as ForceExit).
+                let has_spawn = sched.tasks.get(&caller_id)
+                    .map(|t| t.spawn_cap.is_some())
+                    .unwrap_or(false);
+                if !has_spawn {
+                    return Err(SyscallError::PermissionDenied);
+                }
+
+                // Gate 2: protect system service cells — revoking I/O caps from a
+                // running VFS/net service mid-flight corrupts driver state. Use
+                // HotSwap to replace them safely.
+                let target_is_system = sched.tasks.get(&target_tid)
+                    .map(|t| t.block_io_cap.is_some() || t.network_cap.is_some())
+                    .unwrap_or(false);
+                if target_is_system {
+                    return Err(SyscallError::PermissionDenied);
+                }
+
+                let task = match sched.tasks.get_mut(&target_tid) {
+                    Some(t) => t,
+                    None => return Err(SyscallError::InvalidCommand),
+                };
+
+                // Apply revocation — clear each indicated cap field.
+                if cap_mask & CM::BLOCK_IO != 0 { task.block_io_cap   = None; }
+                if cap_mask & CM::NETWORK  != 0 { task.network_cap    = None; }
+                if cap_mask & CM::SPAWN    != 0 { task.spawn_cap      = None; }
+                if cap_mask & CM::HYPERVISOR != 0 { task.hypervisor_cap = None; }
+
+                // Parameterised sub-fields: clear the indicated bits, preserving the rest.
+                let mmio_revoke = ((cap_mask >> CM::MMIO_SHIFT) & 0xFF) as u8;
+                task.mmio_devices &= !mmio_revoke;
+                let blk_revoke = ((cap_mask >> CM::BLKREGION_SHIFT) & 0xFF) as u8;
+                task.block_regions &= !blk_revoke;
+            } else {
+                return Err(SyscallError::InvalidCommand);
+            }
+
+            crate::audit::log_event(
+                crate::audit::AuditEvent::CapRevoked,
+                &crate::audit::encode_u32x2(target_tid as u32, cap_mask),
+            );
+            log::info!("[kernel] CapRevoke: task {} revoked mask={:#010x} from task {}",
+                caller_id, cap_mask, target_tid);
+
+            Ok(0)
         }
 
         Syscall::NotifyOnExit { watched } => {
@@ -2477,6 +2536,7 @@ fn map_syscall(syscall_id: usize, a0: usize, a1: usize, a2: usize, a3: usize) ->
         ViSyscall::GetTime       => Syscall::GetTime { op: a0 },
         ViSyscall::GpuFlush      => Syscall::GpuFlush { data_ptr: a0, data_len: a1, xy: a2, wh: a3 },
         ViSyscall::AudioPlay     => Syscall::AudioPlay { buf_ptr: a0, buf_len: a1 },
+        ViSyscall::CapRevoke     => Syscall::CapRevoke { target_tid: a0, cap_mask: a1 as u32 },
         ViSyscall::GpuCursor     => Syscall::GpuCursor { op: a0, data_ptr: a1, xy: a2, hot: a3 },
         ViSyscall::NetTx         => Syscall::NetTx { frame_ptr: a0, frame_len: a1 },
         ViSyscall::NetRx         => Syscall::NetRx { buf_ptr: a0, buf_len: a1 },

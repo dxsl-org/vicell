@@ -190,6 +190,22 @@ pub enum ViSyscall {
     /// Allowlist-gated (bit 47). Requires `AudioPlay` in `declare_syscalls!`.
     AudioPlay = 218,
 
+    /// Revoke one or more capabilities from a live running cell (runtime revocation).
+    ///
+    /// The caller must hold `SpawnCap`.  System cells (`block_io_cap` / `network_cap`
+    /// holders) are protected — revoking I/O caps from a running service mid-flight
+    /// would corrupt driver state; use `HotSwap` to replace them safely.
+    ///
+    /// `cap_mask` bit layout (see `cap_mask` module constants):
+    ///   bit 0 → block_io · bit 1 → network · bit 2 → spawn · bit 3 → hypervisor
+    ///   bits  8-15 → mmio_devices sub-mask (matches resource_registry::DEV_*)
+    ///   bits 16-23 → block_regions sub-mask (partition access bits)
+    ///
+    /// ABI: a0 = target_tid, a1 = cap_mask (u32) → 0 on success.
+    /// Returns `PermissionDenied` if caller lacks SpawnCap or target is a system cell.
+    /// Always permitted past the syscall allowlist (SpawnCap is the authority gate).
+    CapRevoke = 219,
+
     // === Hypervisor (220-225) — HypervisorCap gated (allowlist bit 44) ===
     // All six syscalls require `hypervisor = true` in the cell manifest AND the
     // kernel to have booted at EL2 (ARM64) or with H-ext (RISC-V).  A cell
@@ -240,6 +256,35 @@ pub enum ViSyscall {
 
     // === Process Info ===
     GetProcs = 30,
+}
+
+/// Bit constants for the `cap_mask` argument of `ViSyscall::CapRevoke`.
+///
+/// The 32-bit mask encodes which capability classes to strip from the target cell.
+/// Boolean caps occupy the low 4 bits; parameterized caps use two 8-bit sub-fields.
+pub mod cap_mask {
+    /// Revoke raw block-device access (BlkRead/BlkWrite/BlkFlush).
+    pub const BLOCK_IO: u32 = 1 << 0;
+    /// Revoke network transmit/receive (NetTx/NetRx).
+    pub const NETWORK:  u32 = 1 << 1;
+    /// Revoke cell-spawning authority (SpawnFromPath/HotSwap).
+    pub const SPAWN:    u32 = 1 << 2;
+    /// Revoke RISC-V H-extension / ARM64 EL2 hypervisor access.
+    pub const HYPERVISOR: u32 = 1 << 3;
+
+    /// Bit offset of the `mmio_devices` sub-field within the mask.
+    pub const MMIO_SHIFT: u32 = 8;
+    /// Mask selecting the `mmio_devices` 8-bit sub-field (bits 8-15).
+    /// Each bit within this byte corresponds to a `resource_registry::DEV_*` flag.
+    pub const MMIO_MASK: u32 = 0xFF << MMIO_SHIFT;
+
+    /// Bit offset of the `block_regions` sub-field within the mask.
+    pub const BLKREGION_SHIFT: u32 = 16;
+    /// Mask selecting the `block_regions` 8-bit sub-field (bits 16-23).
+    pub const BLKREGION_MASK: u32 = 0xFF << BLKREGION_SHIFT;
+
+    /// Revoke all capability classes at once.
+    pub const ALL: u32 = BLOCK_IO | NETWORK | SPAWN | HYPERVISOR | MMIO_MASK | BLKREGION_MASK;
 }
 
 /// Compact bitset of permitted syscalls, stored as a `u64`.
@@ -404,11 +449,10 @@ impl ViSyscall {
             // Yield, Exit, and ForceExit are always permitted — a Cell must be able
             // to yield the CPU, exit cleanly, and force-terminate unresponsive tasks
             // regardless of its allowlist.  SpawnCap is the authority gate for ForceExit.
-            // NotifyOnExit and RegisterService are privileged (SpawnCap-gated, like
-            // ForceExit), so they are always permitted past the allowlist — SpawnCap is
-            // the authority gate enforced at dispatch.
+            // NotifyOnExit, RegisterService, and CapRevoke are privileged (SpawnCap-gated),
+            // so they are always permitted past the allowlist — SpawnCap is the gate at dispatch.
             Self::Yield | Self::Exit | Self::ForceExit | Self::NotifyOnExit
-            | Self::RegisterService | Self::Unknown => None,
+            | Self::RegisterService | Self::CapRevoke | Self::Unknown => None,
         }
     }
 }
@@ -465,6 +509,7 @@ impl From<usize> for ViSyscall {
             216 => ViSyscall::GrantUnregister,
             217 => ViSyscall::WaitForEvent,
             218 => ViSyscall::AudioPlay,
+            219 => ViSyscall::CapRevoke,
             220 => ViSyscall::CreateVm,
             221 => ViSyscall::CreateVcpu,
             222 => ViSyscall::MapGuestMemory,

@@ -45,6 +45,8 @@ mod tests {
         (107,  ViSyscall::FileOp),
         (109,  ViSyscall::Write),
         (120,  ViSyscall::GetTime),
+        (218,  ViSyscall::AudioPlay),
+        (219,  ViSyscall::CapRevoke),
         (310,  ViSyscall::NetTx),
         (311,  ViSyscall::NetRx),
     ];

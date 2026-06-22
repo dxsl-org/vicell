@@ -71,6 +71,11 @@ pub enum AuditEvent {
     /// `encode_u32x2(tid, dropped_flags)` (dropped_flags: bit0 block_io, bit1
     /// network, bit2 spawn, bit3 hypervisor).
     CapNarrowedByPolicy = 19,
+    /// Runtime revocation: a SpawnCap holder stripped capabilities from a live cell.
+    /// Payload: `encode_u32x2(target_tid, cap_mask)` where `cap_mask` matches
+    /// `api::syscall::cap_mask` constants (bit0=block_io, bit1=network, bit2=spawn,
+    /// bit3=hypervisor, bits8-15=mmio_devices, bits16-23=block_regions).
+    CapRevoked = 20,
 }
 
 struct AuditRing {

@@ -14,6 +14,10 @@ extern crate alloc;
 
 pub use api::*;
 
+/// Runtime capability delegation handles — [`CapHandle`] for supervisor cells.
+pub mod cap;
+pub use cap::CapHandle;
+
 // Re-export alloc types
 pub use alloc::boxed;
 pub use alloc::string;
@@ -30,6 +34,10 @@ pub use embedded_io;
 /// Use `ostd::heapless::Vec<T, N>`, `heapless::String<N>`, etc.
 /// `heapless::mpmc::Queue` requires the `critical-section-impl` feature enabled in the kernel.
 pub use heapless;
+/// Command-line argument helpers — [`args()`] and [`check_help()`] for Cell entry points.
+pub mod args;
+pub use args::args;
+pub use args::check_help;
 pub mod fast_ipc;
 /// Typed linear Grant handles for zero-copy shared memory (Singularity exchange-heap pattern).
 pub mod grant;
