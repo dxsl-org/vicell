@@ -21,7 +21,7 @@
 | L1 | LBI overhead <5%; hardware isolation overhead 25–37.7% — SAS là đúng hướng | ✅ Confirmed | Document số này trong specs |
 | L2 | Singularity IPC ~1,200 cycles; Cellos vtable ~2–3 cycles — 2 orders cheaper | ✅ Đúng rồi | Dùng số so sánh trong docs |
 | L3 | GC pauses không bao giờ được giải quyết trong Midori — Rust RAII là lợi thế quyết định | ✅ RAII là RT-capable | Bảo vệ invariant này |
-| L4 | Compiler (rustc) là load-bearing TCB — cần document rõ | ❌ Chưa có | Thêm vào specs/00-context.md |
+| L4 | Compiler (rustc) là load-bearing TCB — cần document rõ | ✅ Done (2026-06-22) | specs/00-context.md §5 |
 | L5 | Mutable statics là "ambient authority" — Midori ban bằng language | ⚠️ Convention, không lint | Xem xét custom lint |
 
 ---
@@ -147,7 +147,7 @@ Technical performance: parity hoặc hơn C/C++ trong non-trivial cases. Team đ
 
 | Priority | Action | Effort | Impact |
 |---|---|---|---|
-| **High** | Document rustc là TCB trong `docs/specs/00-context.md` | Low | Security model completeness |
+| **High** | Document rustc là TCB trong `docs/specs/00-context.md` | Low | ✅ Done 2026-06-22 |
 | **High** | Thêm `GrantHandle<T>` wrapper (`!Copy + !Clone`) cho compile-time single-owner | Medium | Closes Singularity exchange heap gap |
 | **Medium** | Xem xét custom clippy lint cho `static mut` trong kernel non-HAL paths | Low | Enforce Midori mutable statics lesson |
 | **Medium** | Protect no-GC invariant: document policy "không GC runtime trong RT Cells" | Low | RT correctness |

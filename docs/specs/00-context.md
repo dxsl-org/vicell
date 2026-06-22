@@ -1,5 +1,5 @@
 # Cellos system context & design rules
-**Last Updated**: 2026-01-08
+**Last Updated**: 2026-06-22
 **Audience**: Developers & AI Agents
 
 
@@ -162,6 +162,30 @@ Cellos dùng **Language-Based Isolation (LBI)** làm cơ chế bảo mật chín
 
 **Prior art:** Microsoft Singularity/Midori xác định CLR/.NET runtime là load-bearing TCB của họ với cùng pattern. Cellos thay CLR bằng `rustc` — đạt cùng guarantee nhưng không cần GC. Xem `docs/research/research-singularity-midori.md`.
 
+> *"One interesting aspect of relying on type safety was that your compiler becomes part of your TCB."*
+> — Joe Duffy, Safe Native Code (2015)
+
+### Tại sao LBI thay vì hardware MMU per-Cell (số đo)
+
+Singularity (MSPC 2006) đo trực tiếp:
+
+| Isolation mechanism | Overhead |
+|---|---|
+| SIP (Language-Based, Ring 0, no mode-switch) | **<5%** |
+| Hardware isolation (added on top) | **25–33%** avg, **37.7%** trên WebFiles macro-benchmark |
+
+Cellos sẽ không dùng per-Cell SATP vì lý do này. Các Cell chia sẻ address space, `rustc` enforce ranh giới tại compile time.
+
+**IPC cost comparison:**
+
+| System | IPC cost |
+|---|---|
+| Singularity channel (pointer hand-off) | ~1,200 cycles |
+| Cellos vtable dispatch | **~2–3 cycles** (400× rẻ hơn) |
+| Linux syscall | ~80–150 cycles |
+
+Cellos vtable IPC rẻ hơn Singularity 2 orders of magnitude vì không có channel/heap indirection. Grant API (syscalls 208–212) là analogue của exchange heap cho large data (>page).
+
 ### Thành phần TCB (nhỏ nhất → lớn nhất)
 
 | Component | Vai trò | Ước lượng |
@@ -174,8 +198,33 @@ Cellos dùng **Language-Based Isolation (LBI)** làm cơ chế bảo mật chín
 
 - **Cell code** — `#![forbid(unsafe_code)]` nghĩa là kernel không trust Cell code; violation bị caught bởi rustc trước khi link.
 - **C/C++ thư viện qua Tier 1b FFI** — được isolated trong caller's address space; kernel validate tất cả grant/IPC boundaries.
-- **WASM/VM guests (Tier 2/3)** — sandbox bởi wasmi fuel-metering hoặc hypervisor Stage-2 paging.
+- **Lua/VM guests (Tier 1b/3)** — sandbox bởi interpreter manifest restrictions hoặc hypervisor Stage-2 paging.
+
+### Mitigation: giảm thiểu rủi ro rustc-as-TCB
+
+Cellos tốt hơn Singularity/Midori ở điểm này vì ba lý do:
+
+1. **rustc là open-source** — cộng đồng lớn, thường xuyên audit; Bartok (Singularity/Midori) là closed-source.
+2. **Ferrocene** — ISO 26262 ASIL-D certified subset của rustc; đủ điều kiện cho automotive safety market.
+   - ⚠️ **Caveat**: RISC-V chưa là qualified target của Ferrocene (tính đến 2026-06, ETA 12–24 tháng). ARM64 và x86 đã qualified. Không dùng RISC-V safety claim trước khi qualify.
+3. **miri** — interprets MIR bytecode, phát hiện unsoundness trong unsafe code. Chạy trong CI cho kernel unsafe paths.
+
+### Policies từ LBI/TCB (phải follow)
+
+| Policy | Rationale |
+|---|---|
+| **Không link GC runtime vào RT-critical Cells** | Midori's unsolved problem — GC pauses phá RT guarantees. Rust RAII = deterministic destruction là lợi thế cấu trúc quyết định. |
+| **`static mut` trong kernel chỉ qua `Spinlock<Option<T>>`** | Mutable statics = "ambient authority" (F6, Duffy). Cells đã block qua `forbid(unsafe_code)`. Kernel là gap còn lại. |
+| **`#![forbid(unsafe_code)]` tuyệt đối trên mọi Cell** | Compiler không thể verify safety nếu unsafe được phép — một unsafe line đủ để vô hiệu hóa toàn bộ LBI guarantee. |
+| **Upgrade `rustc` ngay khi CVE soundness hole** | Soundness hole trong borrow checker hoặc codegen = P0 breach — không có patch nào khác ngoài upgrade compiler. |
 
 ### Hệ quả với security review
 
 Bất kỳ lỗ hổng nào trong `rustc`'s unsafe checker, borrow checker, hoặc codegen cho phép unsafe code trong crate `#![forbid(unsafe_code)]` là **P0 kernel security breach** với Cellos — cần upgrade compiler ngay lập tức.
+
+**Khi review Cell code**, không cần audit memory safety (rustc đã làm). Tập trung vào:
+- Logic bugs và incorrect IPC protocol usage
+- Grant misuse (phải kiểm tra `!Copy + !Clone` invariant trên owner handle)
+- Capability escalation qua IPC (Cell request syscall không có trong manifest)
+
+*Sources: Hunt & Larus ACM 2007; Deconstructing Process Isolation MSPC 2006; Joe Duffy "Safe Native Code" (2015). Full analysis: `docs/research/research-singularity-midori.md`*
