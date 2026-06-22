@@ -142,14 +142,21 @@ pub fn init_kernel_paging(
 
     #[cfg(target_arch = "riscv64")]
     {
-        let (clint_base, plic_base, plic_size, uart_region) = crate::platform::with(|p| {
-            (p.clint_base, p.plic_base, p.plic_size, p.uart_base & !0xFFFF)
+        let (clint_base, plic_base, plic_size, uart_region, rtc_region) = crate::platform::with(|p| {
+            (p.clint_base, p.plic_base, p.plic_size, p.uart_base & !0xFFFF, p.rtc_base & !0xFFFF)
         });
         root_table.identity_map(clint_base, clint_base + 0x10000, mmio_flags, &mut alloc_fn)
             .map_err(|_| PageTableError::OutOfMemory)?;
         root_table.identity_map(plic_base, plic_base + plic_size, mmio_flags, &mut alloc_fn)
             .map_err(|_| PageTableError::OutOfMemory)?;
         root_table.identity_map(uart_region, uart_region + 0x10000, mmio_flags, &mut alloc_fn)
+            .map_err(|_| PageTableError::OutOfMemory)?;
+        // Goldfish RTC (QEMU virt: 0x101000). Without this, sys_get_wall_secs/
+        // sys_get_wall_time (op 2/3) dereference an unmapped MMIO address in
+        // rtc::now_epoch_ns and the kernel takes a Load Page Fault (scause=13)
+        // while servicing the syscall — first hit by the TLS handshake's cert
+        // validity clock. The RTC window is one 4 KiB page.
+        root_table.identity_map(rtc_region, rtc_region + 0x1000, mmio_flags, &mut alloc_fn)
             .map_err(|_| PageTableError::OutOfMemory)?;
         // PCIe ECAM bus-0 window (1 MiB at 0x3000_0000) for RISC-V virt gpex.
         // Required before pcie_ecam::init() accesses config space.
