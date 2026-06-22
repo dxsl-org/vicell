@@ -307,6 +307,11 @@ pub extern "C" fn kmain(hartid: usize, dtb: usize) -> ! {
                 options(nomem, nostack)
             );
         }
+        // Propagate ACPI-parsed MMIO bases to the APIC driver before init_timers.
+        // Defaults are QEMU q35 values; on real hardware these may differ.
+        crate::hal::apic::set_lapic_phys(acpi_info.lapic_base);
+        crate::hal::apic::set_ioapic_phys(acpi_info.ioapic_base);
+        crate::hal::apic::set_irq_overrides(&acpi_info.irq_overrides, acpi_info.ioapic_gsi_base);
         // Propagate HPET base to HAL timer init (runtime from ACPI, fallback to
         // QEMU q35 default 0xFED0_0000 when ACPI is absent).
         crate::hal::set_hpet_base(acpi_info.hpet_base as usize);

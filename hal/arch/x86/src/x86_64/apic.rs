@@ -1,13 +1,26 @@
-//! Local APIC (0xFEE0_0000) and I/O APIC (0xFEC0_0000) MMIO drivers.
+//! Local APIC and I/O APIC MMIO drivers.
 //!
 //! Limine does NOT identity-map MMIO regions; it only maps physical RAM via the
-//! HHDM.  All LAPIC/IOAPIC accesses therefore use `HHDM_BASE + PHYS_ADDR`.
-//! `HHDM_BASE` is stored at LAPIC init time from the Limine HHDM response.
-const LAPIC_PHYS:  usize = 0xFEE0_0000;
-const IOAPIC_PHYS: usize = 0xFEC0_0000;
+//! HHDM.  All LAPIC/IOAPIC accesses use `HHDM_BASE + PHYS_ADDR`.
+//! `HHDM_BASE` is reset to 0 after `init_kernel_paging_x86` identity-maps MMIO.
+//! Physical bases default to QEMU q35 values; override from ACPI MADT via
+//! `set_lapic_phys` / `set_ioapic_phys` before `init_timers()`.
+use core::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
 
-use core::sync::atomic::{AtomicU64, Ordering};
-static HHDM_BASE: AtomicU64 = AtomicU64::new(0);
+static HHDM_BASE:   AtomicU64   = AtomicU64::new(0);
+static LAPIC_PHYS:  AtomicUsize = AtomicUsize::new(0xFEE0_0000);
+static IOAPIC_PHYS: AtomicUsize = AtomicUsize::new(0xFEC0_0000);
+
+/// ISA IRQ → GSI override table from ACPI MADT type-2 entries.
+/// Index = ISA IRQ (0–15); value = GSI. Identity-mapped by default.
+static IRQ_OVERRIDES: [AtomicU32; 16] = [
+    AtomicU32::new(0),  AtomicU32::new(1),  AtomicU32::new(2),  AtomicU32::new(3),
+    AtomicU32::new(4),  AtomicU32::new(5),  AtomicU32::new(6),  AtomicU32::new(7),
+    AtomicU32::new(8),  AtomicU32::new(9),  AtomicU32::new(10), AtomicU32::new(11),
+    AtomicU32::new(12), AtomicU32::new(13), AtomicU32::new(14), AtomicU32::new(15),
+];
+/// GSI base of the first I/O APIC (MADT type-1 gsi_base field). Usually 0.
+static IOAPIC_GSI_BASE: AtomicU32 = AtomicU32::new(0);
 
 /// Store the HHDM base address so all LAPIC/IOAPIC helpers can use it.
 /// Must be called before any other function in this module.
@@ -15,22 +28,44 @@ pub fn set_hhdm_base(offset: u64) {
     HHDM_BASE.store(offset, Ordering::Relaxed);
 }
 
+/// Override the LAPIC physical base from ACPI MADT. Defaults to 0xFEE0_0000.
+/// Call before `init_timers()`.
+pub fn set_lapic_phys(base: u64) {
+    LAPIC_PHYS.store(base as usize, Ordering::Relaxed);
+}
+
+/// Override the I/O APIC physical base from ACPI MADT. Defaults to 0xFEC0_0000.
+/// Call before `init_timers()`.
+pub fn set_ioapic_phys(base: u64) {
+    IOAPIC_PHYS.store(base as usize, Ordering::Relaxed);
+}
+
+/// Store MADT type-2 IRQ source overrides and the IOAPIC GSI base.
+///
+/// `overrides[n]` = GSI for ISA IRQ n; `gsi_base` = first GSI owned by this
+/// IOAPIC (MADT type-1 field). Call before `init_input_irq()`.
+pub fn set_irq_overrides(overrides: &[u32; 16], gsi_base: u32) {
+    IOAPIC_GSI_BASE.store(gsi_base, Ordering::Relaxed);
+    for (i, &gsi) in overrides.iter().enumerate() {
+        IRQ_OVERRIDES[i].store(gsi, Ordering::Relaxed);
+    }
+}
+
 #[inline]
 fn lapic_base() -> usize {
-    (HHDM_BASE.load(Ordering::Relaxed) as usize) + LAPIC_PHYS
+    (HHDM_BASE.load(Ordering::Relaxed) as usize) + LAPIC_PHYS.load(Ordering::Relaxed)
 }
 #[inline]
 fn ioapic_base() -> usize {
-    (HHDM_BASE.load(Ordering::Relaxed) as usize) + IOAPIC_PHYS
+    (HHDM_BASE.load(Ordering::Relaxed) as usize) + IOAPIC_PHYS.load(Ordering::Relaxed)
 }
 
 fn lw(reg: usize, v: u32) {
-    // SAFETY: LAPIC is accessible via HHDM_BASE + LAPIC_PHYS; write does not
-    // affect memory safety.
+    // SAFETY: LAPIC is identity-mapped by init_kernel_paging_x86 at the parsed base.
     unsafe { core::ptr::write_volatile((lapic_base() + reg) as *mut u32, v); }
 }
 fn iow(idx: u8, v: u32) {
-    // SAFETY: IOAPIC is accessible via HHDM_BASE + IOAPIC_PHYS.
+    // SAFETY: IOAPIC is identity-mapped by init_kernel_paging_x86 at the parsed base.
     let base = ioapic_base();
     unsafe {
         core::ptr::write_volatile(base as *mut u32, idx as u32);
@@ -64,19 +99,19 @@ pub unsafe fn start_oneshot(count: u32) {
 
 /// Read the current LAPIC timer count (used by HPET calibration).
 pub fn read_current_count() -> u32 {
-    // SAFETY: LAPIC is accessible via HHDM_BASE + LAPIC_PHYS.
+    // SAFETY: LAPIC is identity-mapped at LAPIC_PHYS after init_kernel_paging_x86.
     unsafe { core::ptr::read_volatile((lapic_base() + 0x390) as *const u32) }
 }
 
 /// Read the LVT Timer register (for debug/diagnostic only).
 pub fn read_lvt_timer() -> u32 {
-    // SAFETY: LAPIC is accessible via HHDM_BASE + LAPIC_PHYS.
+    // SAFETY: LAPIC is identity-mapped at LAPIC_PHYS after init_kernel_paging_x86.
     unsafe { core::ptr::read_volatile((lapic_base() + 0x320) as *const u32) }
 }
 
 /// Read the LAPIC initial count register (0x380).
 pub fn read_initial_count() -> u32 {
-    // SAFETY: LAPIC is accessible via HHDM_BASE + LAPIC_PHYS.
+    // SAFETY: LAPIC is identity-mapped at LAPIC_PHYS after init_kernel_paging_x86.
     unsafe { core::ptr::read_volatile((lapic_base() + 0x380) as *const u32) }
 }
 
@@ -121,8 +156,18 @@ pub fn init_lapic_calibrated(ticks_per_ms: u64) {
     lw(0x380, safe_count);
 }
 
-/// Redirect IOAPIC IRQ to IDT vector on CPU 0 (edge-triggered, active-high).
-pub fn ioapic_redirect(irq: u8, vec: u8) {
-    iow(0x10 + irq * 2 + 1, 0);       // destination: CPU 0
-    iow(0x10 + irq * 2,     vec as u32); // vector, unmasked
+/// Redirect an ISA IRQ to an IDT vector on CPU 0 (edge-triggered, active-high).
+///
+/// Translates `isa_irq` through the MADT type-2 override table to the correct
+/// GSI, then subtracts the IOAPIC's GSI base to get the physical pin index.
+/// On QEMU q35 the override table is identity-mapped (no change in behaviour).
+pub fn ioapic_redirect(isa_irq: u8, vec: u8) {
+    let gsi = IRQ_OVERRIDES
+        .get(isa_irq as usize)
+        .map(|a| a.load(Ordering::Relaxed))
+        .unwrap_or(isa_irq as u32);
+    let gsi_base = IOAPIC_GSI_BASE.load(Ordering::Relaxed);
+    let pin = gsi.saturating_sub(gsi_base) as u8;
+    iow(0x10 + pin * 2 + 1, 0);        // destination: CPU 0
+    iow(0x10 + pin * 2,     vec as u32); // vector, unmasked
 }

@@ -2,7 +2,7 @@
 //!
 //! Boots the x86_64 kernel on a QEMU q35 machine with a PCIe NVMe controller
 //! attached.  The kernel runs its full PCIe ECAM scan + NVMe init sequence and
-//! must log `[nvme] driver ready — NVMe block device active` on the serial port.
+//! must log `[nvme] driver ready` on the serial port.
 //!
 //! A second test sends `blktest` via the shell prompt and verifies that the
 //! first sector is read without error (the `blktest` tool reads sector 0 via
@@ -13,8 +13,8 @@
 //!
 //! Prerequisites:
 //!   - `qemu-system-x86_64` on PATH (or `VIOS_QEMU_X86` env var).
-//!   - A built x86_64 kernel:
-//!     `cargo build --release -p vicell-kernel --target x86_64-unknown-none`
+//!   - The Limine ISO built at `build/vicell-x86.iso`
+//!     (`build/make-iso.sh` or `scripts/build-x86_64-cells.ps1`).
 //!   - The disk image `disk_v3.img` for the boot filesystem (VirtIO block, RISC-V
 //!     disk) is NOT used here; an ephemeral zeroed NVMe image is created on the fly.
 //!
@@ -40,10 +40,10 @@ fn repo_root() -> PathBuf {
         .expect("repo root resolves")
 }
 
-/// Path to the x86_64 release kernel ELF.
-fn x86_kernel_path() -> String {
+/// Path to the x86_64 Limine ISO.
+fn iso_path() -> String {
     repo_root()
-        .join("target/x86_64-unknown-none/release/vicell-kernel")
+        .join("build/vicell-x86.iso")
         .to_string_lossy()
         .into_owned()
 }
@@ -53,18 +53,17 @@ fn x86_kernel_path() -> String {
 /// Returns `true` when everything is available.  Prints a human-readable skip
 /// reason for each missing prerequisite to make CI failures easy to diagnose.
 fn prerequisites_ok() -> bool {
-    let kernel = PathBuf::from(x86_kernel_path());
-    let kernel_ok = kernel.exists();
+    let iso_ok = PathBuf::from(iso_path()).exists();
     let qemu_ok = std::process::Command::new(qemu_x86_binary())
         .arg("--version")
         .output()
         .is_ok();
 
-    if !kernel_ok {
+    if !iso_ok {
         eprintln!(
-            "SKIP nvme-x86: x86_64 kernel not built ({})\n\
-             Build with: cargo build --release -p vicell-kernel --target x86_64-unknown-none",
-            x86_kernel_path()
+            "SKIP nvme-x86: x86_64 ISO not built ({})\n\
+             Build with: scripts/build-x86_64-cells.ps1 then build/make-iso.sh",
+            iso_path()
         );
     }
     if !qemu_ok {
@@ -73,7 +72,7 @@ fn prerequisites_ok() -> bool {
              Install QEMU or set VIOS_QEMU_X86 to the binary path."
         );
     }
-    kernel_ok && qemu_ok
+    iso_ok && qemu_ok
 }
 
 /// Create a small zeroed raw disk image in the system temp directory.
@@ -92,21 +91,15 @@ fn make_nvme_disk() -> PathBuf {
         std::process::id(),
         CTR.fetch_add(1, Ordering::Relaxed)
     ));
-    // Allocate 64 MiB via sparse write (seek to end, write one zero byte).
-    // On Windows this creates a sparse file; on Linux it creates a hole.
-    // The NVMe identify command only reads the namespace data block, which
-    // the QEMU NVMe emulation synthesises from device metadata, so every
-    // byte of the file is read as zero — this is correct behaviour.
     use std::io::Write;
     let mut f = std::fs::OpenOptions::new()
         .write(true)
         .create(true)
         .open(&path)
         .expect("create NVMe disk image");
-    // Write 64 MiB (64 * 1024 * 1024 bytes).
     let size: u64 = 64 * 1024 * 1024;
     f.set_len(size).expect("set NVMe disk size");
-    let _ = f.write_all(b""); // flush metadata
+    let _ = f.write_all(b"");
     drop(f);
     path
 }
@@ -129,8 +122,8 @@ fn nvme_controller_initialises_x86() {
 
     let nvme_disk = make_nvme_disk();
 
-    let qemu = QemuRunner::boot_x86_nvme(
-        &x86_kernel_path(),
+    let qemu = QemuRunner::boot_x86_bios_with_nvme(
+        &iso_path(),
         &nvme_disk.to_string_lossy(),
     );
 
@@ -162,8 +155,8 @@ fn pcie_ecam_finds_nvme_x86() {
 
     let nvme_disk = make_nvme_disk();
 
-    let qemu = QemuRunner::boot_x86_nvme(
-        &x86_kernel_path(),
+    let qemu = QemuRunner::boot_x86_bios_with_nvme(
+        &iso_path(),
         &nvme_disk.to_string_lossy(),
     );
 
@@ -213,8 +206,8 @@ fn nvme_block_io_gate_enforced_x86() {
 
     let nvme_disk = make_nvme_disk();
 
-    let mut qemu = QemuRunner::boot_x86_nvme(
-        &x86_kernel_path(),
+    let mut qemu = QemuRunner::boot_x86_bios_with_nvme(
+        &iso_path(),
         &nvme_disk.to_string_lossy(),
     );
 

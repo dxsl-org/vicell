@@ -7,7 +7,7 @@
 //! `nic_x86_vtd_enabled` — same boot plus `-device intel-iommu`; asserts both
 //! the VT-d passthrough log and the NIC init log.
 //!
-//! Both tests skip gracefully when the x86_64 kernel is not built or
+//! Both tests skip gracefully when the x86_64 ISO is not built or
 //! `qemu-system-x86_64` is not on PATH.
 
 use std::path::PathBuf;
@@ -24,32 +24,31 @@ fn repo_root() -> PathBuf {
         .expect("repo root resolves")
 }
 
-fn x86_kernel_path() -> String {
+fn iso_path() -> String {
     repo_root()
-        .join("target/x86_64-unknown-none/release/vicell-kernel")
+        .join("build/vicell-x86.iso")
         .to_string_lossy()
         .into_owned()
 }
 
 fn prerequisites_ok() -> bool {
-    let kernel = PathBuf::from(x86_kernel_path());
-    let kernel_ok = kernel.exists();
+    let iso_ok = PathBuf::from(iso_path()).exists();
     let qemu_ok = std::process::Command::new(qemu_x86_binary())
         .arg("--version")
         .output()
         .is_ok();
 
-    if !kernel_ok {
+    if !iso_ok {
         eprintln!(
-            "SKIP nic-x86: x86_64 kernel not built ({})\n\
-             Build with: cargo build --release -p vicell-kernel --target x86_64-unknown-none",
-            x86_kernel_path()
+            "SKIP nic-x86: x86_64 ISO not built ({})\n\
+             Build with: scripts/build-x86_64-cells.ps1 then build/make-iso.sh",
+            iso_path()
         );
     }
     if !qemu_ok {
         eprintln!("SKIP nic-x86: qemu-system-x86_64 not on PATH");
     }
-    kernel_ok && qemu_ok
+    iso_ok && qemu_ok
 }
 
 fn make_nvme_disk() -> PathBuf {
@@ -79,7 +78,7 @@ fn nic_x86_e1000_init() {
     if !prerequisites_ok() { return; }
 
     let disk = make_nvme_disk();
-    let qemu = QemuRunner::boot_x86_with_nic(&x86_kernel_path(), &disk.to_string_lossy());
+    let qemu = QemuRunner::boot_x86_bios_with_nic(&iso_path(), &disk.to_string_lossy());
 
     qemu.wait_for("[e1000] NIC initialized", BOOT_TIMEOUT)
         .unwrap_or_else(|e| {
@@ -105,7 +104,7 @@ fn nic_x86_vtd_enabled() {
     if !prerequisites_ok() { return; }
 
     let disk = make_nvme_disk();
-    let qemu = QemuRunner::boot_x86_with_vtd(&x86_kernel_path(), &disk.to_string_lossy());
+    let qemu = QemuRunner::boot_x86_bios_with_vtd(&iso_path(), &disk.to_string_lossy());
 
     qemu.wait_for("[vtd] Intel VT-d passthrough enabled", BOOT_TIMEOUT)
         .unwrap_or_else(|e| {

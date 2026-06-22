@@ -190,7 +190,7 @@ fn handoff_rv64_kernel_starts() {
         return;
     }
     let qemu = QemuRunner::boot_rv64(&rv64_kernel_path());
-    qemu.wait_for("[ViCell] kernel boot v", 8)
+    qemu.wait_for("[Cellos] kernel boot v", 8)
         .unwrap_or_else(|e| panic!("{e}\n--- output ---\n{}", qemu.dump()));
 }
 
@@ -255,7 +255,7 @@ fn handoff_aarch64_kernel_starts() {
         return;
     }
     let qemu = QemuRunner::boot_aarch64(&aarch64_kernel_path());
-    qemu.wait_for("[ViCell] kernel boot v", 10)
+    qemu.wait_for("[Cellos] kernel boot v", 10)
         .unwrap_or_else(|e| panic!("{e}\n--- output ---\n{}", qemu.dump()));
 }
 
@@ -308,7 +308,7 @@ fn handoff_rv32_kernel_starts() {
         return;
     }
     let qemu = QemuRunner::boot_rv32(&rv32_kernel_path());
-    qemu.wait_for("[ViCell] kernel boot v", 10)
+    qemu.wait_for("[Cellos] kernel boot v", 10)
         .unwrap_or_else(|e| panic!("{e}\n--- output ---\n{}", qemu.dump()));
 }
 
@@ -394,7 +394,7 @@ fn handoff_x86_kernel_starts() {
         return;
     }
     let qemu = QemuRunner::boot_x86_bios(&x86_iso_path());
-    qemu.wait_for("[ViCell] kernel boot v", 20)
+    qemu.wait_for("[Cellos] kernel boot v", 20)
         .unwrap_or_else(|e| panic!("{e}\n--- output ---\n{}", qemu.dump()));
 }
 
@@ -421,15 +421,15 @@ fn handoff_x86_frame_allocator() {
         .unwrap_or_else(|e| panic!("{e}\n--- output ---\n{}", qemu.dump()));
 }
 
-/// x86_64 bring-up uses Limine's PML4 (own tables deferred to Phase 09).
-/// Verify the correct paging path was taken.
+/// x86_64 builds and activates its own PML4 (Limine PML4 is replaced in P01).
+/// Verify the kernel PML4 path is taken and paging is successfully activated.
 #[test]
 fn handoff_x86_limine_paging() {
     if !x86_prerequisites_ok() {
         return;
     }
     let qemu = QemuRunner::boot_x86_bios(&x86_iso_path());
-    qemu.wait_for("Paging: using Limine PML4", 27)
+    qemu.wait_for("x86_64 paging initialized", 27)
         .unwrap_or_else(|e| panic!("{e}\n--- output ---\n{}", qemu.dump()));
 }
 
@@ -462,7 +462,7 @@ fn handoff_aarch32_kernel_starts() {
         return;
     }
     let qemu = QemuRunner::boot_aarch32(&aarch32_kernel_path());
-    qemu.wait_for("[ViCell] kernel boot v", 12)
+    qemu.wait_for("[Cellos] kernel boot v", 12)
         .unwrap_or_else(|e| panic!("{e}\n--- output ---\n{}", qemu.dump()));
 }
 
@@ -518,7 +518,7 @@ fn handoff_x86_32_kernel_starts() {
         return;
     }
     let qemu = QemuRunner::boot_x86_32(&x86_32_kernel_path());
-    qemu.wait_for("[ViCell] kernel boot v", 12)
+    qemu.wait_for("[Cellos] kernel boot v", 12)
         .unwrap_or_else(|e| panic!("{e}\n--- output ---\n{}", qemu.dump()));
 }
 
