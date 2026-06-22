@@ -31,11 +31,12 @@ pub enum LlmRequest<'a> {
 }
 
 /// `llm-gateway` → `core`.
-///
-/// `ToolCalls` is intentionally absent until P2 wires tool dispatch.
 #[derive(Debug, Serialize, Deserialize)]
 pub enum LlmReply {
     Text(String),
+    /// LLM wants to invoke one or more tools (P2+). The gateway sets this when
+    /// the content starts with `TOOL_CALL:`.
+    ToolCalls(alloc::vec::Vec<ToolCall>),
     Error(String),
 }
 

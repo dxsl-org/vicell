@@ -8,10 +8,15 @@ uses embedded-tls `UnsecureProvider`, so it does not verify the cert) and
 answers any `POST /v1/chat/completions` with an OpenAI-compatible JSON that
 echoes the prompt back — proving the round-trip end to end.
 
+P2 tool simulation: if the prompt contains keywords like "list", "files", etc.
+the mock returns a TOOL_CALL: reply. If the prompt already contains
+"TOOL_RESULT:" the mock synthesises a final text answer from it.
+
 Run on the HOST (the guest reaches it at 10.0.2.2:8443 via QEMU user-net):
-    python tools/hypha-mock-llm/mock_proxy.py
+    python tools/hypha-mock-llm/mock_proxy.py           # TLS mode
+    python tools/hypha-mock-llm/mock_proxy.py --plain   # HTTP (plaintext)
 Then in the Cellos shell:
-    /bin/hypha          # or: /bin/llm-gateway  (P0 standalone, if reverted)
+    hypha
 
 Requires QEMU user-mode (SLIRP) networking, where guest 10.0.2.2 == host.
 """
@@ -19,6 +24,7 @@ Requires QEMU user-mode (SLIRP) networking, where guest 10.0.2.2 == host.
 import datetime
 import json
 import os
+import re
 import ssl
 import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -73,6 +79,54 @@ def ensure_cert():
     print(f"[mock-llm] generated self-signed P-256 cert: {CERT}")
 
 
+# ── P2 tool simulation ────────────────────────────────────────────────────────
+
+def _tool_call_for(prompt: str) -> str | None:
+    """Return a TOOL_CALL: string if the prompt implies a file tool is needed,
+    or None to give a plain text reply."""
+    low = prompt.lower()
+
+    # Already has a TOOL_RESULT — synthesize a final text answer.
+    if "tool_result:" in low:
+        return None  # fall through to text synthesis below (handled by caller)
+
+    # User is asking about directory contents.
+    if any(w in low for w in ("list", "files", "ls ", "what's in", "what is in",
+                               "dir ", "folder", "directory")):
+        return 'TOOL_CALL: {"name":"list_dir","args":{"path":"/data"}}'
+
+    # User is asking to read a file.
+    if re.search(r'read|contents? of|show me', low):
+        # Try to extract a path hint from the prompt.
+        m = re.search(r'(/\S+)', prompt)
+        path = m.group(1) if m else "/data/notes.txt"
+        return f'TOOL_CALL: {{"name":"read_file","args":{{"path":"{path}"}}}}'
+
+    return None
+
+
+def _text_reply(prompt: str) -> str:
+    """Synthesise a plain text reply — either post-tool synthesis or a plain echo."""
+    low = prompt.lower()
+
+    # Incorporate tool result if present.
+    if "tool_result:" in low:
+        m = re.search(r'tool_result:\s*(\S.*?)(?:\n|$)', prompt)
+        snippet = m.group(1)[:120] if m else "(see above)"
+        return (
+            "Based on the file system query, here is what I found: "
+            + snippet
+            + ". Is there anything else you'd like to do with these files?"
+        )
+
+    return (
+        "Mock LLM here — the Cellos TLS+HTTP+JSON path works. "
+        "You sent: " + prompt[-160:].replace("\n", " ")
+    )
+
+
+# ── HTTP handler ─────────────────────────────────────────────────────────────
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         print("[mock-llm] " + (fmt % args))
@@ -80,18 +134,22 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         length = int(self.headers.get("Content-Length", 0))
         raw = self.rfile.read(length) if length else b""
-        user = ""
+        prompt = ""
         try:
             msgs = json.loads(raw or b"{}").get("messages", [])
             if msgs:
-                user = msgs[-1].get("content", "")
+                prompt = msgs[-1].get("content", "")
         except Exception:
             pass
 
-        reply = (
-            "Mock LLM here — the Cellos TLS+HTTP+JSON path works. "
-            "You sent: " + user[:160].replace("\n", " ")
-        )
+        tool_call = _tool_call_for(prompt)
+        if tool_call:
+            reply = tool_call
+            print(f"[mock-llm] → tool call: {tool_call[:80]}")
+        else:
+            reply = _text_reply(prompt)
+            print(f"[mock-llm] → text reply")
+
         body = json.dumps({
             "id": "mock-1",
             "object": "chat.completion",
@@ -113,6 +171,7 @@ def main():
     if plain:
         print(f"[mock-llm] PLAIN HTTP mock LLM listening on {HOST}:{port}")
         print(f"[mock-llm] guest reaches it at 10.0.2.2:{port} (QEMU user-net)")
+        print(f"[mock-llm] P2 tool simulation active — ask about files/dirs")
     else:
         ensure_cert()
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)

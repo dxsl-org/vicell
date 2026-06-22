@@ -1,0 +1,18 @@
+[package]
+name = "hypha-tool-fs"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+# Hypha tool-fs — filesystem tool cell for the Hypha AI agent (P2).
+# Handles AgentToolRequest::Invoke{name,args_json} and dispatches to VfsClient.
+# Supports: read_file, write_file, list_dir. No block_io cap — uses VFS IPC.
+
+[dependencies]
+ostd        = { path = "../../../../../libs/ostd" }
+api         = { path = "../../../../../libs/api" }
+agent-proto = { path = "../../../../../libs/agent-proto" }
+postcard    = { version = "1", default-features = false, features = ["alloc"] }
+
+[build-dependencies]
+cell-build = { path = "../../../../../libs/cell-build" }

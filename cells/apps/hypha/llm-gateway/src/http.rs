@@ -1,10 +1,11 @@
-//! Minimal HTTP/1.0 + JSON helpers for P0.
+//! Minimal HTTP/1.0 + JSON helpers for P0/P2.
 //!
 //! Hand-rolled on purpose (os-gaps **G1** no HTTP lib, **G4** no_std JSON):
 //! good enough to prove the LLM round-trip. Promote to `ostd::http` +
 //! `serde-json-core` once a second consumer appears or parsing needs to be
 //! robust against arbitrary provider responses.
 
+use agent_proto::ToolCall;
 use alloc::format;
 use alloc::string::String;
 
@@ -52,6 +53,85 @@ pub fn http_body(resp: &[u8]) -> Option<&[u8]> {
     resp.windows(4)
         .position(|w| w == b"\r\n\r\n")
         .map(|i| &resp[i + 4..])
+}
+
+/// If `content` starts with `TOOL_CALL:` (ReAct-style), parse and return a
+/// [`ToolCall`]. Returns `None` for ordinary text replies.
+///
+/// Expected format (LLM must emit ONLY this, nothing else):
+/// `TOOL_CALL: {"name":"tool_name","args":{...}}`
+pub fn extract_tool_call(content: &str) -> Option<ToolCall> {
+    let s = content.trim_start_matches(|c: char| c == ' ' || c == '\t' || c == '\n' || c == '\r');
+    let rest = s.strip_prefix("TOOL_CALL:")?;
+    let json = rest.trim_start_matches(|c: char| c == ' ' || c == '\t');
+    let name = json_extract_str(json, "name")?;
+    let args_json = json_extract_obj(json, "args").unwrap_or("{}");
+    Some(ToolCall {
+        name: String::from(name),
+        args_json: String::from(args_json),
+    })
+}
+
+/// Extract a plain JSON string field from a flat JSON object: `"key": "value"`.
+/// Does not handle nested objects inside the value, but handles `\"` escapes.
+fn json_extract_str<'a>(json: &'a str, key: &str) -> Option<&'a str> {
+    let search = format!("\"{}\"", key);
+    let mut idx = json.find(search.as_str())? + search.len();
+    let bytes = json.as_bytes();
+    while idx < bytes.len() && matches!(bytes[idx], b' ' | b'\t' | b':') {
+        idx += 1;
+    }
+    if idx >= bytes.len() || bytes[idx] != b'"' {
+        return None;
+    }
+    idx += 1; // skip opening quote
+    let start = idx;
+    while idx < bytes.len() && bytes[idx] != b'"' {
+        if bytes[idx] == b'\\' {
+            idx += 1; // skip escaped character
+        }
+        idx += 1;
+    }
+    Some(&json[start..idx])
+}
+
+/// Extract a JSON object value `{...}` for a given key using brace counting.
+/// Handles nested objects and quoted strings containing braces.
+fn json_extract_obj<'a>(json: &'a str, key: &str) -> Option<&'a str> {
+    let search = format!("\"{}\"", key);
+    let mut idx = json.find(search.as_str())? + search.len();
+    let bytes = json.as_bytes();
+    while idx < bytes.len() && matches!(bytes[idx], b' ' | b'\t' | b':') {
+        idx += 1;
+    }
+    if idx >= bytes.len() || bytes[idx] != b'{' {
+        return None;
+    }
+    let start = idx;
+    let mut depth = 0usize;
+    while idx < bytes.len() {
+        match bytes[idx] {
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(&json[start..=idx]);
+                }
+            }
+            b'"' => {
+                idx += 1;
+                while idx < bytes.len() && bytes[idx] != b'"' {
+                    if bytes[idx] == b'\\' {
+                        idx += 1;
+                    }
+                    idx += 1;
+                }
+            }
+            _ => {}
+        }
+        idx += 1;
+    }
+    None
 }
 
 /// Extract the first `"content": "..."` string value from a JSON body and

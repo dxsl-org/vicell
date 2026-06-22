@@ -60,7 +60,7 @@ pub fn main() {
 fn handle(ctx: &AppContext, sender: usize, data: &[u8]) {
     let reply = match postcard::from_bytes::<LlmRequest>(data) {
         Ok(LlmRequest::Complete { prompt }) => match complete(MODEL, prompt) {
-            Ok(text) => LlmReply::Text(fit(text, IPC_REPLY_MAX)),
+            Ok(text) => classify_reply(text),
             Err(e) => LlmReply::Error(e),
         },
         Err(_) => LlmReply::Error(String::from("bad LlmRequest encoding")),
@@ -86,7 +86,19 @@ fn complete(model: &str, prompt: &str) -> Result<String, String> {
     println("");
 
     let body = http::http_body(&resp).ok_or_else(|| String::from("no HTTP body in response"))?;
-    http::extract_content(body).ok_or_else(|| String::from("no content field in response"))
+    let content =
+        http::extract_content(body).ok_or_else(|| String::from("no content field in response"))?;
+    Ok(content)
+}
+
+/// Inspect the raw completion text: if it starts with `TOOL_CALL:` return
+/// `ToolCalls`; otherwise return `Text` (truncated to the IPC budget).
+fn classify_reply(text: String) -> LlmReply {
+    if let Some(call) = http::extract_tool_call(&text) {
+        LlmReply::ToolCalls(alloc::vec![call])
+    } else {
+        LlmReply::Text(fit(text, IPC_REPLY_MAX))
+    }
 }
 
 /// Truncate `s` to at most `max` bytes on a char boundary, marking truncation.

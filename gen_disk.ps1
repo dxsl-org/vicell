@@ -44,7 +44,7 @@ cargo build --release -p app-bench 2>&1 | Select-Object -Last 3   # builds bench
 cargo build --release -p app-net-tools 2>&1 | Select-Object -Last 3
 cargo build --release -p app-sys-tools 2>&1 | Select-Object -Last 3
 cargo build --release -p robot-demo -p robot-dashboard 2>&1 | Select-Object -Last 3
-cargo build --release -p hypha-llm-gateway -p hypha-core 2>&1 | Select-Object -Last 3   # Hypha P0/P1 — gateway + core
+cargo build --release -p hypha-llm-gateway -p hypha-core -p hypha-tool-fs 2>&1 | Select-Object -Last 3   # Hypha P0/P1/P2
 cargo build --release -p input-test 2>&1 | Select-Object -Last 3
 cargo build --release -p audio-demo 2>&1 | Select-Object -Last 3   # VirtIO sound test tone
 cargo build --release -p app-https-demo 2>&1 | Select-Object -Last 3   # G14 TLS server-auth e2e gate
@@ -106,6 +106,7 @@ $robot_demo_bin = "$rel_dir\robot-demo"       # G1 sensor→actuator reference d
 $dashboard_bin = "$rel_dir\robot-dashboard"  # G1 ViUI v2 dashboard demo
 $hypha_llm_bin = "$rel_dir\hypha-llm-gateway" # Hypha P0 — LLM network gateway
 $hypha_core_bin = "$rel_dir\hypha-core"       # Hypha P1 — agent brain (chat)
+$hypha_tool_fs_bin = "$rel_dir\hypha-tool-fs" # Hypha P2 — filesystem tool cell
 $nc_bin     = "$rel_dir\nc"               # Phase A: TCP netcat tool
 $curl_bin   = "$rel_dir\curl"             # Phase B: HTTP GET client
 $wget_bin   = "$rel_dir\wget"             # Phase U: HTTP wget tool
@@ -240,8 +241,9 @@ if (Test-Path $net_bin)   { $table_args += "/bin/net=$net_bin" }
 if (Test-Path $comp_bin)        { $table_args += "/bin/compositor=$comp_bin" }
 if (Test-Path $robot_demo_bin)  { $table_args += "/bin/robot-demo=$robot_demo_bin" }
 if (Test-Path $dashboard_bin)   { $table_args += "/bin/robot-dashboard=$dashboard_bin" }
-if (Test-Path $hypha_llm_bin)   { $table_args += "/bin/llm-gateway=$hypha_llm_bin" }
-if (Test-Path $hypha_core_bin)  { $table_args += "/bin/hypha=$hypha_core_bin" }
+if (Test-Path $hypha_llm_bin)      { $table_args += "/bin/llm-gateway=$hypha_llm_bin" }
+if (Test-Path $hypha_core_bin)     { $table_args += "/bin/hypha=$hypha_core_bin" }
+if (Test-Path $hypha_tool_fs_bin)  { $table_args += "/bin/tool-fs=$hypha_tool_fs_bin" }
 if (Test-Path $nc_bin)    { $table_args += "/bin/nc=$nc_bin" }
 if (Test-Path $curl_bin)  { $table_args += "/bin/curl=$curl_bin" }
 if (Test-Path $wget_bin)  { $table_args += "/bin/wget=$wget_bin" }
