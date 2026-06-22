@@ -80,6 +80,11 @@ fn smoke_handler(_ctx: &mut AppContext, event: AppEvent) {
 }
 
 fn run_smoke() {
+    // TLS handshake in QEMU (ECDHE key exchange + SLIRP TCP) takes 20-50 s.
+    // Reset the watchdog to 60 s so the cell isn't killed mid-handshake.
+    // Heartbeat is in the base syscall set — no extra cap needed.
+    ostd::syscall::sys_heartbeat(6000);
+
     println("[http-smoke] HTTP/JSON e2e smoke starting");
 
     // ── HTTP over TcpStream ────────────────────────────────────────────────
