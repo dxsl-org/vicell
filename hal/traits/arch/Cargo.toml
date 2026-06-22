@@ -2,6 +2,7 @@
 name = "hal-arch-trait"
 version = "0.1.0"
 edition = "2021"
+license = "MPL-2.0"
 
 [dependencies]
 # No dependencies ideally, or just types if needed.
