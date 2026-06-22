@@ -143,7 +143,7 @@ pub fn init_kernel_paging(
     #[cfg(target_arch = "riscv64")]
     {
         let (clint_base, plic_base, plic_size, uart_region, rtc_region) = crate::platform::with(|p| {
-            (p.clint_base, p.plic_base, p.plic_size, p.uart_base & !0xFFFF, p.rtc_base & !0xFFFF)
+            (p.clint_base, p.plic_base, p.plic_size, p.uart_base & !0xFFFF, p.rtc_base & !0xFFF)
         });
         root_table.identity_map(clint_base, clint_base + 0x10000, mmio_flags, &mut alloc_fn)
             .map_err(|_| PageTableError::OutOfMemory)?;
