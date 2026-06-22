@@ -1,6 +1,7 @@
 use ostd::executor::yield_now;
 use ostd::input::{poll_events, InputEvent, KeyState, KeySym};
 use ostd::prelude::*;
+use api::syscall::service;
 
 pub struct AsyncStdin;
 
@@ -8,8 +9,8 @@ impl AsyncStdin {
     /// Read a line from stdin into an owned Vec<u8>.
     ///
     /// Sources in priority order:
-    ///   1. VirtIO keyboard via input service (fb_console keyboard relay)
-    ///   2. UART/serial via sys_read(fd=0) — legacy fallback
+    ///   1. VirtIO keyboard + UART via input service (EV_ASCII relay)
+    ///   2. UART/serial via sys_read(fd=0) — fallback when input service absent
     ///
     /// Returns the bytes entered (excluding the newline). Ownership satisfies
     /// Law 2: no borrowed slice across `.await`.
@@ -97,7 +98,16 @@ impl AsyncStdin {
                 continue;
             }
 
-            // ── UART / serial fallback ─────────────────────────────────────
+            // When the input service is registered it delivers UART chars via
+            // EV_ASCII IPC *and* the kernel also stores them in the UART ring
+            // buffer.  Reading both paths doubles every keystroke.  Skip UART
+            // entirely while the input service is online.
+            if ostd::syscall::sys_lookup_service(service::INPUT).is_some() {
+                yield_now().await;
+                continue;
+            }
+
+            // ── UART / serial fallback (headless: no VirtIO keyboard) ─────
             let mut c = [0u8; 1];
             match ostd::syscall::sys_read(0, &mut c) {
                 Ok(n) if n > 0 => {
