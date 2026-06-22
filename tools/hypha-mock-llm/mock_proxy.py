@@ -161,7 +161,7 @@ def _text_reply(prompt: str) -> str:
         return prefix + snippet + ". Is there anything else?"
 
     return (
-        "Mock LLM here — the Cellos TLS+HTTP+JSON path works. "
+        "Mock LLM here - the Cellos TLS+HTTP+JSON path works. "
         "You sent: " + _user_message(prompt)[-160:].replace("\n", " ")
     )
 
@@ -186,10 +186,10 @@ class Handler(BaseHTTPRequestHandler):
         tool_call = _tool_call_for(prompt)
         if tool_call:
             reply = tool_call
-            print(f"[mock-llm] → tool call: {tool_call[:80]}")
+            print(f"[mock-llm] -> tool call: {tool_call[:80]}")
         else:
             reply = _text_reply(prompt)
-            print(f"[mock-llm] → text reply")
+            print(f"[mock-llm] -> text reply")
 
         body = json.dumps({
             "id": "mock-1",
@@ -205,6 +205,16 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
+    # A logging print must NEVER crash a request handler. On a Windows cp1252
+    # console an unencodable char (e.g. a Unicode arrow) raises UnicodeEncodeError
+    # mid-do_POST, killing the response so the TLS client hangs waiting for a
+    # reply that never comes. Force UTF-8 with a non-fatal error handler.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="backslashreplace")
+        except (AttributeError, ValueError):
+            pass
+
     plain = "--plain" in sys.argv
     port = 8080 if plain else PORT
 
