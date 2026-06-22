@@ -1,10 +1,10 @@
-# ViCell system context & design rules
+# Cellos system context & design rules
 **Last Updated**: 2026-01-08
 **Audience**: Developers & AI Agents
 
 
 ## 🔴 PRIME DIRECTIVE
-**ViCell uses Cellular SAS (Single Address Space) + Language-Based Isolation (LBI)**
+**Cellos uses Cellular SAS (Single Address Space) + Language-Based Isolation (LBI)**
 
 - ❌ **NOT** traditional Linux/Unix process-based thinking
 - ✅ **YES** Cellular architecture with zero-copy IPC
@@ -32,7 +32,7 @@ Trước khi code bất kỳ module nào, Agent **BẮT BUỘC** phải đọc f
 
 ## 2. Cấu trúc thư mục chuẩn
 ```text
-ViCell/
+Cellos/
 ├── kernel/                   # Nano Kernel (Runtime Linker & Manager)
 │   └── src/ 
 │       ├── boot/             # Khởi tạo sơ khai (Handover từ OpenSBI/Limine) 
@@ -116,8 +116,8 @@ ViCell/
 - Sử dụng cấu trúc hiện đại: `foo.rs` nằm ngang hàng với thư mục `foo/`.
 - Tên file/thư mục phải là snake_case.
 
-**Luật 6: ViCell Naming Convention**
-- Mọi thành phần trong mã nguồn phải tuân thủ quy tắc đặt tên để phân biệt giữa **Hợp đồng ViCell (Contract)**, **Thực thi (Implementation)** và **Mã nguồn Fork**.
+**Luật 6: Cellos Naming Convention**
+- Mọi thành phần trong mã nguồn phải tuân thủ quy tắc đặt tên để phân biệt giữa **Hợp đồng Cellos (Contract)**, **Thực thi (Implementation)** và **Mã nguồn Fork**.
 - **Chống đụng độ:** Không được đặt tên trùng với các thư viện fork (ví dụ: cấm đặt tên Trait là `FileSystem` nếu đã fork RedoxFS).
 - **Định danh SAS:** Các Trait bắt đầu bằng `Vi` phải hỗ trợ cơ chế chuyển giao sở hữu (Ownership) hoặc Lease/Grant để tối ưu hóa Single Address Space.
 - **Refactor hàng Fork:** Khi đưa mã nguồn ngoại lai vào, phải giữ nguyên logic gốc nhưng phải bọc (wrap) hoặc implement lại các Trait theo chuẩn `Vi` để Kernel có thể gọi.
@@ -152,7 +152,7 @@ ViCell/
 
 ## 5. Trusted Computing Base (TCB)
 
-ViCell dùng **Language-Based Isolation (LBI)** làm cơ chế bảo mật chính thay cho hardware MMU per-process. Điều này có một hệ quả quan trọng: **`rustc` là load-bearing TCB**.
+Cellos dùng **Language-Based Isolation (LBI)** làm cơ chế bảo mật chính thay cho hardware MMU per-process. Điều này có một hệ quả quan trọng: **`rustc` là load-bearing TCB**.
 
 ### Tại sao `rustc` là TCB
 
@@ -160,14 +160,14 @@ ViCell dùng **Language-Based Isolation (LBI)** làm cơ chế bảo mật chín
 - Borrow checker ngăn một Cell giữ live reference vào vùng nhớ của Cell khác — đây là ranh giới cách ly chính.
 - Nếu `rustc` bị compromise (compiler supply-chain attack hoặc soundness hole), toàn bộ Cell isolation guarantee sụp đổ.
 
-**Prior art:** Microsoft Singularity/Midori xác định CLR/.NET runtime là load-bearing TCB của họ với cùng pattern. ViCell thay CLR bằng `rustc` — đạt cùng guarantee nhưng không cần GC. Xem `docs/research/research-singularity-midori.md`.
+**Prior art:** Microsoft Singularity/Midori xác định CLR/.NET runtime là load-bearing TCB của họ với cùng pattern. Cellos thay CLR bằng `rustc` — đạt cùng guarantee nhưng không cần GC. Xem `docs/research/research-singularity-midori.md`.
 
 ### Thành phần TCB (nhỏ nhất → lớn nhất)
 
 | Component | Vai trò | Ước lượng |
 |---|---|---|
 | `rustc` (nightly Rust compiler) | Enforce LBI — forbid unsafe, ownership/borrow rules | ~3–5M LOC |
-| ViCell kernel | SAS memory allocator, scheduler, IPC, ELF loader | ~11.5K LOC |
+| Cellos kernel | SAS memory allocator, scheduler, IPC, ELF loader | ~11.5K LOC |
 | `libs/api` + `libs/types` | Stable ABI giữa kernel và Cells | ~2K LOC |
 
 ### Không nằm trong TCB (by design)
@@ -178,4 +178,4 @@ ViCell dùng **Language-Based Isolation (LBI)** làm cơ chế bảo mật chín
 
 ### Hệ quả với security review
 
-Bất kỳ lỗ hổng nào trong `rustc`'s unsafe checker, borrow checker, hoặc codegen cho phép unsafe code trong crate `#![forbid(unsafe_code)]` là **P0 kernel security breach** với ViCell — cần upgrade compiler ngay lập tức.
+Bất kỳ lỗ hổng nào trong `rustc`'s unsafe checker, borrow checker, hoặc codegen cho phép unsafe code trong crate `#![forbid(unsafe_code)]` là **P0 kernel security breach** với Cellos — cần upgrade compiler ngay lập tức.

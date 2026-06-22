@@ -1,11 +1,11 @@
-# ViCell Architecture: Hardware Layer
+# Cellos Architecture: Hardware Layer
 **Version**: 0.3 (Universal HAL & Multi-Arch Strategy)
 **Status**: Definitive
 
 ---
 
 ## 1. Multi-Architecture Strategy (The "Trait" Contract)
-ViCell không phụ thuộc vào một kiến trúc CPU cụ thể. Mọi tương tác phần cứng được trừu tượng hóa qua crate `hal-core`.
+Cellos không phụ thuộc vào một kiến trúc CPU cụ thể. Mọi tương tác phần cứng được trừu tượng hóa qua crate `hal-core`.
 
 ### Trait-Based Abstraction
 | Trait | Vai trò | Đặc điểm đa kiến trúc |
@@ -22,7 +22,7 @@ ViCell không phụ thuộc vào một kiến trúc CPU cụ thể. Mọi tươn
 WASM Tier-2 đã bị loại khỏi official stack. C driver isolation dùng **Tier 1b FFI** (Newlib shim) thay thế — xem [specs/05-application.md §3](05-application.md). `WasmDriverRuntime` Cell không implement.
 
 ## 3. Interrupt Model: "Async Waker Dispatch"
-ViCell sử dụng mô hình ngắt bất đồng bộ để tối ưu độ trễ.
+Cellos sử dụng mô hình ngắt bất đồng bộ để tối ưu độ trễ.
 1. **Top-Half (Kernel)**: Nhận ngắt cứng, Ack IRQ nhanh nhất có thể và gọi `waker.wake()` tương ứng.
 2. **Bottom-Half (Cell)**: Driver Cell xử lý ngắt trong một `async task`. Việc chuyển ngữ cảnh (Context Switch) được tối ưu hóa bằng cách chạy trực tiếp trong SAS.
 
@@ -91,14 +91,14 @@ Vì dùng chung bộ nhớ, việc tranh chấp Lock giữa các Cell là rủi 
 
 **Approach:** Port Redox OS [`pci` crate](https://gitlab.redox-os.org/redox-os/drivers) BAR enumeration / capability parsing logic (~40-60% reuse). Rewrite MMIO access layer:
 
-| Layer | Redox approach | ViCell adaptation |
+| Layer | Redox approach | Cellos adaptation |
 |-------|---------------|------------------|
 | MMIO access | Raw pointer cast | `ostd::mmio::MmioRegion` via Resource Registry |
-| Driver isolation | Redox userspace process | ViCell Driver Cell (`#![forbid(unsafe_code)]`) |
+| Driver isolation | Redox userspace process | Cellos Driver Cell (`#![forbid(unsafe_code)]`) |
 | BAR mapping | `mmap()` syscall | `request_mmio(base, len)` → `MmioRegion` grant |
 | Interrupt | Redox IRQ system | PLIC/GIC async waker dispatch (§3 above) |
 
-Result: PCIe enumeration logic reused, ViCell safety invariants preserved.
+Result: PCIe enumeration logic reused, Cellos safety invariants preserved.
 
 ### RISC-V IOMMU (non-optional before NIC)
 

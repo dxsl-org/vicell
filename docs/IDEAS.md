@@ -1,5 +1,5 @@
 ## App
-- Port app đầu tiên cho ViCell: https://github.com/lasselian/prism-desktop
+- Port app đầu tiên cho Cellos: https://github.com/lasselian/prism-desktop
 
 ## Task
 
@@ -16,8 +16,8 @@ Nếu vẫn còn raw MMIO PLIC writes trong hal/arch/riscv/, dùng plic_codegen!
 
 
 ### SKIP
-cortex-m* family — Cortex-M only, ViCell target là A-class + RISC-V
-svd2rust / svdtools — ViCell không dùng SVD
+cortex-m* family — Cortex-M only, Cellos target là A-class + RISC-V
+svd2rust / svdtools — Cellos không dùng SVD
 linux-embedded-hal, rust-sysfs-* — Linux sysfs, không liên quan
 
 ### Reference (đọc học, không copy code)

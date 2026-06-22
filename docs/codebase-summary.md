@@ -1,6 +1,6 @@
-# ViCell Codebase Summary
+# Cellos Codebase Summary
 
-**Project**: ViCell (Jarvis Hybrid OS)
+**Project**: Cellos (Jarvis Hybrid OS)
 **Version**: 0.2.1-dev (Mycelium Era)
 **Language**: Rust (nightly, `no_std`)
 **Crates**: ~52 active workspace members
@@ -25,7 +25,7 @@
 ## Directory Structure
 
 ```
-ViCell/
+Cellos/
 ├── kernel/src/
 │   ├── main.rs             Boot orchestration
 │   ├── cell/
@@ -122,7 +122,7 @@ ViCell/
 ├── cells/runtimes/ (2 crates)
 │   ├── lua/                Lua 5.4 REPL (multi-line, history, VFS I/O FFI, network bindings, ViStateTransfer)
 │   │   ├── src/ffi.rs      Lua C API bindings
-│   │   ├── src/bindings_io.rs  ViCell_io_open/read/close, ViCell_os_execute
+│   │   ├── src/bindings_io.rs  Cellos_io_open/read/close, Cellos_os_execute
 │   │   ├── src/bindings_net.rs  vnet.udp_send/recv, vnet.resolve, DNS FFI
 │   │   └── src/repl_session.rs Multi-line REPL + <eof> continuation detection
 │   └── micropython/        MicroPython 1.24.1 REPL (256KB heap, VFS I/O, vnet module, ViStateTransfer)

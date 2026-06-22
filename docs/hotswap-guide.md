@@ -1,4 +1,4 @@
-# ViCell Hot-Swap Guide
+# Cellos Hot-Swap Guide
 
 Live-replace a running Cell with a new version without losing session state.
 
@@ -98,7 +98,7 @@ impl ViStateTransfer for MyCell {
 The `hotswap` admin tool (`cells/sys-tools/src/hotswap.rs`) is implemented:
 
 ```
-ViCell> hotswap config /bin/config-v2
+Cellos> hotswap config /bin/config-v2
 [hotswap] freezing cell 'config' (id 3)...
 [hotswap] serialised 142 bytes of state
 [hotswap] loaded /bin/config-v2

@@ -1,6 +1,6 @@
-# ViCell Project Overview & PDR
+# Cellos Project Overview & PDR
 
-**Project Name**: ViCell (Jarvis Hybrid OS)  
+**Project Name**: Cellos (Jarvis Hybrid OS)  
 **Version**: 0.2.1-dev (Mycelium Era)  
 **Status**: Active Development (Phase 1 - Core Stability)  
 **Last Updated**: 2026-06-06 (added 2 use-case stages G1/G2 overlay)
@@ -9,7 +9,7 @@
 
 ## Executive Summary
 
-ViCell is a next-generation operating system designed for the **Edge-to-Cloud era**. It combines innovations from Theseus (Live Evolution), Asterinas (FrameKernel Safety), and Tock (Embedded Efficiency) into a unified architecture.
+Cellos is a next-generation operating system designed for the **Edge-to-Cloud era**. It combines innovations from Theseus (Live Evolution), Asterinas (FrameKernel Safety), and Tock (Embedded Efficiency) into a unified architecture.
 
 **Product delivery is framed in two use-case stages** (overlay on the technical phases below — see [project-roadmap.md](project-roadmap.md) → "Two Use-Case Stages"):
 - **Stage G1 — Robot & Embedded** (now → ~2026 Q4): complete the OS for robots/embedded. Primary target = Tier A SBC with MMU (RV64/ARM64, RPi-class robot brain); sub-track = Tier B MCU (RV32 <512KB, CHERIoT-Nano) for low-level control. Defining traits: never-die, bounded real-time, fault isolation, peripheral I/O (GPIO/I2C/SPI/UART/CAN), instant-on boot.
@@ -25,7 +25,7 @@ ViCell is a next-generation operating system designed for the **Edge-to-Cloud er
 
 The architecture spec (03-runtime.md) describes **Heap Snapshotting (Instant On)**: after first boot, serialize the full memory state to `system.img`. Subsequent boots load the snapshot directly, bypassing ELF parsing and re-linking — sub-100 ms cold boot for a full OS stack.
 
-No production OS offers this. If implemented, this becomes ViCell's primary competitive differentiator over Linux, Fuchsia, and unikernels. Planned for Phase 30.
+No production OS offers this. If implemented, this becomes Cellos's primary competitive differentiator over Linux, Fuchsia, and unikernels. Planned for Phase 30.
 
 ---
 
@@ -39,7 +39,7 @@ Traditional operating systems (Linux, Windows, macOS) inherit Unix's process mod
 - **Kernel Complexity**: 20+ million LOC to handle process management
 - **IPC Overhead**: Message passing across process boundaries requires syscalls + memory copies
 
-**ViCell Goal**: Redesign the OS from first principles for 2026+
+**Cellos Goal**: Redesign the OS from first principles for 2026+
 
 ### Architecture Principles
 
@@ -542,7 +542,7 @@ Phase 4: Advanced Features (2026-12 — 2027-03)
 
 ## Stakeholders
 
-- **Core Team**: ViCell Team (tinyong@vigroup.ai)
+- **Core Team**: DXSL (tinyong@vigroup.ai)
 - **Advisors**: Theseus (UC Santa Cruz), Asterinas (TBD), Tock (Google)
 - **Community**: Open source contributors (GitHub)
 

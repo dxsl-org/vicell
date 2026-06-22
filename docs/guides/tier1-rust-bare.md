@@ -19,7 +19,7 @@ ostd::app_entry!(handler = my_handler);
 
 fn my_handler(_ctx: &mut AppContext, event: AppEvent) {
     match event {
-        AppEvent::Init => println("Hello from ViCell!"),
+        AppEvent::Init => println("Hello from Cellos!"),
         AppEvent::Shutdown | AppEvent::ShutdownWith { .. } => {
             ostd::syscall::sys_exit(0);
         }

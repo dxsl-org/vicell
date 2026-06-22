@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build + Ed25519-sign a ViCell operator policy blob (roadmap §G.2 P5b).
+"""Build + Ed25519-sign a Cellos operator policy blob (roadmap §G.2 P5b).
 
 Blob format (little-endian) — MUST match kernel/src/policy.rs::parse:
     magic u32 "VPOL" | version u8=1 | flags u8 | entry_count u16

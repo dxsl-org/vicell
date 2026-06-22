@@ -22,7 +22,7 @@ def create_iso(iso_root: str, output: str):
         joliet=3,
         rock=True,
         sys_ident='LINUX',
-        vol_ident='VICELL_X86',
+        vol_ident='Cellos_X86',
         # El Torito BIOS boot: boot catalog at /boot.cat
         # We set the boot catalog and initial/default boot entry below.
     )

@@ -384,7 +384,7 @@ def create_fat32_image(output_path: str, files: list):
         img.write(struct.pack('<B', 0))                # BS_Reserved1
         img.write(struct.pack('<B', 0x29))             # BS_BootSig
         img.write(struct.pack('<I', 0x12345678))       # BS_VolID
-        img.write(b'ViCell       ')                      # BS_VolLab (11 bytes)
+        img.write(b'Cellos       ')                      # BS_VolLab (11 bytes)
         img.write(b'FAT16   ')                         # BS_FilSysType (8 bytes)
         img.seek(510)
         img.write(b'\x55\xAA')

@@ -1,4 +1,4 @@
-# ViCell Input Service API
+# Cellos Input Service API
 
 The Input Service Cell (`cells/services/input/`) translates raw VirtIO input
 events into structured `InputEvent`s and dispatches them to the focused cell.

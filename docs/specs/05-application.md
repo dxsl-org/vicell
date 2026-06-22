@@ -1,4 +1,4 @@
-# ViCell Architecture: Application Tiers
+# Cellos Architecture: Application Tiers
 **Version**: 0.9 (Security Silo reclassified from Tier 3a → Tier 1 hardware capability)
 **Status**: Definitive — updated 2026-06-19
 
@@ -6,11 +6,11 @@
 
 ## 1. Chiến lược phân tầng (The Tiered Strategy)
 
-ViCell phân cấp ứng dụng dựa trên sự cân bằng giữa **Hiệu năng**, **Tính an toàn**, và **Tính tương thích**.
+Cellos phân cấp ứng dụng dựa trên sự cân bằng giữa **Hiệu năng**, **Tính an toàn**, và **Tính tương thích**.
 
 | Đặc điểm | Tier 1: Native | Tier 1b: C Libs | Tier 3: Virtual |
 | :--- | :--- | :--- | :--- |
-| **Công nghệ** | Rust cells (SAS) | vicell-libc + FFI | Hypervisor Cell |
+| **Công nghệ** | Rust cells (SAS) | Cellos-libc + FFI | Hypervisor Cell |
 | **Hiệu năng** | 100% native | 100% native | ~85-90% native |
 | **Cách ly** | Compiler (LBI) | Compiler (LBI) | Hardware Stage-2 |
 | **Toolchain** | cargo | cargo + cc crate | Linux ecosystem |
@@ -38,7 +38,7 @@ Một số capabilities yêu cầu hardware support nhưng vẫn là **Tier 1 AP
 ```
 Layer: ostd::silo::SiloHandle (Tier 1 API)
 Hardware: ARM64 Stage-2 / x86 VT-x (G2 only — not RISC-V)
-Purpose: TLS private keys an toàn ngay cả khi ViCell kernel bị compromise
+Purpose: TLS private keys an toàn ngay cả khi Cellos kernel bị compromise
 ```
 
 Silo không phải là một VM tier. Nó là một Tier 1 Rust API consume một hardware fence:
@@ -97,7 +97,7 @@ Dành cho **nhúng thư viện C/C++ vào Rust cell** — link trực tiếp ven
 
 See `docs/mlibc-build.md` for the full Tier B build guide.
 
-**Cách hoạt động:** Rust cell link statically với C library. Các lời gọi POSIX bên trong C code (`malloc`, `open`, `read`...) được resolve sang `vicell-libc` (Newlib + POSIX shim) tại link time — chạy native trong SAS, 0ms overhead.
+**Cách hoạt động:** Rust cell link statically với C library. Các lời gọi POSIX bên trong C code (`malloc`, `open`, `read`...) được resolve sang `Cellos-libc` (Newlib + POSIX shim) tại link time — chạy native trong SAS, 0ms overhead.
 
 ```
 [Tier 1b link flow — Tier B mlibc:]
@@ -108,7 +108,7 @@ See `docs/mlibc-build.md` for the full Tier B build guide.
          ↓ links statically
         librknn_api.a  (vendor SDK, C/C++)
          ↓ malloc/open/read → resolve to
-        libc.a  (mlibc Tier B — sysdeps/vicell → vicell_syscall)
+        libc.a  (mlibc Tier B — sysdeps/Cellos → Cellos_syscall)
          ↓ → ViSyscall (VFS IPC, Net IPC, GetTime, GetRandom)
 ```
 
@@ -158,8 +158,8 @@ See `docs/mlibc-build.md` for the full Tier B build guide.
 ### 4.1 Tại sao cần Tier 3
 
 Tier 1 + Tier 1b tốt cho code tin cậy nhưng thiếu ecosystem. G2 target (server/PC) cần:
-- nginx, PostgreSQL, Node.js, Python full, Java — không port được hết lên ViCell
-- **Giải pháp**: Chạy Linux VM bên trong ViCell như 1 Tier 1 Hypervisor Cell
+- nginx, PostgreSQL, Node.js, Python full, Java — không port được hết lên Cellos
+- **Giải pháp**: Chạy Linux VM bên trong Cellos như 1 Tier 1 Hypervisor Cell
 
 Analogy: WSL2 trên Windows — chạy Windows + Linux side-by-side, Linux disk/net nối vào Windows.
 
@@ -170,16 +170,16 @@ Analogy: WSL2 trên Windows — chạy Windows + Linux side-by-side, Linux disk/
 ```
 Mục đích: Chạy Linux ecosystem (apt install nginx → works)
 Guest: Linux kernel + userspace, khởi động bình thường
-Interface: VirtIO devices (disk, net, console) → forward sang ViCell services
+Interface: VirtIO devices (disk, net, console) → forward sang Cellos services
 Boot time: 2-10 giây (Linux init)
 ```
 
 Diagram:
 ```
-ViCell (HS-mode)
+Cellos (HS-mode)
 ├── Tier 1/1b cells (HU-mode) — vfs, net, shell, drivers
 └── Hypervisor Cell (Tier 1, HS-mode capable)
-    ├── vicell_hv/ (minimal VMM, ~9K LOC Rust)
+    ├── Cellos_hv/ (minimal VMM, ~9K LOC Rust)
     │   sys_create_vm / sys_create_vcpu
     │   sys_map_guest_memory → Stage-2 setup
     │   sys_run_vcpu (blocking until VM exit)
@@ -211,7 +211,7 @@ hypervisor_cap: Option<HypervisorCap>,
 
 **Restart semantics:** Hypervisor Cell chết → NotifyOnExit (204) wakes init → init respawns cell → Linux guest boot lại. Linux RAM state lost (ephemeral), disk state survive qua VirtIO blk → VFS. Identical với cách init restart vfs/net/shell hôm nay.
 
-**IPC pattern (VirtIO backend → ViCell cells):**
+**IPC pattern (VirtIO backend → Cellos cells):**
 ```
 Linux guest MMIO write (disk I/O)
   → sys_run_vcpu() returns VmExit::MmioWrite
@@ -222,13 +222,13 @@ Linux guest MMIO write (disk I/O)
 
 **Multi-instance:** N Hypervisor Cells = N độc lập Linux VMs. Không có gì ngăn spawn nhiều instance — kernel treat chúng như N Tier 1 cells bình thường. Trong G2: thường 1 instance (Option A). Cho isolated workloads: N instances (Option B, Firecracker-style).
 
-ViCell tự viết VMM tối giản thay vì fork crosvm (~75K LOC thực tế, kéo theo tokio + mmap dependencies).
+Cellos tự viết VMM tối giản thay vì fork crosvm (~75K LOC thực tế, kéo theo tokio + mmap dependencies).
 
 **Thiết kế VMM:**
 - Rust-native Tier 1 cell, không có tokio, không mmap, không libc
 - Target: `microvm` profile — MMIO bus only, không PCI bus emulation
 - VirtIO: `virtio-blk`, `virtio-net`, `virtio-console` over MMIO
-- VirtIO backends forward về ViCell IPC (VFS Cell, Net Cell) — không cần implement storage/net stack riêng
+- VirtIO backends forward về Cellos IPC (VFS Cell, Net Cell) — không cần implement storage/net stack riêng
 - Stage-2 page table: dùng lại primitives từ `kernel/src/memory/`
 
 **Tại sao không fork crosvm:**
@@ -350,15 +350,15 @@ VT-x impl deferred to G2.
 
 | Profile | Tiers | Hardware | Use case |
 |---|---|---|---|
-| **ViCell-Nano** | Tier 1 | RV32, <512KB | MCU, motor/sensor control |
-| **ViCell-Standard** | Tier 1 + 1b + 3a | RV64/ARM64 SBC | Robot brain, edge AI |
-| **ViCell-Server** | Tier 1 + 1b + 3a + 3b | x86_64 / ARM64 | Server, PC, cloud node |
+| **Cellos-Nano** | Tier 1 | RV32, <512KB | MCU, motor/sensor control |
+| **Cellos-Standard** | Tier 1 + 1b + 3a | RV64/ARM64 SBC | Robot brain, edge AI |
+| **Cellos-Server** | Tier 1 + 1b + 3a + 3b | x86_64 / ARM64 | Server, PC, cloud node |
 
 ---
 
 ## 6. Những đường sai cần tránh (Wrong Paths)
 
-1. **Type-1 hypervisor**: Tier 3 phải chạy ON TOP of ViCell, không phải thay thế kernel. ViCell kernel = Type-2 host. ✅ Xác nhận: hypervisor cell là Tier 1 cell bình thường với HypervisorCap.
+1. **Type-1 hypervisor**: Tier 3 phải chạy ON TOP of Cellos, không phải thay thế kernel. Cellos kernel = Type-2 host. ✅ Xác nhận: hypervisor cell là Tier 1 cell bình thường với HypervisorCap.
 2. **Port QEMU**: Quá lớn (~1M LOC C, cần JIT/mmap) — không fit Tier 1 cell.
 3. **Fork crosvm**: ~75K LOC thực tế (không phải ~20K), kéo theo tokio + mmap — không fit SAS cell. ✅ Build minimal VMM từ scratch (~9K LOC) — đã shipped ARM64 EL2 (P01-P10).
 4. **Gộp Security Silo và Linux VM**: Hai use case khác nhau — implement riêng, reuse Stage-2 primitives.
@@ -369,5 +369,5 @@ VT-x impl deferred to G2.
    - G2 (server/PC): code trusted → Tier 1 (nhanh hơn 5-10x), code untrusted → Tier 3 VM (isolation mạnh hơn)
    - WASM không có use case rõ ràng nằm giữa hai case trên
    - Phase 28 WASM MVP (wasmi + vi.*) giữ lại dưới `feature = "wasm-experimental"` — không roadmap tiếp
-   - Revisit nếu ViCell G2 trở thành multi-tenant platform (third-party workloads từ internet)
+   - Revisit nếu Cellos G2 trở thành multi-tenant platform (third-party workloads từ internet)
 8. **WASI Preview 1**: Deprecated (2019 spec), bỏ qua hoàn toàn.

@@ -1,4 +1,4 @@
-# Phân tích khả năng chạy C++ code trên ViCell
+# Phân tích khả năng chạy C++ code trên Cellos
 
 **Version**: 1.0 (Chốt chính sách)  
 **Last Updated**: 2026-06-18  
@@ -6,7 +6,7 @@
 
 ## Tóm tắt
 
-ViCell **đã có khả năng chạy C code** (Tier 1b) rất tốt và **C++ freestanding** (`-fno-exceptions -fno-rtti`). **Full C++ (exceptions, RTTI, STL) bắt buộc chạy qua Tier 3b Linux VM** — không port vào SAS cell vì phá vỡ LBI.
+Cellos **đã có khả năng chạy C code** (Tier 1b) rất tốt và **C++ freestanding** (`-fno-exceptions -fno-rtti`). **Full C++ (exceptions, RTTI, STL) bắt buộc chạy qua Tier 3b Linux VM** — không port vào SAS cell vì phá vỡ LBI.
 
 > [!IMPORTANT]
 > **Chính sách chốt**: C/C++ freestanding cho embedded/robot → **Tier 1b (SAS)**. Full C++ → **Tier 3b Linux VM**. Không có ngoại lệ.
@@ -17,12 +17,12 @@ ViCell **đã có khả năng chạy C code** (Tier 1b) rất tốt và **C++ fr
 
 ### 1.1 Hai tầng C library
 
-ViCell có hệ thống **two-tier** cho C library:
+Cellos có hệ thống **two-tier** cho C library:
 
 | | Tier A: posix.rs | Tier B: mlibc |
 |---|---|---|
-| **Vị trí** | [libs/api/src/posix.rs](file:///d:/ViCell/libs/api/src/posix.rs) | [third_party/mlibc/](file:///d:/ViCell/third_party/mlibc) |
-| **Ngôn ngữ impl** | Rust (`#[no_mangle] extern "C"`) | C++ (mlibc upstream + ViCell sysdeps) |
+| **Vị trí** | [libs/api/src/posix.rs](file:///d:/Cellos/libs/api/src/posix.rs) | [third_party/mlibc/](file:///d:/Cellos/third_party/mlibc) |
+| **Ngôn ngữ impl** | Rust (`#[no_mangle] extern "C"`) | C++ (mlibc upstream + Cellos sysdeps) |
 | **Khả năng** | malloc, strings, file I/O, math, stdio, setjmp | Full POSIX C library (Grisu3 printf, slab allocator) |
 | **Build** | Tự động (Rust build) | Cần `bash scripts/build-mlibc.sh` trong WSL2 |
 | **Kích thước** | Nhỏ | Lớn hơn |
@@ -45,7 +45,7 @@ ViCell có hệ thống **two-tier** cho C library:
 - **x86_64**: `clang` / `x86_64-elf-gcc` — fallback nếu có
 - **Build system**: Rust `cc` crate (biên dịch .c files) + Meson (mlibc)
 - **Linker**: `rust-lld` (LD.LLD) — handles ELF linking
-- **Syscall ABI**: [vicell/syscall.h](file:///d:/ViCell/third_party/mlibc/sysdeps/vicell/include/vicell/syscall.h) — riscv64 + aarch64
+- **Syscall ABI**: [Cellos/syscall.h](file:///d:/Cellos/third_party/mlibc/sysdeps/Cellos/include/Cellos/syscall.h) — riscv64 + aarch64
 
 ### 1.4 Entry point flow
 
@@ -77,7 +77,7 @@ Những tính năng C++ **không cần runtime support** đều hoạt động:
 **Bằng chứng**: mlibc sysdeps đã sử dụng C++ namespaces, `constexpr`, `[[noreturn]]`, `__attribute__`, `nullptr` — tất cả compile và link thành công:
 
 ```cpp
-// third_party/mlibc/sysdeps/vicell/generic/generic.cpp
+// third_party/mlibc/sysdeps/Cellos/generic/generic.cpp
 namespace mlibc {
     static constexpr size_t ARENA_SIZE = 4 * 1024 * 1024;
     [[noreturn]] void sys_libc_panic() { ... }
@@ -108,7 +108,7 @@ C global/C++ objects cần constructors chạy trước `main()`:
 static MyClass global_obj;  // constructor cần chạy trước main()
 ```
 
-**Vấn đề**: [ostd startup.rs](file:///d:/ViCell/libs/ostd/src/startup.rs) gọi `call main` trực tiếp mà **không** iterate `.init_array`.
+**Vấn đề**: [ostd startup.rs](file:///d:/Cellos/libs/ostd/src/startup.rs) gọi `call main` trực tiếp mà **không** iterate `.init_array`.
 
 **Fix**: Thêm ~25 LOC vào startup.rs (3 arches) + `.init_array` section vào linker scripts.
 
@@ -183,12 +183,12 @@ Cách dùng: apt install g++ → compile → chạy trong VM
 
 | # | Task | File | LOC | SAS-safe? |
 |---|---|---|---|---|
-| 1 | `.init_array` iteration (global constructors) | [startup.rs](file:///d:/ViCell/libs/ostd/src/startup.rs) + linker scripts | ~25+6 | ✅ Chỉ chạy function pointers |
-| 2 | `operator new/delete` (6 variants) | [alloc.rs](file:///d:/ViCell/libs/api/src/posix/alloc.rs) | ~20 | ✅ Wrapper quanh malloc/free |
+| 1 | `.init_array` iteration (global constructors) | [startup.rs](file:///d:/Cellos/libs/ostd/src/startup.rs) + linker scripts | ~25+6 | ✅ Chỉ chạy function pointers |
+| 2 | `operator new/delete` (6 variants) | [alloc.rs](file:///d:/Cellos/libs/api/src/posix/alloc.rs) | ~20 | ✅ Wrapper quanh malloc/free |
 | 3 | `__cxa_pure_virtual` → `abort()` | `posix/cxxabi.rs` [NEW] | ~5 | ✅ Panic handler |
 | 4 | `__cxa_guard_acquire/release/abort` | `posix/cxxabi.rs` [NEW] | ~15 | ✅ Simple flag (single-threaded) |
 | 5 | `abort()` | `posix/cxxabi.rs` [NEW] | ~5 | ✅ Calls `sys_exit(134)` |
-| 6 | Module wiring | [posix.rs](file:///d:/ViCell/libs/api/src/posix.rs) | ~3 | ✅ |
+| 6 | Module wiring | [posix.rs](file:///d:/Cellos/libs/api/src/posix.rs) | ~3 | ✅ |
 | | **Tổng** | | **~84** | |
 
 ### 4.2 Các item ĐÃ LOẠI BỎ (SAS-unsafe)
@@ -204,7 +204,7 @@ Cách dùng: apt install g++ → compile → chạy trong VM
 
 ---
 
-## 5. Ví dụ: Cách chạy C++ code trên ViCell NGAY BÂY GIỜ
+## 5. Ví dụ: Cách chạy C++ code trên Cellos NGAY BÂY GIỜ
 
 ### 5.1 C++ vendor SDK (freestanding — ĐÃ HOẠT ĐỘNG)
 
@@ -299,11 +299,11 @@ extern "C" float robot_update(float error, float dt) {
 | Exceptions, RTTI, STL? | ❌ **LOẠI BỎ** — phá vỡ LBI, SAS unsafe (xem §7) |
 
 
-# Tại sao không nên port Full C++ Runtime lên ViCell
+# Tại sao không nên port Full C++ Runtime lên Cellos
 
 ## Tóm tắt một câu
 
-> **Full C++ (exceptions + RTTI + STL + libunwind) phá vỡ 5/8 Coding Laws, biến ViCell từ "Rust-safe SAS OS" thành "yet another C++ RTOS" — đánh mất lợi thế kiến trúc duy nhất so với QNX/VxWorks/Zephyr.**
+> **Full C++ (exceptions + RTTI + STL + libunwind) phá vỡ 5/8 Coding Laws, biến Cellos từ "Rust-safe SAS OS" thành "yet another C++ RTOS" — đánh mất lợi thế kiến trúc duy nhất so với QNX/VxWorks/Zephyr.**
 
 ---
 
@@ -311,13 +311,13 @@ extern "C" float robot_update(float error, float dt) {
 
 ### Vấn đề cốt lõi
 
-ViCell **không có hardware MMU isolation giữa các cells**. Theo [12-reliability.md §2](file:///d:/ViCell/docs/specs/12-reliability.md):
+Cellos **không có hardware MMU isolation giữa các cells**. Theo [12-reliability.md §2](file:///d:/Cellos/docs/specs/12-reliability.md):
 
 > *"Per-Cell SATP isolation at Tier 1 is NOT pursued. [...] Hardware isolation is delivered by Tier 3 Stage-2 paging (per-VM), not smeared across every Tier-1 cell."*
 
-Điều này có nghĩa **Rust type system là HÀNG RÀO DUY NHẤT** ngăn một cell phá hủy cell khác. Theo [01-core.md](file:///d:/ViCell/docs/specs/01-core.md):
+Điều này có nghĩa **Rust type system là HÀNG RÀO DUY NHẤT** ngăn một cell phá hủy cell khác. Theo [01-core.md](file:///d:/Cellos/docs/specs/01-core.md):
 
-> *"ViCell dịch chuyển từ cách ly bằng phần cứng sang Language-Based Isolation (LBI) để triệt tiêu chi phí IPC."*
+> *"Cellos dịch chuyển từ cách ly bằng phần cứng sang Language-Based Isolation (LBI) để triệt tiêu chi phí IPC."*
 
 ### C++ phá vỡ LBI như thế nào
 
@@ -330,11 +330,11 @@ Full C++ runtime đưa vào SAS hàng chục ngàn dòng **memory-unsafe code**:
 | `libcxxabi` | 8K–12K | `dynamic_cast` (pointer arithmetic), `__cxa_throw` (longjmp-like) |
 | **Tổng** | **~170K–330K LOC C/C++** | **Toàn bộ memory-unsafe** |
 
-So sánh: kernel ViCell **toàn bộ** chỉ ~18K LOC Rust. Port full C++ sẽ đưa vào SAS lượng code unsafe **gấp 10-18× kernel** — chạy cùng address space, không có MMU barrier.
+So sánh: kernel Cellos **toàn bộ** chỉ ~18K LOC Rust. Port full C++ sẽ đưa vào SAS lượng code unsafe **gấp 10-18× kernel** — chạy cùng address space, không có MMU barrier.
 
 ### Research xác nhận
 
-[research-backed-proposals.md](file:///d:/ViCell/docs/research/research-backed-proposals.md) (CHERIoT SOSP 2025 + NSA/CISA 2025):
+[research-backed-proposals.md](file:///d:/Cellos/docs/research/research-backed-proposals.md) (CHERIoT SOSP 2025 + NSA/CISA 2025):
 
 > *"C/C++ gây ~70% critical security vulnerabilities — không thể fix bằng tooling, chỉ fix bằng language swap."*
 
@@ -359,7 +359,7 @@ C++ exceptions hoạt động bằng cách **unwinding the call stack** — đi 
     → destructors chạy (chỉ objects của process này)
     → nếu crash: chỉ process này chết
 
-[ViCell SAS — mọi cell chung address space]
+[Cellos SAS — mọi cell chung address space]
   throw MyException()
     → libunwind walks stack frames (TOÀN BỘ SAS)
     → nếu unwind table bị corrupt → stack walker đi lạc sang cell khác
@@ -367,17 +367,17 @@ C++ exceptions hoạt động bằng cách **unwinding the call stack** — đi 
     → KHÔNG CÓ MMU ngăn chặn → silent data corruption toàn hệ thống
 ```
 
-### Exception unwinding cần metadata mà ViCell không kiểm soát
+### Exception unwinding cần metadata mà Cellos không kiểm soát
 
 `.gcc_except_table` và `.eh_frame` sections chứa **dwarf unwind information** — metadata hướng dẫn libunwind cách walk stack. Metadata này:
 
-- Được compiler tự generate (ViCell không audit được)
+- Được compiler tự generate (Cellos không audit được)
 - Chứa PC-relative offsets (đúng lúc link, sai nếu hot-swap di chuyển code)
 - Giả định contiguous stack (SAS stack guard pages có thể gây confuse)
 
 ### Hot-swap + exceptions = undefined behavior
 
-[03-runtime.md §3](file:///d:/ViCell/docs/specs/03-runtime.md) mô tả hot-swap:
+[03-runtime.md §3](file:///d:/Cellos/docs/specs/03-runtime.md) mô tả hot-swap:
 
 > 1. Kernel đóng băng OldCell
 > 2. Gọi `serialize_state()`
@@ -392,7 +392,7 @@ Nếu exception đang mid-flight khi hot-swap xảy ra → unwind tables trỏ v
 
 ### Law 2 tồn tại vì SAS
 
-[CLAUDE.md](file:///d:/ViCell/CLAUDE.md) Law 2:
+[CLAUDE.md](file:///d:/Cellos/CLAUDE.md) Law 2:
 
 > ❌ FORBIDDEN: `async fn process(data: &mut [u8])`
 > ✅ REQUIRED: `async fn process(data: Box<[u8]>) -> Box<[u8]>`
@@ -410,7 +410,7 @@ C++ RTTI (`dynamic_cast`, `typeid`) duy trì **global type registry** — một 
 
 ### Supervisor restart không hoạt động với C++ global state
 
-[12-reliability.md §4.3](file:///d:/ViCell/docs/specs/12-reliability.md) mô tả recovery model:
+[12-reliability.md §4.3](file:///d:/Cellos/docs/specs/12-reliability.md) mô tả recovery model:
 
 > *"Erlang/OTP-style 'let it crash + restart'. init auto-restarts services."*
 
@@ -438,7 +438,7 @@ So sánh: posix.rs Tier A shim **không có internal state** — restart hoàn t
 
 | Component | Binary size (stripped, riscv64) |
 |---|---|
-| ViCell kernel | ~100–200 KB |
+| Cellos kernel | ~100–200 KB |
 | Tier A posix.rs shim | ~1,405 LOC Rust → ~15-25 KB |
 | mlibc Tier B (minimal) | ~50-100 KB |
 | **libstdc++** (minimal) | **~2-5 MB** |
@@ -446,16 +446,16 @@ So sánh: posix.rs Tier A shim **không có internal state** — restart hoàn t
 | **libunwind** | **~100-200 KB** |
 | **Tổng C++ runtime** | **~3-8 MB** |
 
-G1 target profile ([05-application.md §5](file:///d:/ViCell/docs/specs/05-application.md)):
+G1 target profile ([05-application.md §5](file:///d:/Cellos/docs/specs/05-application.md)):
 
-> **ViCell-Nano**: Tier 1 | RV32, <512KB | MCU, motor/sensor control
-> **ViCell-Standard**: Tier 1 + 1b + 3a | RV64/ARM64 SBC | Robot brain, edge AI
+> **Cellos-Nano**: Tier 1 | RV32, <512KB | MCU, motor/sensor control
+> **Cellos-Standard**: Tier 1 + 1b + 3a | RV64/ARM64 SBC | Robot brain, edge AI
 
-Full C++ runtime **lớn hơn toàn bộ ViCell-Nano profile** — một component duy nhất vượt quá budget cả hệ thống.
+Full C++ runtime **lớn hơn toàn bộ Cellos-Nano profile** — một component duy nhất vượt quá budget cả hệ thống.
 
 ### Mỗi KB tốn ở 3 nơi trong SAS
 
-Trong OS truyền thống, shared library load 1 lần, map vào N processes. Trong ViCell SAS, C++ runtime phải link **statically** vào mỗi cell (dynamic linking không supported). 5 cells dùng C++ = 5× bản copy của libstdc++ trong cùng address space.
+Trong OS truyền thống, shared library load 1 lần, map vào N processes. Trong Cellos SAS, C++ runtime phải link **statically** vào mỗi cell (dynamic linking không supported). 5 cells dùng C++ = 5× bản copy của libstdc++ trong cùng address space.
 
 ---
 
@@ -491,17 +491,17 @@ Tier 3b Linux VM (shipped, ARM64 EL2, P01-P10):
 | **C++ version** | Subset (sẽ luôn thiếu gì đó) | Full C++ 23+ |
 | **fork/threads** | ❌ Không bao giờ (SAS incompatible) | ✅ Full support |
 | **Ecosystem** | Cần port từng library | `apt install` — hàng triệu packages |
-| **Maintenance** | ViCell team tự maintain | Linux community maintain |
+| **Maintenance** | Cellos team tự maintain | Linux community maintain |
 
 ---
 
 ## Lý do 7: Bài học từ Theseus OS
 
-[research-theseus-os.md F5](file:///d:/ViCell/docs/research/research-theseus-os.md) phân tích tại sao Theseus (cùng kiến trúc SAS+LBI) không ship production:
+[research-theseus-os.md F5](file:///d:/Cellos/docs/research/research-theseus-os.md) phân tích tại sao Theseus (cùng kiến trúc SAS+LBI) không ship production:
 
 > *"Pure-Rust mandate: Bất kỳ C/C++ library nào (curl, OpenSSL, SQLite) đều breaks compiler knowledge chain. Đây là architectural fundamental, không phải gap tạm thời."*
 
-ViCell đã giải quyết vấn đề này tốt hơn Theseus bằng **Tier 1b** (C FFI có kiểm soát) — nhưng chỉ cho **C code freestanding**, không phải full C++ runtime. Tier 1b hoạt động **vì scope nhỏ, auditable**:
+Cellos đã giải quyết vấn đề này tốt hơn Theseus bằng **Tier 1b** (C FFI có kiểm soát) — nhưng chỉ cho **C code freestanding**, không phải full C++ runtime. Tier 1b hoạt động **vì scope nhỏ, auditable**:
 
 | | Tier 1b (C freestanding) | Full C++ runtime |
 |---|---|---|
@@ -521,7 +521,7 @@ ViCell đã giải quyết vấn đề này tốt hơn Theseus bằng **Tier 1b*
 | **Law 3**: Multi-Architecture | ⚠️ Gián tiếp | libunwind/libcxxabi cần port per-arch (RV32 chưa có upstream support) |
 | **Law 4**: Unsafe Management | 🔴 **Vi phạm** | 300K LOC unsafe C++ code trong SAS, không thể `#![forbid(unsafe_code)]` |
 | **Law 5**: Modern Module Style | ✅ OK | Không liên quan |
-| **Law 6**: ViCell Naming | ✅ OK | Không liên quan |
+| **Law 6**: Cellos Naming | ✅ OK | Không liên quan |
 | **Law 7**: Trait Objects | 🔴 **Vi phạm** | C++ vtable format khác Rust vtable — cross-language polymorphism không an toàn |
 | **Law 8**: RAII - Implement Drop | 🔴 **Vi phạm** | C++ destructors không tích hợp với Rust Drop — cell death không cleanup C++ objects |
 
@@ -533,7 +533,7 @@ ViCell đã giải quyết vấn đề này tốt hơn Theseus bằng **Tier 1b*
 
 ```mermaid
 graph TD
-    A["C++ code cần chạy<br>trên ViCell"] --> B{"Cần exceptions/<br>RTTI/STL?"}
+    A["C++ code cần chạy<br>trên Cellos"] --> B{"Cần exceptions/<br>RTTI/STL?"}
     B -->|Không| C["Tier 1b: compile với<br>-fno-exceptions -fno-rtti<br>✅ ĐÃ HOẠT ĐỘNG"]
     B -->|Có| D{"Cần fork/threads<br>hoặc full ecosystem?"}
     D -->|Không| E["Tier 1b Level 2:<br>thêm .init_array + new/delete<br>⚠️ CẦN ~100 LOC"]
@@ -545,32 +545,32 @@ graph TD
 ```
 
 > [!CAUTION]
-> **Port full C++ runtime vào Tier 1 cell** không phải là vấn đề kỹ thuật (có thể làm được) — mà là vấn đề **kiến trúc**. Nó biến ViCell từ "Rust-safe SAS OS differentiated by LBI" thành "C++ embedded OS giống VxWorks/QNX nhưng KHÔNG CÓ hardware isolation." Đó là worst of both worlds.
+> **Port full C++ runtime vào Tier 1 cell** không phải là vấn đề kỹ thuật (có thể làm được) — mà là vấn đề **kiến trúc**. Nó biến Cellos từ "Rust-safe SAS OS differentiated by LBI" thành "C++ embedded OS giống VxWorks/QNX nhưng KHÔNG CÓ hardware isolation." Đó là worst of both worlds.
 
 ---
 
 ## 8. POSIX Shim SAS-Safety Audit
 
-Rà soát toàn bộ hàm trong [libs/api/src/posix/](file:///d:/ViCell/libs/api/src/posix) đánh giá an toàn cho SAS.
+Rà soát toàn bộ hàm trong [libs/api/src/posix/](file:///d:/Cellos/libs/api/src/posix) đánh giá an toàn cho SAS.
 
 ### 8.1 AN TOÀN — Giữ nguyên
 
 | Module | Hàm | Lý do an toàn |
 |---|---|---|
-| [alloc.rs](file:///d:/ViCell/libs/api/src/posix/alloc.rs) | `malloc`, `free`, `realloc`, `calloc` | Cell-local heap, magic header validation, null-safe |
-| [math.rs](file:///d:/ViCell/libs/api/src/posix/math.rs) | `sin`, `cos`, `sqrt`, `pow`, `log`, `atan2`, ... | Pure functions (Rust libm), zero side effects |
-| [entropy.rs](file:///d:/ViCell/libs/api/src/posix/entropy.rs) | `getentropy`, `arc4random_buf` | Syscall wrapper, 256-byte limit enforced |
-| [stdio.rs](file:///d:/ViCell/libs/api/src/posix/stdio.rs) | `printf`, `fprintf`, `snprintf`, `fopen`, `fclose`, `fread`, `fwrite` | Syscall wrappers, stack-bounded buffers (1024 bytes) |
-| [sysio.rs](file:///d:/ViCell/libs/api/src/posix/sysio.rs) | `_open`, `_read`, `_write`, `_close`, `_lseek`, `_exit`, `_time` | Direct syscall wrappers, kernel validates args |
-| [strings.rs](file:///d:/ViCell/libs/api/src/posix/strings.rs) | `memcpy`, `memmove`, `memset`, `memcmp`, `strlen`, `strcmp`, `strncmp`, `memchr` | Bounded operations, standard C semantics |
-| [net.rs](file:///d:/ViCell/libs/api/src/posix/net.rs) | `socket`, `connect`, `send`, `recv`, `_close` | IPC wrappers, atomic fd allocation, bounded buffer |
+| [alloc.rs](file:///d:/Cellos/libs/api/src/posix/alloc.rs) | `malloc`, `free`, `realloc`, `calloc` | Cell-local heap, magic header validation, null-safe |
+| [math.rs](file:///d:/Cellos/libs/api/src/posix/math.rs) | `sin`, `cos`, `sqrt`, `pow`, `log`, `atan2`, ... | Pure functions (Rust libm), zero side effects |
+| [entropy.rs](file:///d:/Cellos/libs/api/src/posix/entropy.rs) | `getentropy`, `arc4random_buf` | Syscall wrapper, 256-byte limit enforced |
+| [stdio.rs](file:///d:/Cellos/libs/api/src/posix/stdio.rs) | `printf`, `fprintf`, `snprintf`, `fopen`, `fclose`, `fread`, `fwrite` | Syscall wrappers, stack-bounded buffers (1024 bytes) |
+| [sysio.rs](file:///d:/Cellos/libs/api/src/posix/sysio.rs) | `_open`, `_read`, `_write`, `_close`, `_lseek`, `_exit`, `_time` | Direct syscall wrappers, kernel validates args |
+| [strings.rs](file:///d:/Cellos/libs/api/src/posix/strings.rs) | `memcpy`, `memmove`, `memset`, `memcmp`, `strlen`, `strcmp`, `strncmp`, `memchr` | Bounded operations, standard C semantics |
+| [net.rs](file:///d:/Cellos/libs/api/src/posix/net.rs) | `socket`, `connect`, `send`, `recv`, `_close` | IPC wrappers, atomic fd allocation, bounded buffer |
 
 ### 8.2 CẦN GHI CHÚ — Giữ nhưng có rủi ro SAS
 
 | Module | Hàm | Rủi ro SAS | Mitigation |
 |---|---|---|---|
-| [setjmp.rs](file:///d:/ViCell/libs/api/src/posix/setjmp.rs) | `setjmp` / `longjmp` | `longjmp` có thể nhảy qua stack frames mà không gọi destructors. Nếu `jmp_buf` bị corrupt → nhảy đến địa chỉ tùy ý trong SAS | **GIỮ** — bắt buộc cho Lua (pcall) và DOOM. Chỉ hoạt động trong cùng cell, jmp_buf trên stack |
-| [strings.rs](file:///d:/ViCell/libs/api/src/posix/strings.rs) | `strcpy`, `strcat` | **Unbounded copy** — nếu C code truyền buffer nhỏ + string dài → write ngoài bounds trong SAS | **GIỮ** — C code cần. Vendor SDK nên dùng `strncpy`/`strncat` |
+| [setjmp.rs](file:///d:/Cellos/libs/api/src/posix/setjmp.rs) | `setjmp` / `longjmp` | `longjmp` có thể nhảy qua stack frames mà không gọi destructors. Nếu `jmp_buf` bị corrupt → nhảy đến địa chỉ tùy ý trong SAS | **GIỮ** — bắt buộc cho Lua (pcall) và DOOM. Chỉ hoạt động trong cùng cell, jmp_buf trên stack |
+| [strings.rs](file:///d:/Cellos/libs/api/src/posix/strings.rs) | `strcpy`, `strcat` | **Unbounded copy** — nếu C code truyền buffer nhỏ + string dài → write ngoài bounds trong SAS | **GIỮ** — C code cần. Vendor SDK nên dùng `strncpy`/`strncat` |
 
 ### 8.3 Stubs đã đúng (returns -1 / no-op)
 
@@ -605,7 +605,7 @@ Rà soát toàn bộ hàm trong [libs/api/src/posix/](file:///d:/ViCell/libs/api
 ## 10. Compile flags BẮT BUỘC cho C++ trong Tier 1b
 
 ```bash
-# BẮT BUỘC cho mọi C++ code trong ViCell cell:
+# BẮT BUỘC cho mọi C++ code trong Cellos cell:
 -fno-exceptions                    # exceptions phá SAS
 -fno-rtti                          # RTTI global registry cross-cell
 -fno-unwind-tables                 # không emit .eh_frame (SAS unsafe)
@@ -644,7 +644,7 @@ fn main() {
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                    ViCell C/C++ Policy                          │
+│                    Cellos C/C++ Policy                          │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
 │  Tier 1b (SAS — in-cell):                                      │

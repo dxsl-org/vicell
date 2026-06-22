@@ -15,9 +15,9 @@
 
 Lý do:
 1. RK3588 NPU có thể mua ngay, RKNN SDK v2.3 mature — không có RISC-V NPU nào ship trước 2027
-2. ViCell đã chạy ARM64 (QEMU virt ring-3 smoke tests passing) — porting RK3588 chỉ cần U-Boot handoff + UART/timer HAL
+2. Cellos đã chạy ARM64 (QEMU virt ring-3 smoke tests passing) — porting RK3588 chỉ cần U-Boot handoff + UART/timer HAL
 3. **Tier 3b Linux VM là BÉT HƠN trên ARM64 so với RISC-V** — KVM trên RK3588 EL2 đã confirmed (Alpine Linux), RISC-V H-ext chưa tồn tại trên bất kỳ chip nào
-4. ViCell sẽ là **OS đầu tiên có RKNN NPU access trên RK3588** (Zephyr chỉ có UART, Redox không có port)
+4. Cellos sẽ là **OS đầu tiên có RKNN NPU access trên RK3588** (Zephyr chỉ có UART, Redox không có port)
 
 ---
 
@@ -35,7 +35,7 @@ Lý do:
 - Power: ~5–6W under AI load → ~49 FPS/W for ResNet18
 - FP16: ~0.5 TFLOPS (12× thấp hơn INT8 — sử dụng INT8 là mandatory cho production NPU work)
 
-**Apple M4 comparison** (reference only, not a target): ~38–51 TOPS — ratio ~6–7× hơn RK3588. ViCell's pitch là latency guarantee, không phải throughput parity.
+**Apple M4 comparison** (reference only, not a target): ~38–51 TOPS — ratio ~6–7× hơn RK3588. Cellos's pitch là latency guarantee, không phải throughput parity.
 
 **Sources**: [TinyComputers.io](https://tinycomputers.io/posts/rockchip-rk3588-npu-benchmarks.html) · [IEEKER](https://ieeker.com/rk3588-npu-performance-industrial-edge-ai/) · [clehaxze benchmark](https://clehaxze.tw/gemlog/2024/02-14-benchmarking-rk3588-npu-matrix-multiplcation-performance-ep2.gmi)
 
@@ -58,10 +58,10 @@ Lý do:
 **Confidence: HIGH** | Armbian forum + kernel patchwork
 
 RK3588 có 2 MMU600 instances:
-- **Platform/PHP SMMU (NPU, GPU)**: ✅ Working — 17 IOMMU groups, ViCell grant-based DMA safety applies
+- **Platform/PHP SMMU (NPU, GPU)**: ✅ Working — 17 IOMMU groups, Cellos grant-based DMA safety applies
 - **PCIe SMMU**: ❌ PCIe devices không được assign IOMMU groups — community-confirmed 2025; VFIO passthrough fails; multi-patch chain chưa fully merged
 
-**ViCell implication**: G2 DMA safety scope rõ ràng:
+**Cellos implication**: G2 DMA safety scope rõ ràng:
 - NPU inference pipeline: IOMMU-protected ✅
 - PCIe NIC (server networking): không isolated ❌ — document explicitly
 
@@ -94,7 +94,7 @@ KVM EL2 VHE mode hoạt động. Alpine Linux VMs confirmed booting trên Orange
 
 **No GPU hoặc PCIe NIC passthrough** — bị blocked bởi PCIe IOMMU gap (F3 ở trên).
 
-**ViCell Tier 3b**: Alpine Linux VM (Prometheus/SSH/PostgreSQL) là feasible. 4-vCPU ceiling chấp nhận được cho management traffic.
+**Cellos Tier 3b**: Alpine Linux VM (Prometheus/SSH/PostgreSQL) là feasible. 4-vCPU ceiling chấp nhận được cho management traffic.
 
 **Sources**: [Proxmox OrangePi5+](https://codingfield.com/blog/2024-01/install-armbian-and-proxmox-on-orangepi5plus/) · [pxvirt ARM64](https://github.com/jiangcuo/pxvirt)
 
@@ -106,7 +106,7 @@ KVM EL2 VHE mode hoạt động. Alpine Linux VMs confirmed booting trên Orange
 - `cloud-hypervisor`: AArch64 Tier-1 arch, EL2 VHE mode, SVE/SVE2 guest support
 - 30K LOC no_std Rust ARM64 hypervisor (replaces Google Hafnium SPMC): demonstrates EL2 bare-metal Rust feasibility
 
-Cả hai đều là reference architecture — không phải embedded/bare-metal Type-1 không cần Linux host. Nhưng validate rằng **EL2 bare-metal Rust trên ARM64 là feasible** cho ViCell Tier 3 VMM.
+Cả hai đều là reference architecture — không phải embedded/bare-metal Type-1 không cần Linux host. Nhưng validate rằng **EL2 bare-metal Rust trên ARM64 là feasible** cho Cellos Tier 3 VMM.
 
 **Sources**: [cloud-hypervisor AArch64](https://intelkevinputnam.github.io/cloud-hypervisor-docs-HTML/docs/arm64.html) · [Rust forum no_std ARM64 VMM](https://users.rust-lang.org/t/30k-lines-of-no_std-rust-a-bare-metal-arm64-hypervisor-that-replaces-googles-hafnium-spmc/139497)
 
@@ -119,14 +119,14 @@ No developer board cho bare-metal OS work. Hexagon NPU bị blocked sau propriet
 
 ---
 
-### F8 — Competing OS trên RK3588: ViCell sẽ là đầu tiên với RKNN NPU
+### F8 — Competing OS trên RK3588: Cellos sẽ là đầu tiên với RKNN NPU
 **Confidence: HIGH** | Zephyr docs + Armbian/ubuntu-rockchip survey
 
 - **Armbian/ubuntu-rockchip**: Ubuntu-Rockchip (vendor BSP 6.1) + RKNN là baseline của community
 - **Zephyr**: DTB-only port (Firefly ROC-RK3588-PC); A55 UART/GPIO only; không có RKNN, không có Mali GPU
 - **Redox OS**: không có RK3588 port
 
-**Graduation demo claim**: *"ViCell — first custom OS với deterministic NPU inference trên RK3588"* là credible và verifiable.
+**Graduation demo claim**: *"Cellos — first custom OS với deterministic NPU inference trên RK3588"* là credible và verifiable.
 
 ---
 
@@ -144,7 +144,7 @@ No developer board cho bare-metal OS work. Hexagon NPU bị blocked sau propriet
 ## Development Path cho G2 ARM64
 
 ```
-1. Boot: U-Boot → ViCell EL1 (same path as QEMU virt, FDT từ U-Boot)
+1. Boot: U-Boot → Cellos EL1 (same path as QEMU virt, FDT từ U-Boot)
 2. BSP: Ubuntu-Rockchip vendor kernel 6.1 cho RKNN bring-up
 3. Tier 1b: RKNN C API → Rust FFI Cell (librknnrt.so)
 4. Tier 3b: Alpine Linux VM qua KVM EL2 (4 vCPU)

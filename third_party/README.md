@@ -1,6 +1,6 @@
 # Third-party vendored crates
 
-Vendored forks of external crates adapted for ViCell's no_std/no_main bare-metal target.
+Vendored forks of external crates adapted for Cellos's no_std/no_main bare-metal target.
 These are NOT git submodules — full source snapshots, owned by this repo.
 
 ## redoxfs
@@ -41,6 +41,6 @@ dd if=/dev/zero of=srv.img bs=1M count=64
 # Seed with test data via FUSE (Linux)
 mkdir /tmp/srv-mnt
 ./target/release/redoxfs srv.img /tmp/srv-mnt
-echo "ViCell RedoxFS" > /tmp/srv-mnt/hello.txt
+echo "Cellos RedoxFS" > /tmp/srv-mnt/hello.txt
 fusermount -u /tmp/srv-mnt
 ```

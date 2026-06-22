@@ -10,7 +10,7 @@
 
 AUTOSAR tồn tại dưới hai nhánh có mục tiêu đối lập: **Classic** (static, hard real-time, ASIL-D) và **Adaptive** (dynamic SOA, OTA, ASIL-B max). 4 findings được xác nhận mô tả cấu trúc phân tách này và workflow pain points của Adaptive. Research bị giới hạn bởi session rate limit — nhiều developer pain points cụ thể (C-only tooling, no memory safety) không được xác nhận từ nguồn primary đủ chất lượng.
 
-**ViCell positioning**: ViCell gần với Adaptive về dynamism nhưng không có POSIX overhead. Để cạnh tranh trong automotive/industrial, ViCell cần: static schedulability analysis mode, SOME/IP/DDS compatibility, ASIL-B toolchain path.
+**Cellos positioning**: Cellos gần với Adaptive về dynamism nhưng không có POSIX overhead. Để cạnh tranh trong automotive/industrial, Cellos cần: static schedulability analysis mode, SOME/IP/DDS compatibility, ASIL-B toolchain path.
 
 ---
 
@@ -66,18 +66,18 @@ Adopting AUTOSAR Adaptive đòi hỏi workflow shift đáng kể so với Classi
 
 ---
 
-## Mapping sang ViCell
+## Mapping sang Cellos
 
-| AUTOSAR Requirement | ViCell Status | Gap |
+| AUTOSAR Requirement | Cellos Status | Gap |
 |---|---|---|
 | Dynamic service registration | ✅ RegisterService/LookupService (205/206) | Cần SOME/IP-SD compatibility layer |
 | OTA update (UCM equivalent) | ✅ Cell hot-swap với StateTransfer | Cần ARXML/UCM-compatible manifest format |
-| POSIX-capable runtime | ❌ ViCell là non-POSIX | Tier 3b Linux VM nếu cần POSIX |
+| POSIX-capable runtime | ❌ Cellos là non-POSIX | Tier 3b Linux VM nếu cần POSIX |
 | Hard real-time (ASIL-D) | ⚠️ RT watchdog + preemptive scheduler | Chưa có WCET analysis tool, ASIL-D cert path |
 | C++ development | ❌ Rust-only Cells | Tier 1b có thể wrap C++ vendor libs |
-| Static configuration mode | ❌ ViCell luôn dynamic | Cần static-schedulable subset cho automotive use |
+| Static configuration mode | ❌ Cellos luôn dynamic | Cần static-schedulable subset cho automotive use |
 
-**Verdict**: ViCell competitive với Adaptive (dynamic, modern language, OTA) nhưng không thể thay Classic trong ASIL-D powertrain/braking. Target market: ADAS domain controllers, connected ECUs — nơi Adaptive đang grow nhưng POSIX overhead là vấn đề.
+**Verdict**: Cellos competitive với Adaptive (dynamic, modern language, OTA) nhưng không thể thay Classic trong ASIL-D powertrain/braking. Target market: ADAS domain controllers, connected ECUs — nơi Adaptive đang grow nhưng POSIX overhead là vấn đề.
 
 ---
 
@@ -86,7 +86,7 @@ Adopting AUTOSAR Adaptive đòi hỏi workflow shift đáng kể so với Classi
 1. AUTOSAR Adaptive R25-11 có introduce native hard real-time scheduling (cyclic execution, deadline monotonic) không?
 2. ASIL-D production vehicles có dùng Adaptive cho braking/steering không, hay chỉ ASIL-B ADAS?
 3. Minimum AUTOSAR Classic interfaces (COM stack, RTE API, DCM) cần thiết để được Tier-1 supplier acceptance?
-4. ViCell RT watchdog + Rust async runtime có đủ static analyzability cho ASIL-B safety case không?
+4. Cellos RT watchdog + Rust async runtime có đủ static analyzability cho ASIL-B safety case không?
 
 ---
 

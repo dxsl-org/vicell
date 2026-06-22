@@ -19,7 +19,7 @@
 | RTIC vs Embassy RT benchmark | RTIC 3× faster (1.18µs vs 3.74µs), 38% smaller binary |
 | Hubris (Oxide Computer) | Production OS trên rack servers từ July 2023 |
 | Ferrocene safety cert | ASIL-D compiler qualified; RISC-V **chưa được qualified** |
-| ViCell competitive position | SAS niche **hoàn toàn chưa có đối thủ** trong Rust OS ecosystem |
+| Cellos competitive position | SAS niche **hoàn toàn chưa có đối thủ** trong Rust OS ecosystem |
 
 ---
 
@@ -34,7 +34,7 @@ State of Rust 2024 (7,310 respondents): "slight uptick in users targeting embedd
 
 Automotive là domain tăng mạnh nhất single-year (2024) — được thêm làm closed-answer option lần đầu tiên.
 
-**ViCell implication**: Market nhỏ nhưng growing. "Early mover" trong Rust embedded OS là viable strategy nếu execution tốt.
+**Cellos implication**: Market nhỏ nhưng growing. "Early mover" trong Rust embedded OS là viable strategy nếu execution tốt.
 
 **Sources**: [State of Rust 2024](https://blog.rust-lang.org/2025/02/13/2024-State-Of-Rust-Survey-results/) · [onevariable.com 2025 production survey](https://onevariable.com/blog/embedded-rust-production/)
 
@@ -47,7 +47,7 @@ Automotive là domain tăng mạnh nhất single-year (2024) — được thêm 
 
 **Confirmed production users**: Akiles (hotel keys), IJboulevard (Amsterdam Centraal lighting), Kelvin Cozy (smart radiator), SuperCritical Redshift 6 (synthesizer), LUCI (wheelchair accessibility).
 
-**Pain point critical cho ViCell comparison**: Cooperative scheduling — một blocking task freeze toàn bộ system. Không phải compile error, không có runtime trap. Embassy là firmware framework, không có VFS/IPC/capability model.
+**Pain point critical cho Cellos comparison**: Cooperative scheduling — một blocking task freeze toàn bộ system. Không phải compile error, không có runtime trap. Embassy là firmware framework, không có VFS/IPC/capability model.
 
 **Sources**: [Embassy GitHub](https://github.com/embassy-rs/embassy) · [onevariable.com production survey](https://onevariable.com/blog/embedded-rust-production/)
 
@@ -68,7 +68,7 @@ RTIC formal basis: Stack Resource Policy (SRP) — deadlock-freedom + priority-i
 
 RTIC là scheduling framework only — không có HALs, networking, USB. Thường dùng kết hợp RTIC scheduling + Embassy HALs.
 
-**ViCell implication**: RTIC là ground truth cho hard-RT firmware benchmark. ViCell cần so sánh RT Cell latency với RTIC baseline.
+**Cellos implication**: RTIC là ground truth cho hard-RT firmware benchmark. Cellos cần so sánh RT Cell latency với RTIC baseline.
 
 **Sources**: [Tweede Golf benchmark](https://tweedegolf.nl/en/blog/65/async-rust-vs-rtos-showdown) · [RTIC docs.rs](https://docs.rs/crate/rtic/latest)
 
@@ -79,13 +79,13 @@ RTIC là scheduling framework only — không có HALs, networking, USB. Thườ
 
 3,500 GitHub stars. Deployed làm BMC/service processor trong Oxide rack servers (32-sled AMD racks). First customer: Idaho National Laboratory (DoE).
 
-**Architecture — đối lập hoàn toàn với ViCell**:
+**Architecture — đối lập hoàn toàn với Cellos**:
 - Memory isolation: **MPU hardware** (không phải language safety) ON TOP OF Rust
 - Tasks: **static tại build time** — không có dynamic task creation/destruction
 - Alloc: **không có dynamic allocation**
 - Kernel: ~2,000 lines Rust
 
-Hubris là existence proof rằng production Rust embedded OS khả thi — nhưng niche của nó (MCU security controller, static workload) không overlap với ViCell G1 (robot, dynamic Cells, full stack).
+Hubris là existence proof rằng production Rust embedded OS khả thi — nhưng niche của nó (MCU security controller, static workload) không overlap với Cellos G1 (robot, dynamic Cells, full stack).
 
 **Sources**: [Hubris site](https://hubris.oxide.computer/) · [Oxide blog](https://oxide.computer/blog/hubris-and-humility) · [The New Stack](https://thenewstack.io/in-pursuit-of-a-superior-server-oxide-computer-ships-its-first-rack/)
 
@@ -102,7 +102,7 @@ December 2025: Ferrocene 25.11.0 — first qualified `core` library: IEC 61508 S
 
 **Safety-Critical Rust Consortium** (June 2024): Arm, AdaCore, Ferrous Systems, HighTec, Woven by Toyota — charter chưa có committed deliverables.
 
-**ViCell implication — quan trọng**: Safety market positioning cho RISC-V bị block **ít nhất 12–24 tháng**. ViCell không thể claim ASIL-B path trên RISC-V ngay bây giờ. ARM64 G2 target có path sớm hơn.
+**Cellos implication — quan trọng**: Safety market positioning cho RISC-V bị block **ít nhất 12–24 tháng**. Cellos không thể claim ASIL-B path trên RISC-V ngay bây giờ. ARM64 G2 target có path sớm hơn.
 
 **Sources**: [Ferrocene](https://ferrocene.dev/) · [Ferrous libcore news](https://ferrous-systems.com/blog/ferrocene-libcore-news-release/) · [Rust in Safety-Critical Jan 2026](https://blog.rust-lang.org/2026/01/14/what-does-it-take-to-ship-rust-in-safety-critical/)
 
@@ -121,13 +121,13 @@ Top pain points (ACM CCS 2024):
 7. High-criticality: không có MATLAB/Simulink codegen, không có AUTOSAR Classic Rust RTOS
 8. 29% developers unconvinced của Rust security benefits (vì firmware avoid heap → ownership ít impactful)
 
-**ViCell implication**: Law 4 (`#![forbid(unsafe_code)]` trong Cells) và Tier 1b C FFI pattern (không phải `no_std` porting) là đúng approach cho vendor SDK integration. Embassy blocking-task footgun không có trong ViCell vì kernel preempts.
+**Cellos implication**: Law 4 (`#![forbid(unsafe_code)]` trong Cells) và Tier 1b C FFI pattern (không phải `no_std` porting) là đúng approach cho vendor SDK integration. Embassy blocking-task footgun không có trong Cellos vì kernel preempts.
 
 **Sources**: [ACM CCS 2024](https://dl.acm.org/doi/10.1145/3658644.3690275) · [Rust Safety-Critical blog](https://blog.rust-lang.org/2026/01/14/what-does-it-take-to-ship-rust-in-safety-critical/)
 
 ---
 
-### F7 — ViCell's SAS niche hoàn toàn chưa có đối thủ trong Rust OS landscape
+### F7 — Cellos's SAS niche hoàn toàn chưa có đối thủ trong Rust OS landscape
 **Confidence: HIGH** | Systematic landscape survey
 
 | Project | Stars | Production | Full Stack | SAS | Dynamic |
@@ -138,7 +138,7 @@ Top pain points (ACM CCS 2024):
 | Tock | ~5K | ⚠️ OpenTitan | ❌ | ❌ | ❌ |
 | Ariel OS | <500 | ❌ research | ❌ | ❌ | ⚠️ |
 | Theseus | 2.8K | ❌ research | ⚠️ | ✅ | ✅ |
-| **ViCell** | early | ❌ WIP | ✅ | ✅ | ✅ |
+| **Cellos** | early | ❌ WIP | ✅ | ✅ | ✅ |
 
 **Ariel OS** (arxiv 2504.19662, June 2025): closest threat — first Rust embedded OS với single+multicore preemptive + async. Overhead 9.6% (nRF52840). ARM + RISC-V + Xtensa. Tuy nhiên: architecture paper, không có full-stack services.
 
@@ -146,9 +146,9 @@ Top pain points (ACM CCS 2024):
 
 ---
 
-## Comparison Matrix: ViCell vs Embedded Rust Ecosystem
+## Comparison Matrix: Cellos vs Embedded Rust Ecosystem
 
-| Dimension | ViCell | Embassy | RTIC 2.x | Hubris |
+| Dimension | Cellos | Embassy | RTIC 2.x | Hubris |
 |---|---|---|---|---|
 | Architecture | SAS + LBI | Library framework | Scheduling only | Microkernel + MPU |
 | Async support | Full (kernel preemptive) | Full (cooperative) | Partial | None |
@@ -163,16 +163,16 @@ Top pain points (ACM CCS 2024):
 
 ---
 
-## Chiến lược positioning cho ViCell
+## Chiến lược positioning cho Cellos
 
 **① Position là "Embassy + OS" — rung missing giữa bare-metal và full OS**
-Embassy/RTIC không có VFS, IPC, capability model, compositor. ViCell là Rust-native OS duy nhất với full service stack cho embedded/robot. Pitch: *"You outgrow Embassy when you need filesystem, networking, UI, and composable services — that's when ViCell starts."*
+Embassy/RTIC không có VFS, IPC, capability model, compositor. Cellos là Rust-native OS duy nhất với full service stack cho embedded/robot. Pitch: *"You outgrow Embassy when you need filesystem, networking, UI, and composable services — that's when Cellos starts."*
 
 **② Leverage Ferrocene RISC-V timeline asymmetry**
-RISC-V safety cert target: 12–24 tháng nữa. Khi Ferrocene thêm RISC-V vào qualified list, ViCell là Rust OS duy nhất đã có full RISC-V story sẵn. Track announcement làm market trigger.
+RISC-V safety cert target: 12–24 tháng nữa. Khi Ferrocene thêm RISC-V vào qualified list, Cellos là Rust OS duy nhất đã có full RISC-V story sẵn. Track announcement làm market trigger.
 
 **③ Treat Embassy/RTIC là ecosystem, không phải competition**
-ViCell Cells có thể host Embassy HALs làm drivers. Framing: "OS orchestration layer above Embassy-style drivers." Neutralize "why not just use Embassy" objection.
+Cellos Cells có thể host Embassy HALs làm drivers. Framing: "OS orchestration layer above Embassy-style drivers." Neutralize "why not just use Embassy" objection.
 
 ---
 

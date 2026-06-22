@@ -1,5 +1,5 @@
 # Error Handling Patterns
-> Part of [ViCell Patterns](../patterns.md)
+> Part of [Cellos Patterns](../patterns.md)
 
 ## Result-Based Error Handling
 

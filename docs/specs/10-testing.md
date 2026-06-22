@@ -1,4 +1,4 @@
-# ViCell Architecture: Testing & Verification
+# Cellos Architecture: Testing & Verification
 **Version**: 0.3 (SAS-Specific Quality Assurance)
 **Status**: Definitive
 
@@ -101,7 +101,7 @@ const KERNEL: &str = "target/riscv64gc-unknown-none-elf/release/kernel";
 
 pub fn test_my_feature() {
     let mut q = QemuRunner::new_rv64(KERNEL);
-    q.wait_for("[ViCell]", 30).expect("kernel banner not seen");
+    q.wait_for("[Cellos]", 30).expect("kernel banner not seen");
     q.wait_for("my-expected-output", 30)
         .expect("feature output not seen");
     assert!(!q.output_contains("PANIC"));
@@ -112,7 +112,7 @@ pub fn test_my_feature() {
 
 1. Create `tests/integration/<name>.rs` using the pattern above
 2. Reference the harness with `use super::harness::QemuRunner;`
-3. Run via a future `ViCell-tests` host-target crate (use `--target x86_64-...`)
+3. Run via a future `Cellos-tests` host-target crate (use `--target x86_64-...`)
 4. Mark QEMU-dependent tests `#[ignore]` in CI until QEMU is available on the runner
 
 **Existing integration test files:**

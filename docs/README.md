@@ -1,4 +1,4 @@
-# ViCell Documentation Index
+# Cellos Documentation Index
 
 **Version**: v0.2.1-dev (Mycelium Era) | **Last updated**: 2026-06-03
 
@@ -31,7 +31,7 @@
 |------|---------|
 | [system-architecture.md](system-architecture.md) | System layers, kernel, HAL, IPC |
 | [code-standards.md](code-standards.md) | The 8 Coding Laws + conventions |
-| [patterns.md](patterns.md) | Common Rust patterns for ViCell |
+| [patterns.md](patterns.md) | Common Rust patterns for Cellos |
 | [security-model.md](security-model.md) | STRIDE analysis, known limitations |
 
 ---

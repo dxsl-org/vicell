@@ -1,11 +1,12 @@
-# ViCell
+# Cellos
 
 [![CI](https://github.com/dxsl-org/vicell/actions/workflows/ci.yml/badge.svg)](https://github.com/dxsl-org/vicell/actions/workflows/ci.yml)
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-Donate-%23FF5E5B?logo=ko-fi)](https://ko-fi.com/dxsl_org)
 
 A next-generation OS for the Edge-to-Cloud era. Software is organized as **Cells** (not processes) sharing one address space, isolated by the Rust type system rather than hardware MMU.
 
 **Architecture**: Cellular Single Address Space (SAS) + Language-Based Isolation (LBI).  
-**Status**: v0.2.1-dev (Mycelium Era) · Active Stage: **G1 — Robot & Embedded**
+**Status**: v1.x Mycelium · Active Stage: **G1 — Robot & Embedded**
 
 ---
 
@@ -26,14 +27,14 @@ cargo build --release
 ```
 
 ```
-ViCell> echo hello
+Cellos> echo hello
 hello
-ViCell> ls /bin
+Cellos> ls /bin
 shell  vfs  net  input  compositor  hello  utils ...
-ViCell> date
+Cellos> date
 2026-06-08 00:00:00 UTC
-ViCell> cat /proc/version
-ViCell v0.2.1-dev (Mycelium Era) riscv64
+Cellos> cat /proc/version
+Cellos v1.x Mycelium riscv64
 ```
 
 ARM64 target:
@@ -76,7 +77,7 @@ ARM64 target:
 ## Architecture
 
 ```
-ViCell/
+Cellos/
 ├── kernel/             Nano-kernel: scheduler · loader · memory · IPC · syscalls
 ├── hal/
 │   ├── traits/         ViArch · ViTimer · ViUart · ViGpio · ViI2c · ViMmc · ViDisplay
@@ -112,7 +113,7 @@ ViCell/
 | `riscv64gc-unknown-none-elf` | ✅ Primary | Full boot · all services |
 | `aarch64-unknown-none` | ✅ Boots | Scheduler reached; full bring-up G1 next |
 | `x86_64-unknown-none` | ✅ Boots | Scheduler reached; full bring-up G2 |
-| `riscv32imc-unknown-none-elf` | ✅ Boot | ViCell-Nano · QEMU S-mode verified |
+| `riscv32imc-unknown-none-elf` | ✅ Boot | Cellos-Nano · QEMU S-mode verified |
 
 Build kernel with `RUSTFLAGS=-Crelocation-model=pic` (handled automatically). Cells stay non-PIC — do **not** put this in `.cargo/config.toml` globally.
 
@@ -125,7 +126,7 @@ Build kernel with `RUSTFLAGS=-Crelocation-model=pic` (handled automatically). Ce
 3. **Multi-Architecture** — use `VAddr`/`PAddr`; never hardcode pointer sizes
 4. **Unsafe Management** — Cells: `#![forbid(unsafe_code)]`; Kernel: document every `unsafe` with `// SAFETY:`
 5. **Modern Module Style** — `foo.rs` + `foo/` directory; `mod.rs` is forbidden
-6. **ViCell Naming** — `Vi` prefix for public traits/types (`ViDriver`, `ViResult`); snake_case for files
+6. **Cellos Naming** — `Vi` prefix (Virtual Interface namespace) for public traits/types (`ViDriver`, `ViResult`); snake_case for files
 7. **Trait Objects for Polymorphism** — `Arc<dyn ViDriver + Send + Sync>` at system boundaries
 8. **RAII — Implement Drop** — all resources clean up explicitly; no process-based cleanup in SAS
 
@@ -182,7 +183,7 @@ cargo test --all          # run tests
 
 ## Acknowledgments
 
-ViCell draws ideas from:
+Cellos draws ideas from:
 - **Theseus** (UC Santa Cruz) — live evolution, single address space
 - **Asterinas** — FrameKernel safety abstractions
 - **Tock** (Google) — embedded OS efficiency, hardware isolation traits
@@ -190,4 +191,4 @@ ViCell draws ideas from:
 
 ---
 
-**Version**: 0.2.1-dev (Mycelium Era) · **Last Updated**: 2026-06-08 · **Maintained by**: lungmat8
+**Version**: 1.x Mycelium · **Last Updated**: 2026-06-08 · **Maintained by**: lungmat8

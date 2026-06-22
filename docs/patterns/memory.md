@@ -1,5 +1,5 @@
 # Memory Management Patterns
-> Part of [ViCell Patterns](../patterns.md)
+> Part of [Cellos Patterns](../patterns.md)
 
 ## Owned Buffers for Async (SAS Law)
 

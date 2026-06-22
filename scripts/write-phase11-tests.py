@@ -1,10 +1,10 @@
 """Write Phase 11 test infrastructure files."""
 import os
 
-base = "d:/ViCell"
+base = "d:/Cellos"
 
 # ── integration test harness ───────────────────────────────────────────────────
-HARNESS = '''//! ViCell integration test harness.
+HARNESS = '''//! Cellos integration test harness.
 //!
 //! Provides `QemuRunner` which spawns QEMU, injects serial input, and
 //! captures serial output.  Integration tests use this to drive the kernel.
@@ -13,7 +13,7 @@ use std::process::{Command, Child, Stdio};
 use std::io::{BufReader, BufRead};
 use std::time::{Duration, Instant};
 
-/// QEMU-driven ViCell integration test runner.
+/// QEMU-driven Cellos integration test runner.
 pub struct QemuRunner {
     child: Child,
     output: Vec<String>,
@@ -67,7 +67,7 @@ impl Drop for QemuRunner {
 
 # ── scripts/measure-coverage.sh ───────────────────────────────────────────────
 COVERAGE_SH = '''#!/usr/bin/env bash
-# Measure line coverage for the ViCell kernel and libs using cargo llvm-cov.
+# Measure line coverage for the Cellos kernel and libs using cargo llvm-cov.
 # Requires: llvm-tools-preview component (pinned in rust-toolchain.toml).
 # Usage: bash scripts/measure-coverage.sh
 set -euo pipefail

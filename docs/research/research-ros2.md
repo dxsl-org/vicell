@@ -14,9 +14,9 @@ ROS 2 architectural pain points hội tụ về 3 root causes:
 2. **DDS internal threads** không controlled bởi OS scheduler, gây latency degradation under CPU load; config không portable cross DDS vendors
 3. **Intra-process zero-copy ↔ fault isolation dichotomy**: ComponentContainer cần một trong hai, không thể có cả hai
 
-Tất cả 3 root causes map **trực tiếp** sang ViCell advantages: Cellular SAS + LBI giải quyết đồng thời cả 3 mà không có architectural trade-off.
+Tất cả 3 root causes map **trực tiếp** sang Cellos advantages: Cellular SAS + LBI giải quyết đồng thời cả 3 mà không có architectural trade-off.
 
-**ViCell G1 robot target**: ARM64/RV64 SBC, competing với ROS 2 + Linux deployment.
+**Cellos G1 robot target**: ARM64/RV64 SBC, competing với ROS 2 + Linux deployment.
 
 ---
 
@@ -37,7 +37,7 @@ ROS 2 default executor có structural priority-inversion defect: tại mỗi pro
 - Casini et al. arXiv:2512.16926 "Bridging the Gap" (Dec 2025)
 - Official ROS 2 Rolling docs
 
-**ViCell mapping**: RT Cell với pinned core + preemptive scheduler loại bỏ executor-level scheduling hoàn toàn. Mỗi Cell là independent task, kernel scheduler quyết định priority, không có polling-point inversion.
+**Cellos mapping**: RT Cell với pinned core + preemptive scheduler loại bỏ executor-level scheduling hoàn toàn. Mỗi Cell là independent task, kernel scheduler quyết định priority, không có polling-point inversion.
 
 ---
 
@@ -53,7 +53,7 @@ Config không portable: CycloneDDS dùng CYCLONEDDS_URI XML, RTI Connext dùng Q
 - Casini et al. arXiv:2601.10722v1
 - Official ROS 2 DDS tuning docs (docs.ros.org/en/rolling/How-To-Guides/DDS-tuning.html)
 
-**ViCell mapping**: RT Cell với pinned core + SCHED_FIFO loại bỏ vấn đề này hoàn toàn — IPC path **không bao giờ** involve uncontrolled third-party thread. Typed vtable IPC là direct Rust fn pointer call, không có middleware thread.
+**Cellos mapping**: RT Cell với pinned core + SCHED_FIFO loại bỏ vấn đề này hoàn toàn — IPC path **không bao giờ** involve uncontrolled third-party thread. Typed vtable IPC là direct Rust fn pointer call, không có middleware thread.
 
 **Caveat**: Paper (2506.16882v1) main contribution là Agnocast — CycloneDDS là baseline bị beat. Test conditions (100KB, SCHED_OTHER DDS threads) có thể được chọn để maximize contrast.
 
@@ -71,7 +71,7 @@ ROS 2 intra-process zero-copy qua ComponentContainer compromises fault isolation
 - Official ROS 2 composition docs (docs.ros.org/en/rolling/Concepts/Intermediate/About-Composition.html)
 - Autoware Foundation GitHub discussion #5835
 
-**ViCell mapping**: **Đây là strongest competitive advantage của ViCell.** Cellular SAS + LBI achieve true zero-copy (same address space, typed vtable IPC, no serialization) **WHILE** maintaining fault isolation via Rust type system và never-die supervisor. Dichotomy này không tồn tại trong ViCell.
+**Cellos mapping**: **Đây là strongest competitive advantage của Cellos.** Cellular SAS + LBI achieve true zero-copy (same address space, typed vtable IPC, no serialization) **WHILE** maintaining fault isolation via Rust type system và never-die supervisor. Dichotomy này không tồn tại trong Cellos.
 
 ---
 
@@ -92,7 +92,7 @@ Agnocast project (TIER IV, production Autoware) workaround bằng separate IPC m
 - Official ROS 2 zero-copy design doc (design.ros2.org/articles/zero_copy.html)
 - GitHub ros2/rosidl#566 (open, no assignee)
 
-**ViCell mapping**: ViCell typed vtable IPC với grant-based shared memory (GrantAlloc/Share/Slice, syscalls 208-212) cung cấp zero-copy cho arbitrary message sizes bao gồm dynamic types, không có allocator compatibility constraint.
+**Cellos mapping**: Cellos typed vtable IPC với grant-based shared memory (GrantAlloc/Share/Slice, syscalls 208-212) cung cấp zero-copy cho arbitrary message sizes bao gồm dynamic types, không có allocator compatibility constraint.
 
 ---
 
@@ -105,7 +105,7 @@ Filed bởi Morgan Quigley (ROS co-creator) ở ros2/rclcpp#272. Fixed trong PR 
 
 **Relevance**: Bug cũ nhưng illustrate structural class: C++ shared ownership tại executor/middleware boundary là fragile. Pattern risk tồn tại dù specific bug đã fix.
 
-**ViCell mapping**: Law 4 (`#![forbid(unsafe_code)]` trong Cells) và Rust ownership semantics làm class use-after-free này impossible trong Cell code. Never-die supervisor provide containment layer cho kernel/HAL unsafe code.
+**Cellos mapping**: Law 4 (`#![forbid(unsafe_code)]` trong Cells) và Rust ownership semantics làm class use-after-free này impossible trong Cell code. Never-die supervisor provide containment layer cho kernel/HAL unsafe code.
 
 ---
 
@@ -118,7 +118,7 @@ Lifecycle node API cung cấp state management nhưng **không** cung cấp cras
 
 **Sources**: IEEE ISORC 2025, official ROS 2 composition docs, Autoware #5835
 
-**ViCell mapping**: Never-die supervisor (NotifyOnExit=204, init auto-restarts vfs/net/shell) directly address gap này. Cell fault isolation via Rust LBI: Cell panic bị catch tại Cell boundary và không propagate đến scheduler hoặc other Cells.
+**Cellos mapping**: Never-die supervisor (NotifyOnExit=204, init auto-restarts vfs/net/shell) directly address gap này. Cell fault isolation via Rust LBI: Cell panic bị catch tại Cell boundary và không propagate đến scheduler hoặc other Cells.
 
 ---
 
@@ -129,11 +129,11 @@ Claim này corroborates F2 về non-portability từ independent angle.
 
 ---
 
-## Benchmark missing: ViCell vs ROS 2
+## Benchmark missing: Cellos vs ROS 2
 
 **Câu hỏi quan trọng nhất chưa có câu trả lời**:
 
-> *Latency distribution của ViCell typed vtable IPC (GrantAlloc path) vs CycloneDDS intra-host trên ARM64 SBC (Jetson, RPi 5) dưới cùng CPU load conditions như IEEE ISORC 2025?*
+> *Latency distribution của Cellos typed vtable IPC (GrantAlloc path) vs CycloneDDS intra-host trên ARM64 SBC (Jetson, RPi 5) dưới cùng CPU load conditions như IEEE ISORC 2025?*
 
 Đây là benchmark validation trực tiếp nhất cho G1 robot positioning. Cần prioritize sau khi network + input subsystems ổn định.
 
@@ -143,7 +143,7 @@ Claim này corroborates F2 về non-portability từ independent angle.
 
 1. Experimental events executor (Kilted, rclpy only) có resolve polling-point priority inversion cho Python nodes không, và có timeline cho C++ rclcpp equivalent?
 2. Agnocast (TIER IV) có viable migration path cho existing ROS 2 fleets không, hay bị cùng ecosystem adoption barrier như polymorphic allocators?
-3. ViCell never-die supervisor để fully replace ROS 2 lifecycle node pattern cần Cell-level state machine gì (INACTIVE/ACTIVE/FINALIZED equivalent) — specs/12-reliability.md có specify không?
+3. Cellos never-die supervisor để fully replace ROS 2 lifecycle node pattern cần Cell-level state machine gì (INACTIVE/ACTIVE/FINALIZED equivalent) — specs/12-reliability.md có specify không?
 
 ---
 

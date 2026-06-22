@@ -7,7 +7,7 @@ build time by the `tls-ca-*` cargo feature.  Only one may be active at once.
 
 | File | Feature flag | Key type | Subject | notAfter | Source |
 |------|-------------|----------|---------|----------|--------|
-| `private.der` | `tls-ca-private` (default) | ECDSA P-256 | CN=ViCell Private CA | 2036-06-18 | self-generated (see below) |
+| `private.der` | `tls-ca-private` (default) | ECDSA P-256 | CN=Cellos Private CA | 2036-06-18 | self-generated (see below) |
 | `amazon-root-ca3.der` | `tls-ca-amazon` | ECDSA P-256 | CN=Amazon Root CA 3 | 2040-05-26 | https://www.amazontrust.com/repository/AmazonRootCA3.pem |
 | `isrg-x2.der` | `tls-ca-letsencrypt` | ECDSA P-384 | CN=ISRG Root X2 | 2040-09-17 | https://letsencrypt.org/certs/isrg-root-x2.pem |
 

@@ -1,19 +1,19 @@
-# ViCell — Innovation Proposals
+# Cellos — Innovation Proposals
 
 **Version**: 1.0  
 **Last Updated**: 2026-06-08  
-**Tác giả**: Phân tích từ competitive landscape + kiến trúc ViCell hiện tại  
+**Tác giả**: Phân tích từ competitive landscape + kiến trúc Cellos hiện tại  
 **Trạng thái**: Đề xuất — chưa phải roadmap chính thức
 
 > Mỗi đề xuất đều bắt đầu bằng câu hỏi: **"Tại sao Linux/Windows/FreeRTOS không làm điều này?"**  
 > Nếu câu trả lời là "họ có thể làm nhưng chưa làm" → ý tưởng bình thường.  
-> Nếu câu trả lời là "họ không thể làm vì phải tương thích ngược" → đây là cơ hội thực sự của ViCell.
+> Nếu câu trả lời là "họ không thể làm vì phải tương thích ngược" → đây là cơ hội thực sự của Cellos.
 
 ---
 
-## Nền tảng: ViCell có 4 "siêu năng lực" độc nhất
+## Nền tảng: Cellos có 4 "siêu năng lực" độc nhất
 
-Trước khi đề xuất, cần hiểu tại sao những thứ sau đây khả thi với ViCell mà không khả thi với hệ thống khác:
+Trước khi đề xuất, cần hiểu tại sao những thứ sau đây khả thi với Cellos mà không khả thi với hệ thống khác:
 
 | Siêu năng lực | Ý nghĩa | Không thể có ở Linux/Windows |
 |---|---|---|
@@ -35,7 +35,7 @@ Profiling production system là bài toán khó của mọi OS:
 ### Tại sao Linux không thể làm tốt hơn
 Không có API typing cho inter-process call. eBPF probe phải hook vào kernel function hoặc userspace memory address — fragile, version-specific, nguy hiểm khi sai địa chỉ.
 
-### ViCell có thể làm gì
+### Cellos có thể làm gì
 **Mọi inter-cell call đều đi qua vtable entry trong kernel-managed dispatch table.**
 
 Observer Cell là Cell đặc biệt có thể:
@@ -69,14 +69,14 @@ Cần thêm kernel API `sys_register_observer(target_cell, trait_id, method_id)`
 ## Đề xuất 2: Typed Zero-Copy Ring Channel
 
 ### Vấn đề
-IPC hiện tại của ViCell (`sys_send`) là synchronous request-response. Tốt cho lệnh, tệ cho **data streaming liên tục** (sensor 1kHz, camera 30fps, audio 48kHz).
+IPC hiện tại của Cellos (`sys_send`) là synchronous request-response. Tốt cho lệnh, tệ cho **data streaming liên tục** (sensor 1kHz, camera 30fps, audio 48kHz).
 
 Với loại data này, mọi OS đều phải dùng shared memory + semaphore — untyped, error-prone, crash khi một bên chết.
 
 ### Tại sao Linux không thể làm tốt hơn
 POSIX pipe là untyped bytes. Shared memory qua `mmap` là untyped void*. Không có gì ngăn producer và consumer dùng struct khác nhau → memory corruption. Không có gì xử lý khi producer Cell chết trong lúc consumer đang đọc.
 
-### ViCell có thể làm gì
+### Cellos có thể làm gì
 **`CellChannel<T>` — kernel-owned typed ring buffer:**
 
 ```rust
@@ -112,12 +112,12 @@ Kernel cần thêm ring buffer allocator trong Metadata Registry. Phức tạp v
 ## Đề xuất 3: Adapter Cell — Semantic Version Negotiation
 
 ### Vấn đề
-Khi ViCell ecosystem phát triển, `ViFileSystem` sẽ có v1.x, v2.x, v3.x. Nếu App Cell cần v2.x và VFS Cell implement v3.x → không tương thích. Hiện tại: không có giải pháp.
+Khi Cellos ecosystem phát triển, `ViFileSystem` sẽ có v1.x, v2.x, v3.x. Nếu App Cell cần v2.x và VFS Cell implement v3.x → không tương thích. Hiện tại: không có giải pháp.
 
 ### Tại sao Linux không thể làm
 Dynamic library versioning (soname) trên Linux là manual: maintainer phải viết compat shim, ship `libfoo.so.2` và `libfoo.so.3` song song. Không có automation. ELF không có type information để auto-generate shim.
 
-### ViCell có thể làm gì
+### Cellos có thể làm gì
 Vì inter-cell API là Rust trait có đầy đủ type signature (bao gồm semver từ Cargo.toml), linker có thể **tự động generate Adapter Cell**:
 
 ```
@@ -140,7 +140,7 @@ impl ViFileSystem_v2 for VfsAdapterV2ToV3 {
 ### Ứng dụng
 - OTA update VFS/Net/Driver Cell lên major version mà không cần update tất cả App Cell cùng lúc
 - Gradual migration: 90% app dùng v2 adapter, 10% app đã migrate sang v3 native
-- Vendor compatibility: third-party Cell cũ vẫn chạy khi ViCell platform update
+- Vendor compatibility: third-party Cell cũ vẫn chạy khi Cellos platform update
 
 ### Feasibility
 Phức tạp cao — cần type-level diff analysis trong linker. **Ưu tiên: G2 sau khi ecosystem đủ lớn.**
@@ -155,7 +155,7 @@ OpenTelemetry/Jaeger yêu cầu: (1) manual instrumentation từng function, (2)
 ### Tại sao Linux không thể tự động
 Inter-process call trên Linux đi qua kernel (syscall) nhưng kernel không biết "context" của call — trace context là userspace concept. Không thể auto-propagate qua pipe/socket mà không modify mọi app.
 
-### ViCell có thể làm gì
+### Cellos có thể làm gì
 **Mọi inter-cell call đều là typed, kernel-visible.** Kernel có thể inject trace context tự động:
 
 ```
@@ -190,7 +190,7 @@ Thêm cross-cutting concerns (rate limiting, circuit breaker, TLS termination, a
 ### Tại sao Linux không thể làm sạch hơn
 `LD_PRELOAD` trick tương tự nhưng: chỉ hoạt động với C/POSIX ABI, không type-safe, không thể revoke khi app đang chạy, không kernel-managed.
 
-### ViCell có thể làm gì
+### Cellos có thể làm gì
 Extend vtable swap từ Đề xuất 1 thành **Middleware Chain**:
 
 ```
@@ -239,7 +239,7 @@ Với robot deployed thực tế: camera AI Cell cần kết nối đến infere
 ### Tại sao Linux không làm tốt
 iptables/nftables enforce theo PID/UID — crude. Kubernetes NetworkPolicy là external policy engine, không trong kernel, có thể bypass. SELinux network policy phức tạp cấu hình, không developer-friendly.
 
-### ViCell có thể làm gì
+### Cellos có thể làm gì
 **Network capability là typed struct, not binary flag:**
 
 ```rust
@@ -281,7 +281,7 @@ Với hệ thống 20+ Cells đang chạy, operator không có cách biết:
 ### Tại sao Linux không có
 Linux không có concept "dependency graph giữa services" ở kernel level. systemd có dependency graph nhưng static, không live, không biết về runtime call patterns.
 
-### ViCell có thể làm gì
+### Cellos có thể làm gì
 Kernel đã duy trì Cell DAG (strong/weak refs, Metadata Registry). Chỉ cần expose:
 
 ```rust
@@ -323,7 +323,7 @@ Với model 50MB inference ở 30fps: **1.5GB/s copy overhead** chỉ để move
 ### Tại sao Linux không thể tránh
 Memory mapping giữa CPU và NPU phụ thuộc hardware (UMA vs NUMA). Linux unified memory (CUDA Unified/DMA-BUF) tồn tại nhưng: không type-safe, không có lifetime tracking, race condition nếu CPU và NPU access cùng lúc.
 
-### ViCell có thể làm gì
+### Cellos có thể làm gì
 **`TensorBuffer` — kernel-managed dual-domain memory:**
 
 ```rust
@@ -358,7 +358,7 @@ Cần hardware-specific memory allocation (RKNN, X390 APIs) + kernel TensorBuffe
 
 ## Tổng kết: Lộ trình đề xuất
 
-| # | Tên | Unique to ViCell | Effort | Value | Priority |
+| # | Tên | Unique to Cellos | Effort | Value | Priority |
 |---|---|---|---|---|---|
 | 1 | Observer Cell (zero-overhead profiling) | ✅ vtable-based, không thể làm với process model | Medium | Rất cao | **G2 early** |
 | 2 | Typed Zero-Copy Ring Channel | ✅ kernel-owned typed buffer, Cell crash-safe | Medium | Cao (robot + server) | **G1/G2** |
@@ -375,8 +375,8 @@ Cần hardware-specific memory allocation (RKNN, X390 APIs) + kernel TensorBuffe
 - **Đề xuất 2**: Typed Ring Channel — unblocks camera/sensor pipelines, cần thiết cho robot demo thực tế
 
 ### Một đề xuất "flagship" cho positioning
-**Đề xuất 5 (Middleware Injection)** + **Đề xuất 4 (Auto Tracing)** kết hợp tạo ra story mạnh nhất để phân biệt ViCell với mọi OS khác:
+**Đề xuất 5 (Middleware Injection)** + **Đề xuất 4 (Auto Tracing)** kết hợp tạo ra story mạnh nhất để phân biệt Cellos với mọi OS khác:
 
-> *"Trong ViCell, bạn có thể thêm rate limiting, distributed tracing, circuit breaker, và TLS termination vào bất kỳ service nào, không cần chạm vào source code của service đó, không cần reboot, không cần proxy sidecar."*
+> *"Trong Cellos, bạn có thể thêm rate limiting, distributed tracing, circuit breaker, và TLS termination vào bất kỳ service nào, không cần chạm vào source code của service đó, không cần reboot, không cần proxy sidecar."*
 
-Đây là điều mà Kubernetes service mesh (Istio, Linkerd) cố làm ở infrastructure layer nhưng phải chấp nhận network overhead + operational complexity. ViCell có thể làm điều tương đương ở OS layer, trong cùng address space, với zero overhead khi không active.
+Đây là điều mà Kubernetes service mesh (Istio, Linkerd) cố làm ở infrastructure layer nhưng phải chấp nhận network overhead + operational complexity. Cellos có thể làm điều tương đương ở OS layer, trong cùng address space, với zero overhead khi không active.

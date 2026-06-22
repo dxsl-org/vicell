@@ -1,4 +1,4 @@
-# ViCell Performance Baseline Report
+# Cellos Performance Baseline Report
 
 > **Status:** Initial baseline — QEMU measurements pending first CI run.
 > Updated weekly by `.github/workflows/perf.yml`.
@@ -94,13 +94,13 @@ Round-robin 10 ms timeslice means a network packet arriving just after a timesli
 
 ```bash
 # 1. Build kernel + bench cell
-cargo build --release -p ViCell-kernel -p app-bench
+cargo build --release -p Cellos-kernel -p app-bench
 
 # 2. Boot with disk image containing /bin/bench
 ./run.ps1   # or: bash scripts/run-aarch64.sh for AArch64
 
 # 3. At the shell prompt, spawn bench
-ViCell> /bin/bench
+Cellos> /bin/bench
 
 # 4. Read serial output for [bench] lines
 # JSON lines (parseable by compare-bench-results.sh):

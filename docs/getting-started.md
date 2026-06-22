@@ -1,12 +1,12 @@
-# Getting Started with ViCell
+# Getting Started with Cellos
 
-> Your complete guide to building and contributing to ViCell
+> Your complete guide to building and contributing to Cellos
 >
 > **Version**: 0.2.1-dev | **Last Updated**: 2026-06-19
 
 ## Quick Start
 
-Get ViCell running in 5 steps. Expect 30–45 minutes on your first setup.
+Get Cellos running in 5 steps. Expect 30–45 minutes on your first setup.
 
 ### Prerequisites Table
 
@@ -43,8 +43,8 @@ winget install LLVM.LLVM
 #     .cargo/config.toml sets CC_riscv64gc_unknown_none_elf automatically.
 
 # 3. Clone and enter repository
-git clone https://github.com/your-org/ViCell.git
-cd ViCell
+git clone https://github.com/your-org/Cellos.git
+cd Cellos
 
 # 4. Build kernel
 cargo build --release
@@ -58,27 +58,27 @@ python3 create_ramdisk.py
 
 You'll see:
 ```
-ViCell K MAIN ENTRY
+Cellos K MAIN ENTRY
 [INFO] Kernel started (Hart: 0, DTB: 0x87000000)
 [INFO] Frame allocator initialized
 [INFO] Paging initialized
 [INFO] Heap initialized
 [INFO] Scheduler initialized
-ViCell Shell v0.2.0
-ViCell>
+Cellos Shell v0.2.0
+Cellos>
 ```
 
 Type `help` to see available commands. Type `exit` to quit QEMU.
 
 ---
 
-## Understanding ViCell
+## Understanding Cellos
 
-### What Makes ViCell Different?
+### What Makes Cellos Different?
 
-ViCell is a **Cellular Single Address Space (SAS) Operating System** — revolutionary compared to traditional designs.
+Cellos is a **Cellular Single Address Space (SAS) Operating System** — revolutionary compared to traditional designs.
 
-| Aspect | Traditional OS | ViCell |
+| Aspect | Traditional OS | Cellos |
 |--------|---|---|
 | **Isolation** | Hardware MMU + processes | Rust type system + Cells |
 | **Address Space** | Separate per process | Single shared address space |
@@ -204,7 +204,7 @@ mkfs.vfat disk.img
 qemu-system-riscv64 \
   -machine virt -cpu rv64 -smp 1 -m 128M \
   -nographic -bios default \
-  -kernel target/riscv64gc-unknown-none-elf/release/ViCell-kernel \
+  -kernel target/riscv64gc-unknown-none-elf/release/Cellos-kernel \
   -drive file=disk.img,format=raw,if=none,id=hd0 \
   -device virtio-blk-device,drive=hd0
 ```
@@ -233,13 +233,13 @@ qemu-system-riscv64 \
 # Terminal 1: Start QEMU in debug mode (pauses at boot)
 qemu-system-riscv64 -machine virt -cpu rv64 -m 128M \
   -nographic -bios default \
-  -kernel target/riscv64gc-unknown-none-elf/debug/ViCell-kernel \
+  -kernel target/riscv64gc-unknown-none-elf/debug/Cellos-kernel \
   -drive file=disk.img,format=raw,if=none,id=hd0 \
   -device virtio-blk-device,drive=hd0 \
   -s -S
 
 # Terminal 2: Connect GDB
-riscv64-unknown-elf-gdb target/riscv64gc-unknown-none-elf/debug/ViCell-kernel
+riscv64-unknown-elf-gdb target/riscv64gc-unknown-none-elf/debug/Cellos-kernel
 (gdb) target remote localhost:1234
 (gdb) break kmain
 (gdb) continue
@@ -287,7 +287,7 @@ git checkout -b feature/shell-uptime
 
 # 3. Build and test
 cargo build --release && python3 create_ramdisk.py && ./run.ps1
-# In ViCell: uptime
+# In Cellos: uptime
 
 # 4. Commit (conventional format)
 git commit -m "feat(shell): add uptime command
@@ -332,7 +332,7 @@ Add a new syscall for CPU frequency.
 How do I get CPU frequency from HAL?
 
 ## Environment
-ViCell: main (commit abc123) | Target: RISC-V 64 | Host: Linux
+Cellos: main (commit abc123) | Target: RISC-V 64 | Host: Linux
 ```
 
 ### Debug Tips
@@ -388,7 +388,7 @@ DOCS
 
 ### This Week
 
-- [ ] Build and run ViCell successfully
+- [ ] Build and run Cellos successfully
 - [ ] Read CLAUDE.md + system-architecture.md overview
 - [ ] Trace one syscall through the code
 - [ ] Join GitHub Discussions
@@ -408,4 +408,4 @@ DOCS
 
 ---
 
-**Welcome to ViCell! Start small, ask questions, have fun. See you in the PRs.**
+**Welcome to Cellos! Start small, ask questions, have fun. See you in the PRs.**

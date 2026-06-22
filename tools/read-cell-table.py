@@ -1,4 +1,4 @@
-"""Read and print the ViCell cell bootstrap table from disk_v3.img."""
+"""Read and print the Cellos cell bootstrap table from disk_v3.img."""
 import struct, sys, os
 
 SECTOR_SIZE       = 512

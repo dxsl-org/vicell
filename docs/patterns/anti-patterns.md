@@ -1,5 +1,5 @@
 # Anti-Patterns to Avoid
-> Part of [ViCell Patterns](../patterns.md)
+> Part of [Cellos Patterns](../patterns.md)
 
 ## Unsafe Code in Cells
 
@@ -16,7 +16,7 @@ fn main() { ostd::println!("Hello"); }
 
 **Enforcement**: `cargo-geiger` CI gate on every PR. No exceptions for Cell crates.
 
-## mod.rs Files (ViCell Law 5)
+## mod.rs Files (Cellos Law 5)
 
 ```
 ❌ memory/mod.rs       (old Rust style)
@@ -26,7 +26,7 @@ fn main() { ostd::println!("Hello"); }
    memory/paging.rs    (submodule)
 ```
 
-## Hardcoded Pointer Sizes (ViCell Law 3)
+## Hardcoded Pointer Sizes (Cellos Law 3)
 
 ```rust
 // ❌ Breaks on 32-bit targets
@@ -48,7 +48,7 @@ static COUNTER: Spinlock<usize> = Spinlock::new(0);
 pub fn increment() { *COUNTER.lock() += 1; }
 ```
 
-## Borrowed Buffers for Async (ViCell Law 2)
+## Borrowed Buffers for Async (Cellos Law 2)
 
 ```rust
 // ❌ Lifetime violation — borrow may dangle if Cell unloads during await

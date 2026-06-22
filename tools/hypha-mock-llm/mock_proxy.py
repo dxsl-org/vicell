@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """Hypha mock LLM proxy — host-side plumbing test for the llm-gateway cell.
 
-Purpose (os-gap G3 de-risk): isolate the *ViCell side* of the LLM path
+Purpose (os-gap G3 de-risk): isolate the *Cellos side* of the LLM path
 (cell -> net -> TLS -> HTTP -> JSON parse) from the real provider. This is NOT
-a real LLM. It speaks TLS 1.3 with a self-signed P-256 cert (ViCell's net cell
+a real LLM. It speaks TLS 1.3 with a self-signed P-256 cert (Cellos's net cell
 uses embedded-tls `UnsecureProvider`, so it does not verify the cert) and
 answers any `POST /v1/chat/completions` with an OpenAI-compatible JSON that
 echoes the prompt back — proving the round-trip end to end.
 
 Run on the HOST (the guest reaches it at 10.0.2.2:8443 via QEMU user-net):
     python tools/hypha-mock-llm/mock_proxy.py
-Then in the ViCell shell:
+Then in the Cellos shell:
     /bin/hypha          # or: /bin/llm-gateway  (P0 standalone, if reverted)
 
 Requires QEMU user-mode (SLIRP) networking, where guest 10.0.2.2 == host.
@@ -89,7 +89,7 @@ class Handler(BaseHTTPRequestHandler):
             pass
 
         reply = (
-            "Mock LLM here — the ViCell TLS+HTTP+JSON path works. "
+            "Mock LLM here — the Cellos TLS+HTTP+JSON path works. "
             "You sent: " + user[:160].replace("\n", " ")
         )
         body = json.dumps({

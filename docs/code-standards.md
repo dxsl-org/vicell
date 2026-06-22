@@ -1,4 +1,4 @@
-# ViCell Code Standards
+# Cellos Code Standards
 
 **Scope**: Rust code across kernel, HAL, libraries, and Cells  
 **Edition**: 2021  
@@ -101,7 +101,7 @@ foo/
 
 **Why**: Clearer file tree, easier IDE navigation, prevents accidental circular imports.
 
-### Law 6: ViCell Naming Convention
+### Law 6: Cellos Naming Convention
 
 | Category | Rule | Examples |
 |----------|------|----------|
@@ -353,7 +353,7 @@ pub use crate::types::{ViError, ViResult};
 
 ### Cells Directory Structure
 
-ViCell organizes cells into 8 semantic groups (parallel to code, not functionality):
+Cellos organizes cells into 8 semantic groups (parallel to code, not functionality):
 
 ```
 cells/
@@ -470,7 +470,7 @@ pub async fn read_with_timeout(path: &str, timeout_ms: u64) -> ViResult<Vec<u8>>
 
 ### App Development (Cell Writing)
 
-Use the ViCell App SDK (`libs/ostd/`) to eliminate boilerplate:
+Use the Cellos App SDK (`libs/ostd/`) to eliminate boilerplate:
 
 **Before (manual dispatch)**:
 ```rust
@@ -516,7 +516,7 @@ async fn run() {
 
 ## I/O Trait Layers (embedded-io Integration)
 
-ViCell integrates [`embedded-io`](https://docs.rs/embedded-io) for byte-stream I/O. The two systems serve distinct purposes and must not be conflated:
+Cellos integrates [`embedded-io`](https://docs.rs/embedded-io) for byte-stream I/O. The two systems serve distinct purposes and must not be conflated:
 
 ### Which trait system to use
 

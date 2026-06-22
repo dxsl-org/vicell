@@ -1,6 +1,6 @@
 # ADR: Native Filesystem for G2 (/srv backend)
 
-**Date**: 2026-06-11 | **Status**: Accepted | **Authors**: ViCell core team
+**Date**: 2026-06-11 | **Status**: Accepted | **Authors**: Cellos core team
 
 ---
 
@@ -44,7 +44,7 @@ G2 (server/PC workload, C930/P870 + NVMe) needs:
   `alloc::collections::BTreeMap`; map `std::io::Error` → `ViError`; wrap
   file handles as `ViFileHandle`. Redox already maintains an `alloc`-only build
   for its kernel space.
-- **MIT licence**: compatible with ViCell's MIT licence.
+- **MIT licence**: compatible with Cellos's MIT licence.
 
 ### Why custom CoW B-tree was rejected
 
@@ -68,7 +68,7 @@ of careful implementation and testing, not 4–6 weeks. Redox has done that work
 1. Fork `redox-os/redoxfs` at a tagged release; add as a `[patch]` or vendor subtree.
 2. Enable `default-features = false, features = ["alloc"]` (Redox already has this).
 3. Replace `std::collections::*` → `alloc::collections::*` throughout.
-4. Replace `std::io::{Error, Read, Write, Seek}` → ViCell equivalents from `libs/ostd`.
+4. Replace `std::io::{Error, Read, Write, Seek}` → Cellos equivalents from `libs/ostd`.
 5. Implement `NvmeBlockAdapter: BlockDevice` backed by the G2 DMA Grant API
    (see `docs/specs/02-memory.md §5` — large-buffer IPC via `sys_grant_blk_read`).
 6. Mount lazily: wait for NVMe driver `ServiceReady` notification before calling

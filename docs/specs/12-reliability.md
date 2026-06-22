@@ -1,19 +1,19 @@
-# ViCell Reliability Model — The "Never-Die" Spec
+# Cellos Reliability Model — The "Never-Die" Spec
 
 **Version**: 0.1 (Initial — Reliability Track Definition)
 **Status**: Definitive
 **Last Updated**: 2026-06-05
 
-> ViCell targets robots and embedded devices. For that domain "fast + realtime" is not
+> Cellos targets robots and embedded devices. For that domain "fast + realtime" is not
 > enough — the system **must not die**. This spec defines what "không chết" means
-> concretely, records where ViCell stands today, and lists the criteria that must be
+> concretely, records where Cellos stands today, and lists the criteria that must be
 > completed. It is the canonical reference for the Reliability track.
 
 ---
 
 ## 1. What "Never-Die" Means — Six Independent Axes
 
-"Never-die" is **not one property**. It decomposes into six axes that ViCell scores very
+"Never-die" is **not one property**. It decomposes into six axes that Cellos scores very
 differently on. Conflating axis 1 (isolation) with the whole is the single biggest mistake.
 
 | # | Axis | Core question | Example of "death" |
@@ -34,7 +34,7 @@ A statically-isolated but unrecoverable system still "dies" the moment a control
 
 **Per-Cell SATP isolation at Tier 1 is NOT pursued.** Rationale:
 
-- ViCell runs in **RISC-V S-mode** under SBI. **PMP is M-mode-only** (Priv Spec §3.7) — an
+- Cellos runs in **RISC-V S-mode** under SBI. **PMP is M-mode-only** (Priv Spec §3.7) — an
   S-mode kernel cannot program it without custom M-mode firmware. **sPMP** (S-mode PMP) is
   **not ratified and not in commodity silicon** as of 2026. So PMP is viable only as a
   *static boot-time* guard, never as a per-cell dynamic isolator.
@@ -100,12 +100,12 @@ Ordered by ROI for never-die. Items are independent of the (dropped) SATP decisi
 - [x] **Reboot-on-kernel-panic** — DONE 2026-06-06 (commit f7515e05). Kernel panic now requests an
       SBI SRST **cold reboot** (`sbi::system_reset`) after printing diagnostics, falling back to the
       halt loop only if firmware lacks SRST. Cell faults unaffected. Verified in QEMU (injected panic
-      reboots vs freezes; normal boot still reaches `ViCell >`).
+      reboots vs freezes; normal boot still reaches `Cellos >`).
 - [x] **Stack guard pages** — DONE 2026-06-06 (commit a8fa971c). Root cause of the earlier block
       found + fixed: the spawn paths zeroed the stack from `kstack.base` (the guard frame itself)
       for `STACK_FRAMES` pages — writing *through* the guard. Now zero from `base+PAGE_SIZE` (the
       usable pages only), then unmap the guard frame + `sfence.vma` in `stack.rs::allocate`. A stack
-      overflow now traps. Verified: boot reaches `ViCell >` with guards active, 0 unmap failures.
+      overflow now traps. Verified: boot reaches `Cellos >` with guards active, 0 unmap failures.
       Remaining verification: a deliberate-overflow test cell to confirm the trap fires (follow-up).
 
 ### 4.2 — Detection (P0)
@@ -140,7 +140,7 @@ Erlang/OTP-style "let it crash + restart".
       the waiter (Phase 00 made fault paths notify waiters), and init respawns the shell, with a
       restart cap against crash-storms. Uses only `sys_wait` + `sys_spawn_from_path` — **no new
       ABI / no Law 1**. Functionally verified end-to-end: `exit` kills the shell, init logs
-      "shell died — restarting" → "shell restarted", a 2nd `ViCell >` appears, init doesn't fault.
+      "shell died — restarting" → "shell restarted", a 2nd `Cellos >` appears, init doesn't fault.
       > Prereq bug fixed first: init had a pre-existing instruction-fault during boot — the bench
       > cell lacked a linker script and clobbered init's `.text` PTE (commit e6798320). Also the
       > boot gate's fault pattern was broken and hid it (fixed). Both were masking init's death.
@@ -149,7 +149,7 @@ Erlang/OTP-style "let it crash + restart".
       death notification to each watcher (wakes a parked `Recv` returning the dead tid, or queues to
       `Task::pending_deaths` for the next `Recv` — never missed during respawn); SpawnCap-gated.
       init now supervises ALL services (vfs/config/input/net/compositor/shell) with one `sys_recv`
-      loop, restarting whichever dies + re-arming. Verified: boot reaches `ViCell >` "supervising
+      loop, restarting whichever dies + re-arming. Verified: boot reaches `Cellos >` "supervising
       services"; exiting the shell → "service died — restarting"/"service restarted", 2nd prompt, 0
       panics.
 - [x] **Stable service-ID registry** — DONE 2026-06-06 (commit 5cda48d8). Kernel `service_id→tid`
@@ -284,26 +284,26 @@ two regimes, on opposite ends:
 
 **Key limit for robots:** you cannot horizontally scale a robot's *physical body* — actuators
 are singular. So for a single robot, axis 6 must come from on-board redundancy or graceful
-safe-state, not scale-out. Scale-out's free axis 6 applies to ViCell's *cloud-microservice*
+safe-state, not scale-out. Scale-out's free axis 6 applies to Cellos's *cloud-microservice*
 use case, not its motor-control use case.
 
-### The unifying insight (ViCell-relevant)
+### The unifying insight (Cellos-relevant)
 **Supervisor-restart (one node) and node-failover (distributed) are the same recovery pattern at
-different scales** — "let it crash, something restarts it". ViCell's cell + supervisor-tree model
+different scales** — "let it crash, something restarts it". Cellos's cell + supervisor-tree model
 (Phases 03–04) is the single-node form. Because cells communicate only via IPC (location-agnostic
 by design), the *same* supervision/abstraction can later extend across nodes (distributed cells):
 
 - For **cloud microservices** (a Tier-1 use case in [05-application.md](05-application.md)):
-  cross-node cell failover is ViCell's path to axis 6 in the availability regime — for free,
+  cross-node cell failover is Cellos's path to axis 6 in the availability regime — for free,
   as a byproduct of scaling the existing model. **Do not build this now (YAGNI)**, but the
   supervisor/IPC ABI should not foreclose it.
 - For **robot fleets/swarms:** one robot dying while the swarm continues is fleet-level axis 6,
   again the same supervision pattern lifted one level.
 
-**Conclusion for ViCell:** the realistic single-OS target is **QNX-class on axes 1–5** (trusted-tier
+**Conclusion for Cellos:** the realistic single-OS target is **QNX-class on axes 1–5** (trusted-tier
 model), with **axis 6 pushed to deployment hardware** (ECC, HW watchdog, redundant nodes) — and
 the cell+supervisor model kept *scale-ready* so the availability-regime path to axis 6 stays open
-later. ViCell's differentiator vs QNX (C) is **Rust LBI + ~11.5K-LOC TCB**: no existing OS
+later. Cellos's differentiator vs QNX (C) is **Rust LBI + ~11.5K-LOC TCB**: no existing OS
 combines Rust safety + a tiny TCB + Erlang-style supervision. That intersection is the niche.
 
 ---

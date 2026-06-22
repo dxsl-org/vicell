@@ -1,4 +1,4 @@
-# ViCell Network Service API
+# Cellos Network Service API
 
 The Net Service Cell (`cells/services/net/`) drives a smoltcp TCP/IPv4 stack
 backed by the kernel VirtIO NIC driver and provides BSD-style socket IPC.

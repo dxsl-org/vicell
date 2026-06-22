@@ -1,10 +1,10 @@
-# ViCell — Frequently Asked Questions
+# Cellos — Frequently Asked Questions
 
 ---
 
-## 1. What is ViCell?
+## 1. What is Cellos?
 
-ViCell is a **Cellular Single Address Space (SAS) operating system** written in Rust.
+Cellos is a **Cellular Single Address Space (SAS) operating system** written in Rust.
 All code — kernel, drivers, and applications — shares one virtual address space.
 Isolation is enforced by **Rust's type system and ownership model** (Language-Based
 Isolation, LBI), not by hardware page tables.  Software is organized as **Cells**
@@ -14,30 +14,30 @@ rather than traditional processes.
 
 ## 2. Why "Cellular"?
 
-A Cell is the fundamental unit of ViCell software, analogous to a process in Linux but
+A Cell is the fundamental unit of Cellos software, analogous to a process in Linux but
 much lighter.  Cells share the same address space and communicate via zero-copy IPC
 (ownership transfer), making the design similar to a mycelium network — many
 independent organisms sharing the same substrate.
 
 ---
 
-## 3. How is ViCell different from Redox, seL4, or Theseus?
+## 3. How is Cellos different from Redox, seL4, or Theseus?
 
-| | ViCell | Redox | seL4 | Theseus |
+| | Cellos | Redox | seL4 | Theseus |
 |-|------|-------|------|---------|
 | Isolation | Rust type system (LBI) | Hardware MMU | Hardware MMU + formal proof | Language + type system |
 | IPC | Zero-copy owned-buffer | Message passing | Capability IPC | No-copy via type safety |
 | Language | Rust (no_std) | Rust | C (kernel), Rust user | Rust |
 | Focus | Edge-to-Cloud, Cellular SAS | POSIX-compatible | High-assurance embedded | Live evolution / hot-swap |
 
-ViCell is most similar to Theseus in spirit but targets a broader hardware range and
+Cellos is most similar to Theseus in spirit but targets a broader hardware range and
 prioritizes zero-copy IPC performance over formal verification.
 
 ---
 
 ## 4. Why Rust nightly?
 
-ViCell uses several nightly-only features required for bare-metal `no_std` programming:
+Cellos uses several nightly-only features required for bare-metal `no_std` programming:
 
 - `-Z build-std=core,alloc` — build the standard library for bare-metal targets
 - `#![feature(custom_test_frameworks)]` — test runner in `no_std` kernels
@@ -51,7 +51,7 @@ tested.
 ## 5. Why no hardware MMU isolation?
 
 Hardware MMU isolation has a cost: every context switch flushes the TLB, every
-cross-process IPC copies data.  ViCell bets that Rust's type system provides equivalent
+cross-process IPC copies data.  Cellos bets that Rust's type system provides equivalent
 safety guarantees at near-zero overhead.
 
 Trade-offs accepted:
@@ -62,7 +62,7 @@ Trade-offs accepted:
 
 ---
 
-## 6. What hardware does ViCell run on?
+## 6. What hardware does Cellos run on?
 
 **Emulated (supported today):**
 - RISC-V 64 (`qemu-system-riscv64 -machine virt`) — primary target, CI-tested
@@ -78,7 +78,7 @@ Trade-offs accepted:
 ## 7. Why no Linux compatibility?
 
 A POSIX/Linux compatibility shim is tracked in `libs/api/src/posix.rs` for basic
-syscall forwarding, but full Linux ABI compatibility is not a goal.  ViCell is a
+syscall forwarding, but full Linux ABI compatibility is not a goal.  Cellos is a
 research OS exploring a different design point; apps are written as Cells, not
 POSIX processes.  For Linux app compat, see Redox or Asterinas.
 

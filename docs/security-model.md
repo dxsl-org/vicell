@@ -1,12 +1,12 @@
-# ViCell Security Model
+# Cellos Security Model
 
 **Version:** v0.2.3-dev | **Updated:** 2026-06-21
 
 ## Design Philosophy
 
-ViCell uses a **Cellular Single Address Space (SAS)** model with
+Cellos uses a **Cellular Single Address Space (SAS)** model with
 Language-Based Isolation (LBI) via Rust's type system.  Traditional OS
-security relies on hardware MMU separation between processes; ViCell instead
+security relies on hardware MMU separation between processes; Cellos instead
 relies on:
 
 1. **Rust ownership + borrow checker** — prevents spatial/temporal memory bugs
@@ -62,16 +62,16 @@ relies on:
 ### Spectre v1/v2 — SAS Worst-Case Scenario
 **Severity: Critical (research/trusted-environment only)**
 
-SAS is the worst-case environment for Spectre attacks. In a traditional OS, Spectre leaks within a single process boundary. In ViCell SAS, a compromised Tier 1 cell can speculatively read any memory in the entire system — including kernel heap, crypto keys, and other cells.
+SAS is the worst-case environment for Spectre attacks. In a traditional OS, Spectre leaks within a single process boundary. In Cellos SAS, a compromised Tier 1 cell can speculatively read any memory in the entire system — including kernel heap, crypto keys, and other cells.
 
-**Current status**: No mitigation. ViCell v1.0 requires all Tier 1 cells to be trusted (signed, first-party code).
+**Current status**: No mitigation. Cellos v1.0 requires all Tier 1 cells to be trusted (signed, first-party code).
 
 **Mitigations planned**:
 - Short-term: Document "trusted cells only" constraint explicitly (done here)
 - Medium-term: Tier 3 VM isolation for untrusted code (hardware page tables per VM)
 - Long-term: CHERIoT RISC-V hardware capabilities — see "Hardware Isolation Roadmap" section below
 
-**Do NOT use ViCell to run untrusted third-party code until Tier 3 VM is implemented.**
+**Do NOT use Cellos to run untrusted third-party code until Tier 3 VM is implemented.**
 
 > **Full analysis:** [research/research-hardware-isolation.md](research/research-hardware-isolation.md) — covers the
 > full menu of hardware supplements (CFI, MPK/PKS, MPU/PMP, RISC-V WorldGuard/Smmtt, IOMMU/IOPMP, confidential
@@ -79,7 +79,7 @@ SAS is the worst-case environment for Spectre attacks. In a traditional OS, Spec
 > (Tock, Hubris, RedLeaf, Theseus, Singularity, CheriOS) and a severity-ranked gap list.
 
 > **Isolation strategy decision (2026-06-05):** per-Cell **SATP** isolation at Tier 1 is
-> **explicitly NOT pursued**. PMP is M-mode-only (unreachable from ViCell's S-mode without
+> **explicitly NOT pursued**. PMP is M-mode-only (unreachable from Cellos's S-mode without
 > custom firmware) and sPMP is unratified; per-cell SATP would break Tier 1 zero-copy IPC.
 > Hardware isolation is delivered by **Tier 3 Stage-2 paging (per-VM)**, and untrusted code
 > is confined to Tier 2 (WASM) / Tier 3. The Tier 1 "signed cells only" guarantee depends on
@@ -107,7 +107,7 @@ engine) can read or write **any** physical address — kernel page tables, sched
 stacks — **without a single line of `unsafe`**, purely via MMIO writes it is legitimately permitted to issue.
 This defeats LBI and every CPU-side memory protection at once. The blast radius equals a Linux *kernel driver*
 bug, not a user-space exploit. (Thunderclap, NDSS 2019, bypassed the IOMMU of macOS/Linux/FreeBSD even when
-*enabled* — ViCell has not enabled translation at all.)
+*enabled* — Cellos has not enabled translation at all.)
 
 **Key distinction**: MMIO ownership ≠ DMA authorization. The Resource Registry enforces exclusive MMIO
 ownership, but holding NIC MMIO implies DMA capability while holding UART MMIO does not. The kernel must track
@@ -121,7 +121,7 @@ hardware. See [research/research-hardware-isolation.md](research/research-hardwa
 ### Forward-Edge CFI Absent (BTI / CET-IBT)
 **Severity: High (prerequisite for MPK)**
 
-Spatial memory protection does not stop a corrupted indirect branch from jumping anywhere in the SAS. ViCell
+Spatial memory protection does not stop a corrupted indirect branch from jumping anywhere in the SAS. Cellos
 plans PAC (ARM) but PAC only covers the **backward edge** (return addresses) — forward-edge JOP/COP is open
 without **BTI** (ARM) or **CET-IBT** (x86). Critically, **MPK/PKU is not a security boundary without CFI**:
 `WRPKRU` is an unprivileged instruction, so any JOP gadget reaching an unsanctioned `WRPKRU`/`XRSTOR` grants
@@ -151,7 +151,7 @@ ambient authority · explicit delegation · monotonic downgrade · revocable).
 
 **Planned** (see [research/research-cell-security-permissions.md](research/research-cell-security-permissions.md)
 for the full design + capability-OS / mobile-OS references): evolve through (1) **parameterized capabilities**
-(`__ViCell_cap_args` ELF section — e.g. "GPIO pins 14-17" not "all GPIO"; additive, no Law 1 bump), (2)
+(`__Cellos_cap_args` ELF section — e.g. "GPIO pins 14-17" not "all GPIO"; additive, no Law 1 bump), (2)
 **spawn-time intersection** (a Cell can only delegate caps it holds — kills confused-deputy), (3) **runtime
 revocation** (`CapHandle` + `sys_cap_revoke`), (4) **operator-signed policy** for headless G1 fleets (consent =
 signed policy, NOT a dialog — see the headless-robot caveat) and an optional **TCC-style consent-broker Cell**
@@ -162,9 +162,9 @@ via code injection" hole that produced repeated macOS/iOS TCC CVEs.
 ### Boot Trust Chain + Attestation — Absent
 **Severity: Medium (High for fleet deployment)**
 
-ViCell has no secure boot, no measured boot, no device attestation, and no sealed storage. Cell binary signing
+Cellos has no secure boot, no measured boot, no device attestation, and no sealed storage. Cell binary signing
 (Ed25519/P-256) is planned but unimplemented. A robot fleet cannot cryptographically prove a device runs
-unmodified ViCell (vs tampered firmware with a cloned identity), and secrets are not bound to a measured boot
+unmodified Cellos (vs tampered firmware with a cloned identity), and secrets are not bound to a measured boot
 state.
 
 **Planned** (see [research/research-cell-security-permissions.md](research/research-cell-security-permissions.md)
@@ -182,9 +182,9 @@ storage** with the AEAD key held in the **Silo** (closes the CDI-in-RAM exposure
 
 ### CHERI sub-roadmap
 
-**CHERIoT** (Capability Hardware Extension RISC-V for IoT) là extension RISC-V cung cấp **hardware-enforced pointer bounds** — kết hợp hoàn hảo với Rust LBI của ViCell.
+**CHERIoT** (Capability Hardware Extension RISC-V for IoT) là extension RISC-V cung cấp **hardware-enforced pointer bounds** — kết hợp hoàn hảo với Rust LBI của Cellos.
 
-### Tại sao CHERI quan trọng với ViCell
+### Tại sao CHERI quan trọng với Cellos
 
 | Cơ chế | Rust LBI (hiện tại) | CHERI + Rust LBI |
 |--------|---------------------|-----------------|
@@ -205,12 +205,12 @@ storage** with the AEAD key held in the **Silo** (closes the CDI-in-RAM exposure
 | **RISC-V "Zcheri" extension** | ❌ **Chưa ratify** (target đầu 2026, đã trượt) | RV32CH/RV64CH |
 | **CHERI-RISC-V RV64** (Cambridge / COSMIC) | 🔶 FPGA only; COSMIC nhắm secure-enclave 3/2028, chưa tape-out | RV64 full CHERI |
 
-> **Thực tế (2026)**: CHERI cho RV64 (target chính của ViCell) **chưa có silicon, chưa có Rust target, ISA chưa ratify**
+> **Thực tế (2026)**: CHERI cho RV64 (target chính của Cellos) **chưa có silicon, chưa có Rust target, ISA chưa ratify**
 > — KHÔNG khả thi cho 2026-Q4; realistic 2028-2030. ARM Morello đã bị khai tử. **CHERIoT-IBEX là RV32E** và là path
-> duy nhất chín muồi — phù hợp **ViCell-Nano** profile (embedded robots). Compartment switch đo được 209-452 cycle
+> duy nhất chín muồi — phù hợp **Cellos-Nano** profile (embedded robots). Compartment switch đo được 209-452 cycle
 > (nhanh hơn null syscall, SOSP 2025).
 
-### Integration Path với ViCell (Phase 31)
+### Integration Path với Cellos (Phase 31)
 
 ```
 Bước 1: HAL arch mới
@@ -237,11 +237,11 @@ Bước 4: Kernel unsafe blocks
 ### Prerequisites (Phase 31)
 
 - [ ] Mua Sonata development board (CHERIoT-IBEX, ~$50)
-- [ ] Xác nhận CHERIoT-Platform/rust build cho no_std ViCell target
+- [ ] Xác nhận CHERIoT-Platform/rust build cho no_std Cellos target
 - [ ] Thiết kế `feature = "cheri"` flag trong libs/types không breaking existing RV64 code
 - [ ] Benchmark: overhead của CHERI bounds check vs. phần mềm Rust LBI
 
-**Target**: Phase 31 (2026-Q4) cho ViCell-Nano profile trên Sonata board.
+**Target**: Phase 31 (2026-Q4) cho Cellos-Nano profile trên Sonata board.
 
 ---
 

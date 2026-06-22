@@ -1,7 +1,7 @@
-"""Write all x86_64 HAL sub-modules for ViCell Phase 09."""
+"""Write all x86_64 HAL sub-modules for Cellos Phase 09."""
 import os
 
-BASE = "d:/ViCell/hal/arch/x86/src/x86_64"
+BASE = "d:/Cellos/hal/arch/x86/src/x86_64"
 os.makedirs(BASE, exist_ok=True)
 
 # ── uart_16550.rs ─────────────────────────────────────────────────────────────

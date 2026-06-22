@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build-time guard: every Cell's linker base must be off-MMIO, below RAM, and unique.
 
-ViCell is a Single Address Space (SAS): all Cells share ONE page table. A Cell whose
+Cellos is a Single Address Space (SAS): all Cells share ONE page table. A Cell whose
 fixed load VA collides with a kernel MMIO identity map (CLINT/PLIC/UART) or with another
 live Cell silently clobbers PTEs (kernel/src/memory/paging.rs maps MMIO identity). This
 exact class bit us twice: vfs sat inside CLINT and bench/lua/micropython inside PLIC,

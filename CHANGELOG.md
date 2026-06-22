@@ -1,6 +1,6 @@
-# ViCell Changelog
+# Cellos Changelog
 
-All notable changes to ViCell are documented here.
+All notable changes to Cellos are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
@@ -69,6 +69,6 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-[Unreleased]: https://github.com/dxsl-org/vicell/compare/v0.2.1...HEAD
-[0.2.1]: https://github.com/dxsl-org/vicell/compare/v0.2.0...v0.2.1
-[0.2.0]: https://github.com/dxsl-org/vicell/releases/tag/v0.2.0
+[Unreleased]: https://github.com/dxsl-org/Cellos/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/dxsl-org/Cellos/compare/v0.2.0...v0.2.1
+[0.2.0]: https://github.com/dxsl-org/Cellos/releases/tag/v0.2.0

@@ -8,9 +8,9 @@ labels: showcase
 <!-- Describe your project, experiment, port, or demo. Include a screenshot,
      recording, or code snippet if you have one. -->
 
-## How It Uses ViCell
+## How It Uses Cellos
 
-<!-- Which ViCell features, APIs, or Cells did you use or extend?
+<!-- Which Cellos features, APIs, or Cells did you use or extend?
      e.g. "I wrote a new Cell using libs/ostd's File API..." -->
 
 ## What I Learned

@@ -1,4 +1,4 @@
-# ViCell Display / Compositor API
+# Cellos Display / Compositor API
 
 The Compositor Cell (`cells/services/compositor/`) manages a z-ordered set of
 cell surfaces, blends them in software, and flushes dirty regions to the VirtIO

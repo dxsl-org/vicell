@@ -67,7 +67,7 @@ impl VfsManager {
     pub fn new() -> Self {
         let mut root = Box::new(RamFile::new_dir("/"));
         root.children.insert(String::from("readme.txt"),
-            Box::new(RamFile::new_file("readme.txt", b"Welcome to ViCell!\n")));
+            Box::new(RamFile::new_file("readme.txt", b"Welcome to Cellos!\n")));
 
         let mut bin = Box::new(RamFile::new_dir("bin"));
         for (name, data) in [
@@ -184,6 +184,6 @@ pub fn main() {
 }
 """
 
-with open("d:/ViCell/cells/services/vfs/src/main.rs", "w", encoding="utf-8", newline="\n") as f:
+with open("d:/Cellos/cells/services/vfs/src/main.rs", "w", encoding="utf-8", newline="\n") as f:
     f.write(content)
 print("main.rs written")

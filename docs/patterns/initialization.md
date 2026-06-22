@@ -1,5 +1,5 @@
 # Initialization Patterns
-> Part of [ViCell Patterns](../patterns.md)
+> Part of [Cellos Patterns](../patterns.md)
 
 ## Two-Phase Initialization
 

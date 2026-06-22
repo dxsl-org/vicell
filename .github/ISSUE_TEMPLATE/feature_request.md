@@ -1,6 +1,6 @@
 ---
 name: Feature Request
-about: Propose a new capability for ViCell
+about: Propose a new capability for Cellos
 title: "[FEAT] "
 labels: ["enhancement", "triage"]
 assignees: []

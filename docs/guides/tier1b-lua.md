@@ -6,7 +6,7 @@
 
 ## Overview
 
-ViCell includes a **Lua interpreter Cell** at `cells/runtimes/lua/`. Scripts run in a sandbox with:
+Cellos includes a **Lua interpreter Cell** at `cells/runtimes/lua/`. Scripts run in a sandbox with:
 
 - **VFS bindings**: read/write files via IPC
 - **Restricted stdlib**: `os`, `io.popen`, `debug` disabled (no network syscalls)
@@ -48,7 +48,7 @@ hello
 
 ## VFS Bindings
 
-Read and write files via ViCell's VFS service:
+Read and write files via Cellos's VFS service:
 
 ```lua
 -- Read entire file
@@ -109,9 +109,9 @@ This is the **no-network constraint** — it protects against malicious scripts.
 ```lua
 local json = require("json")
 
-local data = '{"name":"ViCell","version":"0.3.0"}'
+local data = '{"name":"Cellos","version":"0.3.0"}'
 local parsed = json.parse(data)
-print(parsed.name)        -- ViCell
+print(parsed.name)        -- Cellos
 print(parsed.version)     -- 0.3.0
 
 local output = json.stringify({ status = "ok", code = 200 })
@@ -215,7 +215,7 @@ Access via `require("json")` or `dofile("/tmp/json.lua")`.
 ✅ Quick prototyping, one-off scripts  
 ✅ CLI tools, text processing  
 ✅ Configuration / task automation  
-✅ Learning ViCell syscalls (no Rust needed)  
+✅ Learning Cellos syscalls (no Rust needed)  
 
 ❌ Performance-critical code → use Tier 1 Rust  
 ❌ Network apps → use Tier 1 Rust + SDK L1  

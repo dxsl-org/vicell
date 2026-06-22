@@ -1,6 +1,6 @@
-# ViCell Scripting Guide
+# Cellos Scripting Guide
 
-ViCell supports two embedded scripting runtimes: **Lua 5.4** (verified) and **MicroPython 1.24.1** (verified).
+Cellos supports two embedded scripting runtimes: **Lua 5.4** (verified) and **MicroPython 1.24.1** (verified).
 Both run as native Cells with direct access to the VFS and IPC APIs.
 
 ---
@@ -11,8 +11,8 @@ Both run as native Cells with direct access to the VFS and IPC APIs.
 
 At the shell prompt:
 ```
-ViCell> lua
-Lua 5.4 on ViCell  (Ctrl+D to exit)
+Cellos> lua
+Lua 5.4 on Cellos  (Ctrl+D to exit)
 > 
 ```
 
@@ -22,7 +22,7 @@ Arrow-up/down navigates command history (session-local; persistence added in Pha
 ### Running a Script
 
 ```
-ViCell> exec /bin/lua /scripts/hello.lua
+Cellos> exec /bin/lua /scripts/hello.lua
 ```
 
 (Phase 17a will make `lua script.lua` work directly once arg-passing is wired.)
@@ -34,8 +34,8 @@ All standard Lua 5.4 libraries are available: `string`, `table`, `math`,
 
 ```lua
 -- String operations
-local s = "Hello, ViCell!"
-print(s:upper())          -- HELLO, ViCell!
+local s = "Hello, Cellos!"
+print(s:upper())          -- HELLO, Cellos!
 print(#s)                 -- 12
 
 -- Math
@@ -85,8 +85,8 @@ The Lua REPL handles incomplete chunks automatically — just keep typing:
 > function greet(name)
 >>   print("Hello, " .. name .. "!")
 >> end
-> greet("ViCell")
-Hello, ViCell!
+> greet("Cellos")
+Hello, Cellos!
 ```
 
 ### Example Scripts
@@ -124,8 +124,8 @@ The runtime includes a 256 KB heap and FFI bindings to the VFS and IPC APIs.
 ### Starting the REPL
 
 ```
-ViCell> python
-MicroPython v1.24.1 on ViCell  (Ctrl+D to exit)
+Cellos> python
+MicroPython v1.24.1 on Cellos  (Ctrl+D to exit)
 >>> 
 ```
 
@@ -137,7 +137,7 @@ MicroPython v1.24.1 on ViCell  (Ctrl+D to exit)
 ['shell', 'lua', 'python', 'cat', 'ls', ...]
 >>> f = open("/readme.txt")
 >>> print(f.read())
-Welcome to ViCell!
+Welcome to Cellos!
 ```
 
 ### Supported Modules
@@ -161,7 +161,7 @@ File I/O works via VFS syscalls (read and write).
 ### Running Python Scripts
 
 ```
-ViCell> exec /bin/python /scripts/hello.py
+Cellos> exec /bin/python /scripts/hello.py
 ```
 
 ---
@@ -183,9 +183,9 @@ disk.img
 
 ## Adding New Lua C Bindings
 
-1. Declare the Rust `extern "C" fn ViCell_xxx(L: *mut LuaState) -> c_int` in
+1. Declare the Rust `extern "C" fn Cellos_xxx(L: *mut LuaState) -> c_int` in
    `cells/runtimes/lua/src/bindings_io.rs`.
-2. Register it in `cells/runtimes/lua/glue/lua_ViCell_glue.c` via `lua_register(L, "xxx", ViCell_xxx)`.
+2. Register it in `cells/runtimes/lua/glue/lua_Cellos_glue.c` via `lua_register(L, "xxx", Cellos_xxx)`.
 3. Call any VFS/IPC operations using `ostd::syscall::sys_*` helpers.
 4. Add the binding to the table in this document.
 

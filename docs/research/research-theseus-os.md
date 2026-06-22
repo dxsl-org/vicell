@@ -5,25 +5,25 @@
 **Phương pháp**: 34 tool calls, 11+ sources fetched, 7 findings adversarially verified
 **Report đầy đủ**: `.agents/reports/research-260611-theseus-os.md`
 
-> **Kết luận một câu**: Theseus proves the SAS+LBI model; ViCell operationalizes it.
+> **Kết luận một câu**: Theseus proves the SAS+LBI model; Cellos operationalizes it.
 > Dùng Theseus làm academic credibility (OSDI 2020), không phải threat.
 
 ---
 
 ## Tóm tắt executive
 
-| Dimension | Theseus | ViCell | ViCell ahead? |
+| Dimension | Theseus | Cellos | Cellos ahead? |
 |---|---|---|---|
 | Architecture | SAS + intralingual (Rust only) | SAS + LBI + Rust | Same philosophy |
-| IPC cost (measured) | 687 cycles fastpath | ~2–3 cycles (vtable, planned) | ViCell design target far cheaper |
-| Hot-swap | 385µs median, published eval | Zombie state + disk re-link, no numbers | Theseus has published eval, ViCell does not |
-| RISC-V | ❌ Not supported | ✅ Primary target | **ViCell +++ decisive** |
-| Persistent FS | ❌ Memory-only | ✅ FAT32 + littlefs | **ViCell +++** |
-| Async executor | ❌ Unmerged branch (busy-polling) | ✅ Kernel async IPC | **ViCell +++** |
-| Real-time | ❌ No RT design | ✅ RT watchdog + priorities | **ViCell +++** |
-| Production-oriented | ❌ Research only | ✅ Never-die, supervisor, OTA | **ViCell +++** |
+| IPC cost (measured) | 687 cycles fastpath | ~2–3 cycles (vtable, planned) | Cellos design target far cheaper |
+| Hot-swap | 385µs median, published eval | Zombie state + disk re-link, no numbers | Theseus has published eval, Cellos does not |
+| RISC-V | ❌ Not supported | ✅ Primary target | **Cellos +++ decisive** |
+| Persistent FS | ❌ Memory-only | ✅ FAT32 + littlefs | **Cellos +++** |
+| Async executor | ❌ Unmerged branch (busy-polling) | ✅ Kernel async IPC | **Cellos +++** |
+| Real-time | ❌ No RT design | ✅ RT watchdog + priorities | **Cellos +++** |
+| Production-oriented | ❌ Research only | ✅ Never-die, supervisor, OTA | **Cellos +++** |
 | Formal verification | ✅ Hybrid type+proof (2024 paper) | ❌ Not pursued | Theseus + (academic only) |
-| C/legacy code | ⚠️ breaks intralingual guarantee | ✅ Tier 1b FFI (RKNN/K230) | **ViCell +++** |
+| C/legacy code | ⚠️ breaks intralingual guarantee | ✅ Tier 1b FFI (RKNN/K230) | **Cellos +++** |
 
 ---
 
@@ -38,18 +38,18 @@ Theseus chạy tất cả (kernel, drivers, services, apps) trong **single addre
 
 Isolation là **purely software-defined** — không có hardware enforcement của cell boundaries. Compiler và type system là cơ chế duy nhất.
 
-**ViCell comparison**: Gần như identical philosophy. ViCell thêm per-task page tables (User VA < 0x8000_0000) như belt-and-suspenders layer trên LBI — Theseus deliberately omits hardware guard layer.
+**Cellos comparison**: Gần như identical philosophy. Cellos thêm per-task page tables (User VA < 0x8000_0000) như belt-and-suspenders layer trên LBI — Theseus deliberately omits hardware guard layer.
 
 **Sources**: [OSDI 2020](https://www.academia.edu/51083894/Theseus_an_Experiment_in_Operating_System_Structure_and_State_Management) · [Theseus Book](https://www.theseus-os.com/Theseus/book/design/design.html)
 
 ---
 
-### F2 — "State spill" là core problem Theseus giải quyết — ViCell's Law 2 là cùng giải pháp
+### F2 — "State spill" là core problem Theseus giải quyết — Cellos's Law 2 là cùng giải pháp
 **Confidence: HIGH** | PLOS 2017 + OSDI 2020
 
 State spill: callee retain state về caller vượt quá duration của interaction → caller's future correctness phụ thuộc vào callee's memory of prior state. Theseus eliminate bằng cách require servers **stateless with respect to clients** — tất cả state phải được pass in request itself (client owns it).
 
-**Đây là chính xác ViCell's Law 2**: `async fn process(data: Box<[u8]>) -> Box<[u8]>` thay vì `async fn process(data: &mut [u8])`. Theseus verify điều này tại architectural level qua per-section dependency metadata; ViCell enforce qua type system.
+**Đây là chính xác Cellos's Law 2**: `async fn process(data: Box<[u8]>) -> Box<[u8]>` thay vì `async fn process(data: &mut [u8])`. Theseus verify điều này tại architectural level qua per-section dependency metadata; Cellos enforce qua type system.
 
 State spill freedom enables live upgrade: không có component nào hold state của component khác → swap component chỉ cần relinking, không cần state transfer.
 
@@ -62,13 +62,13 @@ State spill freedom enables live upgrade: không có component nào hold state c
 
 Theseus IPC model: **ITC channels** — typed shared-memory channels backed by atomic references trong SAS. Không có kernel involvement sau khi established.
 
-| IPC type | Theseus | ViCell |
+| IPC type | Theseus | Cellos |
 |---|---|---|
 | Channel async RTT | 1,664 cycles | ~100–1,000 cycles (kernel-mediated, current) |
 | ITC fastpath RTT | **687 cycles** | ~2–3 cycles (vtable, planned Phase 27) |
 | seL4 comparison | ~802 cycles RTT (equivalent) | — |
 
-Theseus fastpath tương đương seL4 microkernel về RTT — SAS eliminates context switch, partially compensating cho loss of hardware optimization. ViCell's vtable design target (~2–3 cycles) vẫn là 230× cheaper hơn Theseus fastpath.
+Theseus fastpath tương đương seL4 microkernel về RTT — SAS eliminates context switch, partially compensating cho loss of hardware optimization. Cellos's vtable design target (~2–3 cycles) vẫn là 230× cheaper hơn Theseus fastpath.
 
 **Sources**: [academia.edu OSDI 2020 ITC measurements](https://www.academia.edu/51083894/Theseus_an_Experiment_in_Operating_System_Structure_and_State_Management)
 
@@ -92,7 +92,7 @@ Theseus hot-swap là 4-stage atomic process:
 
 31% failure rate = async unwinding gaps (LLVM chỉ emit unwind tables cho Rust exception points, không phải arbitrary hardware fault points).
 
-**ViCell implication**: ViCell có Zombie State + ref-count drain + disk re-link mechanism nhưng **chưa có published benchmark numbers**. Đây là credibility gap cần close.
+**Cellos implication**: Cellos có Zombie State + ref-count drain + disk re-link mechanism nhưng **chưa có published benchmark numbers**. Đây là credibility gap cần close.
 
 **Sources**: [academia.edu OSDI 2020 evaluation section](https://www.academia.edu/51083894/Theseus_an_Experiment_in_Operating_System_Structure_and_State_Management)
 
@@ -108,7 +108,7 @@ Theseus hot-swap là 4-stage atomic process:
 
 Ngoài ra: memfs + heapfile (RAM only, không có block-backed persistent FS), không có DHCP, không có RT guarantees.
 
-**ViCell comparison**: ViCell giải quyết tất cả 4 blockers: RISC-V primary, Tier 1b C FFI, async kernel, FAT32+littlefs persistent FS.
+**Cellos comparison**: Cellos giải quyết tất cả 4 blockers: RISC-V primary, Tier 1b C FFI, async kernel, FAT32+littlefs persistent FS.
 
 **Sources**: [academia.edu OSDI 2020 acknowledged limitations](https://www.academia.edu/51083894/Theseus_an_Experiment_in_Operating_System_Structure_and_State_Management) · [GitHub kernel directory inspection](https://github.com/theseus-os/Theseus/tree/theseus_main/kernel)
 
@@ -143,9 +143,9 @@ Nhưng: no company backing, no roadmap to production, bus factor thấp (Kevin B
 
 ---
 
-## ViCell vs Theseus — Gap Matrix đầy đủ
+## Cellos vs Theseus — Gap Matrix đầy đủ
 
-| Capability | ViCell | Theseus |
+| Capability | Cellos | Theseus |
 |---|---|---|
 | **Persistent FS** | FAT32 + littlefs, VFS MountTable | `memfs` + `heapfile` RAM only |
 | **Network stack** | smoltcp DHCP/TCP/UDP, socket API | Basic ping + e1000 driver, http_client exists (maturity unknown) |
@@ -162,16 +162,16 @@ Nhưng: no company backing, no roadmap to production, bus factor thấp (Kevin B
 
 ---
 
-## Positioning cho ViCell
+## Positioning cho Cellos
 
 **① Dùng Theseus làm academic validation, không phải threat**
-OSDI 2020 là peer-reviewed A\* venue. Khi ViCell bị skepticism về "tại sao không hardware isolation?", cite Theseus + Singularity để validate SAS+LBI architecture với zero cost.
+OSDI 2020 là peer-reviewed A\* venue. Khi Cellos bị skepticism về "tại sao không hardware isolation?", cite Theseus + Singularity để validate SAS+LBI architecture với zero cost.
 
-**② Positioning narrative**: "Theseus proves the model; ViCell operationalizes it."
+**② Positioning narrative**: "Theseus proves the model; Cellos operationalizes it."
 - Theseus: same architectural bet, optimized for research purity
-- ViCell: same architectural bet, optimized for production deployment
+- Cellos: same architectural bet, optimized for production deployment
 
-**③ Nên close credibility gap**: Instrument hot-swap latency và publish numbers tương đương Theseus's 385µs benchmark. ViCell có mechanism, thiếu published eval.
+**③ Nên close credibility gap**: Instrument hot-swap latency và publish numbers tương đương Theseus's 385µs benchmark. Cellos có mechanism, thiếu published eval.
 
 ---
 
@@ -179,7 +179,7 @@ OSDI 2020 là peer-reviewed A\* venue. Khi ViCell bị skepticism về "tại sa
 
 - OSDI 2020 PDF không parseable; numbers từ academia.edu HTML render + course notes (3 independent sources agree)
 - Theseus network stack completeness không verify được đầy đủ (http_client crate exists nhưng maturity unknown)
-- Hot-swap correctness comparison với ViCell's Zombie State mechanism không verified qua source code
+- Hot-swap correctness comparison với Cellos's Zombie State mechanism không verified qua source code
 
 ---
 

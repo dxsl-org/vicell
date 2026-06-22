@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Boot-test ViCell AArch64 on QEMU, assert shell prompt reached."""
+"""Boot-test Cellos AArch64 on QEMU, assert shell prompt reached."""
 
 import subprocess, socket, time, sys
 
-KERNEL = "target/aarch64-unknown-none-softfloat/release/vicell-kernel"
+KERNEL = "target/aarch64-unknown-none-softfloat/release/Cellos-kernel"
 DISK   = "disk_arm_virt.img"
 QEMU   = r"C:\Program Files\qemu\qemu-system-aarch64.exe"
 PORT   = 55204
@@ -48,7 +48,7 @@ while time.time() < deadline:
         chunk = conn.recv(4096)
         if chunk:
             output += chunk
-            if b"ViCell >" in output:
+            if b"Cellos >" in output:
                 break
     except socket.timeout:
         pass
@@ -68,10 +68,10 @@ for l in lines[-80:]:
 print()
 
 checks = [
-    ("[ViCell] kernel boot", "kernel banner"),
+    ("[Cellos] kernel boot", "kernel banner"),
     ("Scheduler initialized",  "scheduler init"),
     ("Successfully spawned init", "init spawned"),
-    ("ViCell >",               "shell prompt"),
+    ("Cellos >",               "shell prompt"),
 ]
 
 all_pass = True

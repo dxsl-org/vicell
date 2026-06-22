@@ -2,14 +2,14 @@
 
 > **Version**: 0.1 | **Last Updated**: 2026-06-07
 >
-> Hướng dẫn phát triển, kiểm thử, và gỡ lỗi ViCell trên board phần cứng thật.
+> Hướng dẫn phát triển, kiểm thử, và gỡ lỗi Cellos trên board phần cứng thật.
 > Đọc [getting-started.md](./getting-started.md) trước nếu chưa build/chạy được trên QEMU.
 
 ---
 
 ## 1. Tổng quan chiến lược: QEMU-first, Board-validate
 
-ViCell áp dụng nguyên tắc **QEMU-first** (xem [specs/04-hardware.md §7](./specs/04-hardware.md)):
+Cellos áp dụng nguyên tắc **QEMU-first** (xem [specs/04-hardware.md §7](./specs/04-hardware.md)):
 mọi HAL trait và driver cell được phát triển & kiểm thử trên QEMU trước,
 board thật chỉ dùng để **validate** những gì QEMU không thể emulate.
 
@@ -50,7 +50,7 @@ có thể, sửa, rồi mới deploy lại.
 |---|---|---|
 | Milk-V Pioneer (SG2042) | RV64 | Server-class RV64, PCIe test |
 | Radxa ROCK 5B (RK3588) | ARM64 | NPU driver (RKNN) |
-| Sonata (CHERIoT) | RV32 | ViCell-Nano sub-track |
+| Sonata (CHERIoT) | RV32 | Cellos-Nano sub-track |
 
 ---
 
@@ -105,7 +105,7 @@ có thể, sửa, rồi mới deploy lại.
 
 ## 4. Chuẩn bị SD card (one-time setup)
 
-Board thật cần bootloader (U-Boot) trên SD card. Kernel ViCell sẽ được U-Boot nạp.
+Board thật cần bootloader (U-Boot) trên SD card. Kernel Cellos sẽ được U-Boot nạp.
 
 ### RPi 4
 
@@ -142,7 +142,7 @@ EOF
 # U-Boot sẽ tự tìm và load từ SD hoặc TFTP.
 
 # Format SD, copy kernel:
-cp vicell-kernel.img /SD/vicell.bin
+cp Cellos-kernel.img /SD/Cellos.bin
 ```
 
 ---
@@ -154,11 +154,11 @@ cp vicell-kernel.img /SD/vicell.bin
 ```powershell
 # Build
 $env:RUSTFLAGS = "-C relocation-model=pic"
-cargo build --release -p vicell-kernel --target aarch64-unknown-none-softfloat
+cargo build --release -p Cellos-kernel --target aarch64-unknown-none-softfloat
 $env:RUSTFLAGS = $null
 
 # Copy kernel lên SD card (giả sử ổ E:)
-Copy-Item target/aarch64-unknown-none-softfloat/release/vicell-kernel E:\vicell.bin
+Copy-Item target/aarch64-unknown-none-softfloat/release/Cellos-kernel E:\Cellos.bin
 
 # Rút SD → cắm board → bật nguồn → xem serial output
 ```
@@ -184,14 +184,14 @@ TFTP cho phép deploy kernel qua mạng Ethernet mà **không cần rút SD card
 
 **Windows** — dùng [Tftpd64](https://pjo2.github.io/tftpd64/):
 1. Download Tftpd64, chạy portable (không cần cài)
-2. Settings → TFTP → Base Directory: `D:\ViCell\tftp`
+2. Settings → TFTP → Base Directory: `D:\Cellos\tftp`
 3. Bind IP: IP Ethernet của PC (ví dụ: `192.168.1.100`)
 
 **Linux/macOS**:
 ```bash
 sudo apt install tftpd-hpa
 # hoặc: brew install tftp-hpa
-# Config: /etc/default/tftpd-hpa → TFTP_DIRECTORY="/home/user/vicell/tftp"
+# Config: /etc/default/tftpd-hpa → TFTP_DIRECTORY="/home/user/Cellos/tftp"
 sudo systemctl restart tftpd-hpa
 ```
 
@@ -201,15 +201,15 @@ sudo systemctl restart tftpd-hpa
 # scripts/deploy-rpi4.ps1
 
 param(
-    [string]$TftpDir = "D:\ViCell\tftp",
+    [string]$TftpDir = "D:\Cellos\tftp",
     [string]$Target  = "aarch64-unknown-none-softfloat"
 )
 
-$kernel = "target/$Target/release/vicell-kernel"
+$kernel = "target/$Target/release/Cellos-kernel"
 
 Write-Host "Building aarch64 release kernel..."
 $env:RUSTFLAGS = "-C relocation-model=pic"
-cargo build --release -p vicell-kernel --target $Target
+cargo build --release -p Cellos-kernel --target $Target
 $env:RUSTFLAGS = $null
 
 if (-not (Test-Path $kernel)) {
@@ -220,14 +220,14 @@ if (-not (Test-Path $kernel)) {
 # Đảm bảo TFTP directory tồn tại
 New-Item -ItemType Directory -Force -Path $TftpDir | Out-Null
 
-Copy-Item $kernel "$TftpDir\vicell.bin" -Force
-$size = (Get-Item "$TftpDir\vicell.bin").Length / 1MB
-Write-Host "Deployed vicell.bin ($([math]::Round($size, 1)) MB) to TFTP." -ForegroundColor Green
+Copy-Item $kernel "$TftpDir\Cellos.bin" -Force
+$size = (Get-Item "$TftpDir\Cellos.bin").Length / 1MB
+Write-Host "Deployed Cellos.bin ($([math]::Round($size, 1)) MB) to TFTP." -ForegroundColor Green
 Write-Host ""
 Write-Host "On U-Boot serial console, run:" -ForegroundColor Yellow
 Write-Host "  setenv serverip 192.168.1.100"
 Write-Host "  setenv ipaddr   192.168.1.200"
-Write-Host "  tftp 0x40000000 vicell.bin"
+Write-Host "  tftp 0x40000000 Cellos.bin"
 Write-Host "  go   0x40000000"
 ```
 
@@ -239,7 +239,7 @@ Thêm vào `boot.scr` trên SD card để U-Boot tự TFTP và boot:
 # boot.cmd (compile bằng mkimage)
 setenv serverip 192.168.1.100
 setenv ipaddr   192.168.1.200
-tftp 0x40000000 vicell.bin
+tftp 0x40000000 Cellos.bin
 go 0x40000000
 ```
 
@@ -250,7 +250,7 @@ mkimage -C none -A arm64 -T script -d boot.cmd boot.scr
 ```
 
 Khi có `boot.scr`, workflow trở thành: **build → copy TFTP → nhấn reset trên board** → tự
-động boot ViCell mới nhất. **Iteration time: ~15 giây**.
+động boot Cellos mới nhất. **Iteration time: ~15 giây**.
 
 ### Phương pháp C: UART xmodem (backup — chỉ cần 1 dây USB)
 
@@ -260,7 +260,7 @@ Khi không có Ethernet (ví dụ test ngoài bàn lab):
 # U-Boot console:
 u-boot> loady 0x40000000 115200    # chờ nhận file qua UART YMODEM
 
-# PC: dùng TeraTerm → File → Transfer → YMODEM → Send → chọn vicell.bin
+# PC: dùng TeraTerm → File → Transfer → YMODEM → Send → chọn Cellos.bin
 # Sau khi truyền xong:
 u-boot> go 0x40000000
 ```
@@ -272,7 +272,7 @@ có lựa chọn khác.
 
 ## 6. Serial monitor (bắt buộc)
 
-Serial monitor là **cửa sổ duy nhất** để tương tác với ViCell trên board thật (tương đương
+Serial monitor là **cửa sổ duy nhất** để tương tác với Cellos trên board thật (tương đương
 `-nographic` trên QEMU). Kernel log, shell prompt, panic message đều xuất ra đây.
 
 ### Tìm COM port
@@ -399,10 +399,10 @@ openocd -f interface/ftdi/ft2232h-module-swd.cfg -f target/sifive-u74.cfg
 ```powershell
 # Terminal 2: GDB kết nối tới OpenOCD
 # ARM64:
-aarch64-none-elf-gdb target/aarch64-unknown-none-softfloat/debug/vicell-kernel
+aarch64-none-elf-gdb target/aarch64-unknown-none-softfloat/debug/Cellos-kernel
 
 # RISC-V:
-riscv64-unknown-elf-gdb target/riscv64gc-unknown-none-elf/debug/vicell-kernel
+riscv64-unknown-elf-gdb target/riscv64gc-unknown-none-elf/debug/Cellos-kernel
 
 # Trong GDB:
 (gdb) target remote localhost:3333
@@ -443,7 +443,7 @@ $configs = @{
 }
 
 $cfg = $configs[$Board]
-$kernel = "target/$($cfg.Target)/$BuildProfile/vicell-kernel"
+$kernel = "target/$($cfg.Target)/$BuildProfile/Cellos-kernel"
 
 Write-Host "Starting OpenOCD for $Board..." -ForegroundColor Cyan
 $openocd = Start-Process -FilePath "openocd" `
@@ -502,7 +502,7 @@ Tạo build mode đặc biệt cho test trên board thật:
 #![forbid(unsafe_code)]
 
 fn main() {
-    ostd::println!("=== ViCell Peripheral Test Suite ===");
+    ostd::println!("=== Cellos Peripheral Test Suite ===");
 
     // GPIO test: toggle pin, read back
     ostd::println!("[TEST] GPIO toggle...");
@@ -565,10 +565,10 @@ fn measure_irq_latency() {
 │                              │                              │
 │  PS> .\scripts\deploy-       │  Connected to COM3 @ 115200  │
 │      rpi4.ps1                │                              │
-│  Building aarch64 kernel...  │  ViCell K MAIN ENTRY         │
-│  Deployed vicell.bin (4.2MB) │  [INFO] Kernel started       │
+│  Building aarch64 kernel...  │  Cellos K MAIN ENTRY         │
+│  Deployed Cellos.bin (4.2MB) │  [INFO] Kernel started       │
 │                              │  [INFO] Frame alloc OK       │
-│  (board tự reboot nếu có    │  ViCell>                      │
+│  (board tự reboot nếu có    │  Cellos>                      │
 │   auto-boot script)          │                              │
 │                              │                              │
 └──────────────────────────────┴──────────────────────────────┘
@@ -635,4 +635,4 @@ Khi nhận được board mới, thực hiện theo thứ tự:
 - [getting-started.md](./getting-started.md) — Setup build environment + QEMU
 - [specs/04-hardware.md](./specs/04-hardware.md) — Multi-arch HAL strategy + target boards
 - [IDEAS.md](./IDEAS.md) — Roadmap: tuần 6-10 board validation
-- [system-architecture.md](./system-architecture.md) — Kiến trúc tổng thể ViCell
+- [system-architecture.md](./system-architecture.md) — Kiến trúc tổng thể Cellos

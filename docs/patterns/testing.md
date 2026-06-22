@@ -1,5 +1,5 @@
 # Testing Patterns
-> Part of [ViCell Patterns](../patterns.md)
+> Part of [Cellos Patterns](../patterns.md)
 
 ## Unit Tests with Mocks
 

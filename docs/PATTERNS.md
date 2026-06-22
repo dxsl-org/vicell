@@ -1,7 +1,7 @@
-# ViCell Patterns
+# Cellos Patterns
 **Version**: 0.2.1-dev | **Last Updated**: 2026-06-05
 
-Design patterns, idioms, and architectural decisions for ViCell development.
+Design patterns, idioms, and architectural decisions for Cellos development.
 Detailed content lives in `docs/patterns/` sub-files — this file is the index.
 
 **Philosophy**: Safety First · Zero-Copy · Explicit · Fail Fast · Portable

@@ -83,12 +83,12 @@ Complete C standard library via mlibc (libc.a). Supports fork(), pthread, comple
 On **Windows in WSL2**:
 
 ```bash
-# In ViCell root
+# In Cellos root
 cd scripts
 bash build-mlibc.sh
 
-# Check result: should create mlibc/aarch64-vicell/lib/libc.a (and other targets)
-ls mlibc/aarch64-vicell/lib/libc.a
+# Check result: should create mlibc/aarch64-Cellos/lib/libc.a (and other targets)
+ls mlibc/aarch64-Cellos/lib/libc.a
 ```
 
 Mlibc is **git-ignored**; it's rebuilt as part of the kernel build. No commit needed.
@@ -173,7 +173,7 @@ fn main() {
 
 ## C Runtime Constraints
 
-ViCell SAS laws apply to C code too (since it's in a Rust Cell):
+Cellos SAS laws apply to C code too (since it's in a Rust Cell):
 
 ❌ **Fork / subprocess spawning** — SAS has no fork. Use `spawn = true` manifest + `sys_spawn` (Tier 1 Rust only).  
 ❌ **Mmap** — No virtual memory per-cell. Use heap (malloc) or VFS.  

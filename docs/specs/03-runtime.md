@@ -1,18 +1,18 @@
-# ViCell Architecture: Runtime & SDK
+# Cellos Architecture: Runtime & SDK
 **Version**: 0.3 (Zero-Copy Inter-Cell Communication)
 **Status**: Definitive
 
 ---
 
 ## 1. IPC: Direct Method Calls
-Trong ViCell, khái niệm IPC truyền thống bị loại bỏ. Mọi tương tác giữa các Cell là **gọi hàm trực tiếp (Direct Call)** thông qua Rust Traits.
+Trong Cellos, khái niệm IPC truyền thống bị loại bỏ. Mọi tương tác giữa các Cell là **gọi hàm trực tiếp (Direct Call)** thông qua Rust Traits.
 
 * **Performance**: Chi phí tương đương một lời gọi hàm ảo (~2-3 chu kỳ CPU).
 * **Interface**: Định nghĩa trong crate `libs/api`. Sử dụng `#[repr(C)]` cho các cấu trúc dữ liệu ở biên giới (Boundaries) để đảm bảo **Stable ABI**.
 * **Data Flow**: Mặc định là **Zero-copy**. Dữ liệu được truyền dưới dạng tham chiếu (`&T`) hoặc quyền sở hữu (`Box<T>`).
 
 ## 2. Async/Await & Safety (Owned Buffers)
-ViCell tận dụng triệt để mô hình lập trình bất đồng bộ của Rust để tối ưu I/O.
+Cellos tận dụng triệt để mô hình lập trình bất đồng bộ của Rust để tối ưu I/O.
 
 ### Quy tắc "Owned Buffers ONLY"
 Để ngăn chặn lỗi ghi đè bộ nhớ khi một Cell bị unload đột ngột:
@@ -24,7 +24,7 @@ ViCell tận dụng triệt để mô hình lập trình bất đồng bộ củ
 * **Bảo vệ**: Kernel sẽ từ chối lệnh `unload` của Cell sở hữu ban đầu cho đến khi tác vụ Async hoàn tất và quyền sở hữu được trả về hoặc giải phóng.
 
 ## 3. Hot-Swap & State Transfer
-ViCell hỗ trợ nâng cấp phần mềm mà không cần ngừng hệ thống (Live Update).
+Cellos hỗ trợ nâng cấp phần mềm mà không cần ngừng hệ thống (Live Update).
 
 * **Protocol**: Các Cell quan trọng phải thực thi Trait `StateTransfer`.
 * **Quy trình**:
@@ -34,7 +34,7 @@ ViCell hỗ trợ nâng cấp phần mềm mà không cần ngừng hệ thống
     4. Tráo đổi con trỏ hàm (Symbol Re-linking) và giải phóng `OldCell`.
 
 ## 4. Boot Optimization (Instant On)
-Để robot khởi động < 1 giây, ViCell sử dụng cơ chế **Heap Snapshotting**.
+Để robot khởi động < 1 giây, Cellos sử dụng cơ chế **Heap Snapshotting**.
 
 ### 4.1 Mục tiêu
 - **Cold boot** (lần đầu hoặc sau update): parse ELF + link + init cells → ~2–5 giây
@@ -66,7 +66,7 @@ Warm Boot:
 
 ```
 Offset  Size   Field
-0x00    8      Magic: b"ViCell_SNP"
+0x00    8      Magic: b"Cellos_SNP"
 0x08    4      Version: u32 (LE)
 0x0C    4      CRC32 of entire image (field = 0 during calculation)
 0x10    8      Kernel build hash (SHA256 first 8 bytes)
@@ -101,6 +101,6 @@ Offset  Size   Field
 - [ ] **Fixed physical layout** đã confirmed (no physical ASLR)
 - [ ] Snapshot size estimate: ~4–8 MB cho kernel + 6 base cells (tùy heap usage)
 
-## 5. Tooling: `ostd` & `cargo-ViCell`
+## 5. Tooling: `ostd` & `cargo-Cellos`
 * **`ostd`**: Thư viện chuẩn thay thế `std`, cung cấp các interface cho Allocator, Async Runtime và Logging.
-* **Multi-Arch Build**: `cargo-ViCell` hỗ trợ biên dịch song song cho nhiều Target (RV32, RV64) từ cùng một mã nguồn thông qua cơ chế `hal/core`.
+* **Multi-Arch Build**: `cargo-Cellos` hỗ trợ biên dịch song song cho nhiều Target (RV32, RV64) từ cùng một mã nguồn thông qua cơ chế `hal/core`.

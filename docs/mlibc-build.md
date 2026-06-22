@@ -1,8 +1,8 @@
-# mlibc Build Guide — ViCell Tier B C Library
+# mlibc Build Guide — Cellos Tier B C Library
 
 ## Overview
 
-ViCell uses a two-tier C library strategy:
+Cellos uses a two-tier C library strategy:
 
 | Tier | Crate | When to use |
 |------|-------|------------|
@@ -53,7 +53,7 @@ The Rust workspace never invokes Meson — you run the build script once, then C
 ### Windows (riscv64 only)
 
 ```powershell
-# From the ViCell root
+# From the Cellos root
 pwsh scripts/setup-mlibc.ps1
 ```
 
@@ -62,7 +62,7 @@ Produces: `third_party/mlibc/build/libc.a`
 ### WSL2 (riscv64 + aarch64)
 
 ```bash
-# From the ViCell WSL2 path, e.g. /mnt/d/ViCell
+# From the Cellos WSL2 path, e.g. /mnt/d/Cellos
 bash scripts/build-mlibc.sh
 ```
 
@@ -74,12 +74,12 @@ After either script completes, `cargo check -p mlibc-smoke` succeeds.
 
 ### Manual build steps (for debugging)
 
-> **Note:** `-Dsysdeps=vicell` is **not** a valid meson option for mlibc. The ViCell sysdeps are
-> selected automatically via `host_machine.system() == 'vicell'` in mlibc's `meson.build`.
-> The cross files set `system = 'vicell'` in `[host_machine]`.
+> **Note:** `-Dsysdeps=Cellos` is **not** a valid meson option for mlibc. The Cellos sysdeps are
+> selected automatically via `host_machine.system() == 'Cellos'` in mlibc's `meson.build`.
+> The cross files set `system = 'Cellos'` in `[host_machine]`.
 
 ```bash
-cd /path/to/ViCell/third_party/mlibc-src   # the cloned mlibc source
+cd /path/to/Cellos/third_party/mlibc-src   # the cloned mlibc source
 
 # riscv64
 meson setup build \
@@ -104,18 +104,18 @@ ls -lh build-aarch64/libc.a
 
 ---
 
-## Applying the ViCell sysdeps patch to a fresh mlibc clone
+## Applying the Cellos sysdeps patch to a fresh mlibc clone
 
-The build scripts clone mlibc into `third_party/mlibc-src/` and copy `third_party/mlibc/sysdeps/vicell/` into it. When forking a new mlibc commit, add the ViCell branch to the cloned `third_party/mlibc-src/meson.build`:
+The build scripts clone mlibc into `third_party/mlibc-src/` and copy `third_party/mlibc/sysdeps/Cellos/` into it. When forking a new mlibc commit, add the Cellos branch to the cloned `third_party/mlibc-src/meson.build`:
 
 ```python
 # In mlibc's top-level meson.build, find the host_machine.system() dispatch block
 # and add this branch before the final else/error:
-elif host_machine.system() == 'vicell'
-    subdir('sysdeps/vicell')
+elif host_machine.system() == 'Cellos'
+    subdir('sysdeps/Cellos')
 ```
 
-The ViCell sysdeps live entirely under `sysdeps/vicell/` — no other mlibc files are modified.
+The Cellos sysdeps live entirely under `sysdeps/Cellos/` — no other mlibc files are modified.
 
 **Pinned mlibc commit:** _(update this when you fork a new commit)_
 ```
@@ -175,14 +175,14 @@ If your LLVM is in a different directory, override `LIBCLANG_PATH` in your shell
 
 ---
 
-## Architecture: ViCell sysdeps
+## Architecture: Cellos sysdeps
 
-All syscalls route through `sysdeps/vicell/include/vicell/syscall.h`:
+All syscalls route through `sysdeps/Cellos/include/Cellos/syscall.h`:
 
 ```
 mlibc printf("%.15g", x)
   └─ Grisu3 formatter → sys_write(fd, buf, n)    ← declared in sysdeps.hpp
-       └─ generic.cpp: vicell_syscall(109, fd, buf, n, 0)
+       └─ generic.cpp: Cellos_syscall(109, fd, buf, n, 0)
             └─ riscv64: a7=109, ecall   │   aarch64: x0=109, svc #0
                                         └──── CRITICAL: aarch64 uses x0=nr, NOT x8
 ```
@@ -202,7 +202,7 @@ mlibc printf("%.15g", x)
 
 **GetTime op-selectors:** op=0 → 10 MHz monotonic ticks; op=2 → epoch nanoseconds (RTC); op=3 → epoch seconds.
 
-**Open arg order:** `vicell_syscall(101, path_ptr, path_len, flags, mode)` — note `path_len` is passed separately, unlike POSIX where the string is null-terminated.
+**Open arg order:** `Cellos_syscall(101, path_ptr, path_len, flags, mode)` — note `path_len` is passed separately, unlike POSIX where the string is null-terminated.
 
 ### Anonymous memory
 
@@ -216,7 +216,7 @@ mlibc's allocator (`frg::slab_allocator`) is backed by a **4 MB static bump aren
 |---------|-------|-----|
 | `mlibc libc.a is missing` at `cargo check` | Haven't built mlibc yet | Windows: `pwsh scripts/setup-mlibc.ps1`; WSL2: `bash scripts/build-mlibc.sh` |
 | Duplicate symbol `printf` / `malloc` at link | `api` missing mlibc feature | Add `features = ["mlibc"]` to api dependency |
-| `__mlibc_int_fast8 != __INT_FAST8_TYPE__` ninja failure | GCC bare-metal fast-int ABI mismatch | Already fixed via `-D__INT_FAST8_TYPE__=__INT8_TYPE__` etc. in `sysdeps/vicell/meson.build`. Re-run setup script if you see it. |
-| `undefined reference to mlibc::sys_write` | Sysdeps not being picked up | Check `[host_machine] system = 'vicell'` in the `.cross` file; do NOT pass `-Dsysdeps=vicell` (invalid option) |
+| `__mlibc_int_fast8 != __INT_FAST8_TYPE__` ninja failure | GCC bare-metal fast-int ABI mismatch | Already fixed via `-D__INT_FAST8_TYPE__=__INT8_TYPE__` etc. in `sysdeps/Cellos/meson.build`. Re-run setup script if you see it. |
+| `undefined reference to mlibc::sys_write` | Sysdeps not being picked up | Check `[host_machine] system = 'Cellos'` in the `.cross` file; do NOT pass `-Dsysdeps=Cellos` (invalid option) |
 | Wrong output on aarch64 (garbage data) | Wrong register layout in syscall.h | aarch64 ABI uses x0=nr (not x8) — see syscall.h |
 | Arena exhausted (malloc returns null) | Allocating >4 MB total | Increase `ARENA_SIZE` in generic.cpp |

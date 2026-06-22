@@ -68,7 +68,7 @@ impl<'a> ViShell<'a> {
             "cat" => self.cmd_cat(parts),
             "help" => self.cmd_help(),
             _ => {
-                println!("ViCell: command not found: {}", cmd);
+                println!("Cellos: command not found: {}", cmd);
                 Ok(())
             }
         }
@@ -103,15 +103,15 @@ impl<'a> ViShell<'a> {
 
 ### Tại sao cấu trúc này lại "đáng đồng tiền bát gạo"?
 
-1. **Hiệu suất Robot Nano**: Nhờ **Luật 8 (Borrowing)**, việc mày parse một câu lệnh dài dằng dặc cũng không tốn thêm một byte nào trên Global Heap. Điều này cực kỳ quan trọng khi ViCell chạy trên các thiết bị có RAM giới hạn.
+1. **Hiệu suất Robot Nano**: Nhờ **Luật 8 (Borrowing)**, việc mày parse một câu lệnh dài dằng dặc cũng không tốn thêm một byte nào trên Global Heap. Điều này cực kỳ quan trọng khi Cellos chạy trên các thiết bị có RAM giới hạn.
 2. **Tính linh hoạt của Cell**: Vì mày dùng **Luật 7 (Trait Objects)**, cái Shell này không cần biết nó đang `ls` trên `viFS1` (RAM Disk) hay `viFS2` (TFS). Khi mày tháo RAM Disk ra và cắm một ổ cứng thật dùng `viFS2`, cái Shell vẫn chạy mà không cần sửa một dòng code nào.
-3. **An toàn tuyệt đối (LBI)**: Nếu Shell bị lỗi (ví dụ: parse sai địa chỉ), cơ chế **Panic Recovery** của ViCell sẽ chỉ làm sập cái Shell Cell đó. Kernel bắt được trap, hồi sinh Shell, và mày lại thấy dấu nhắc lệnh `ViCell >` mà không phải reboot cả hệ thống.
+3. **An toàn tuyệt đối (LBI)**: Nếu Shell bị lỗi (ví dụ: parse sai địa chỉ), cơ chế **Panic Recovery** của Cellos sẽ chỉ làm sập cái Shell Cell đó. Kernel bắt được trap, hồi sinh Shell, và mày lại thấy dấu nhắc lệnh `Cellos >` mà không phải reboot cả hệ thống.
 
 
 ### 🏁 Lời khuyên "Chốt hạ":
 **"Code từ từ nhưng phải Native"**.
 
-* **Bước 1**: Làm một cái vòng lặp `loop { print!("ViCell > "); input(); dispatch(); }` đơn giản nhất.
+* **Bước 1**: Làm một cái vòng lặp `loop { print!("Cellos > "); input(); dispatch(); }` đơn giản nhất.
 * **Bước 2**: Thực thi các lệnh bằng cách gọi trực tiếp vào `ViFileSystem` trait qua syscall.
 
-Đừng copy `Busybox` hay `Rush` ngay lúc này, vì mày sẽ mất cả tuần để sửa lỗi tương thích. Tự code một cái Shell tí hon theo đúng "vibe" của ViCell sẽ giúp mày hiểu sâu hơn về cái "long mạch" Trap/Syscall mày vừa khai thông.
+Đừng copy `Busybox` hay `Rush` ngay lúc này, vì mày sẽ mất cả tuần để sửa lỗi tương thích. Tự code một cái Shell tí hon theo đúng "vibe" của Cellos sẽ giúp mày hiểu sâu hơn về cái "long mạch" Trap/Syscall mày vừa khai thông.

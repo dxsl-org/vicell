@@ -1,6 +1,6 @@
-# ViCell API Reference
+# Cellos API Reference
 
-> Complete API documentation for ViCell kernel interfaces, syscalls, and trait definitions
+> Complete API documentation for Cellos kernel interfaces, syscalls, and trait definitions
 
 ## Table of Contents
 
@@ -18,7 +18,7 @@
 
 ## Overview
 
-ViCell provides a minimal, well-defined API surface for Cells to interact with the kernel and system services. The API is designed with these principles:
+Cellos provides a minimal, well-defined API surface for Cells to interact with the kernel and system services. The API is designed with these principles:
 
 - **Type Safety**: Rust's type system prevents invalid API usage
 - **Zero-Copy**: Ownership-based data transfer for performance
@@ -45,7 +45,7 @@ ViCell provides a minimal, well-defined API surface for Cells to interact with t
 
 ### Syscall Numbers
 
-Syscalls are the only way for Cells to interact with the kernel. ViCell has a minimal set of ~15 syscalls (compared to Linux's 300+).
+Syscalls are the only way for Cells to interact with the kernel. Cellos has a minimal set of ~15 syscalls (compared to Linux's 300+).
 
 **Syscall Enumeration** (`libs/api/src/syscall.rs`):
 
@@ -875,7 +875,7 @@ fn handle_request(request: &[u8]) -> ViResult<Box<[u8]>> {
 
     match command {
         "ping" => Ok(b"pong".to_vec().into_boxed_slice()),
-        "version" => Ok(b"ViCell 0.2.0".to_vec().into_boxed_slice()),
+        "version" => Ok(b"Cellos 0.2.0".to_vec().into_boxed_slice()),
         _ => Err(ViError::NotSupported),
     }
 }
@@ -953,4 +953,4 @@ pub fn open_v2(&self, path: &str, mode: OpenMode) -> ViResult<Box<dyn ViFile>>;
 
 **Last Updated**: 2026-01-07
 **Version**: 0.2.0
-**Maintainer**: ViCell Team
+**Maintainer**: DXSL

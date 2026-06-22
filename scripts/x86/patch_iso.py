@@ -2,7 +2,7 @@
 """Patch an ISO9660 file in-place by replacing a file with same-size content.
 
 Usage: python patch_iso.py <iso_file> <iso_path> <replacement_file>
-Example: python patch_iso.py vicell-x86.iso /boot/kernel.elf new_kernel.elf
+Example: python patch_iso.py Cellos-x86.iso /boot/kernel.elf new_kernel.elf
 """
 import sys
 import struct

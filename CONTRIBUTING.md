@@ -1,6 +1,6 @@
-# Contributing to ViCell
+# Contributing to Cellos
 
-Welcome! ViCell is a `no_std` Rust OS built on a **Cellular Single Address Space**
+Welcome! Cellos is a `no_std` Rust OS built on a **Cellular Single Address Space**
 architecture — a different design point from traditional Linux/Windows-style OSes.
 This guide gets you from zero to your first merged PR.
 
@@ -216,7 +216,7 @@ Reviewers check these before approving:
 
 ## UI Subsystem (ViUI)
 
-ViUI v2 is ViCell's native UI toolkit — `no_std`, Reactive Signal Tree, MIT-licensed.
+ViUI v2 is Cellos's native UI toolkit — `no_std`, Reactive Signal Tree, MIT-licensed.
 
 **DSL syntax note**: The `.vi` file format intentionally mirrors [Slint](https://slint.dev)'s
 `.slint` syntax for developer familiarity (migration cost ≈ zero). The ViUI *runtime engine*

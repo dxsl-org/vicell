@@ -101,20 +101,20 @@ Source: Eclipse Foundation 2024 survey announcement
 
 ---
 
-## Ý nghĩa với ViCell
+## Ý nghĩa với Cellos
 
 ### Market opportunity
 
-| Segment | Current | ViCell Angle |
+| Segment | Current | Cellos Angle |
 |---|---|---|
-| Linux 46% | Mature, hard to displace | G2: Two-plane arch (ViCell data plane + Linux VM) |
+| Linux 46% | Mature, hard to displace | G2: Two-plane arch (Cellos data plane + Linux VM) |
 | FreeRTOS 29% | C-only, no memory safety | G1: Migration target for safety-sensitive projects |
 | Zephyr 21% | Growing, still C-dominant | G1: Rust-first alternative, same board support target |
 | ThreadX 13% | Azure-tied, Microsoft push | Niche, not primary target |
 
-### Pain points → ViCell features
+### Pain points → Cellos features
 
-| Survey Pain Point | ViCell Response |
+| Survey Pain Point | Cellos Response |
 |---|---|
 | Connectivity (48%) | Net cell (DHCP/socket API shipped); TLS planned Phase 24 |
 | Security (35%, growing) | Ed25519 Cell signing, capability tokens (ZST), Law 4 |
@@ -122,9 +122,9 @@ Source: Eclipse Foundation 2024 survey announcement
 
 ### Strategic insight
 
-**Open source 75% với 24% committers** = thị trường muốn community-driven OS, không chỉ vendor push. ViCell cần public GitHub presence + contribution guide để capture developer mindshare.
+**Open source 75% với 24% committers** = thị trường muốn community-driven OS, không chỉ vendor push. Cellos cần public GitHub presence + contribution guide để capture developer mindshare.
 
-**FreeRTOS 29% chưa growth** — FreeRTOS không grow vì Amazon locked, C-only. Zephyr stealing mindshare. ViCell có thể target cùng segment với pitch tốt hơn: "Zephyr với Rust-native và memory safety by construction."
+**FreeRTOS 29% chưa growth** — FreeRTOS không grow vì Amazon locked, C-only. Zephyr stealing mindshare. Cellos có thể target cùng segment với pitch tốt hơn: "Zephyr với Rust-native và memory safety by construction."
 
 ---
 

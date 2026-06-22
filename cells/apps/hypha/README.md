@@ -1,10 +1,10 @@
 # Hypha
 
 > **Hypha** (sợi nấm) — a single living thread of the *Mycelium* that threads through every Cell
-> and coordinates them. ViCell's first **real** application: a native Tier-1 Rust AI agent.
+> and coordinates them. Cellos's first **real** application: a native Tier-1 Rust AI agent.
 
 Unlike the demo cells (`hello-cell`, `robot-dashboard`, `https-demo`, …) which each prove one
-primitive, Hypha is a useful app *and* a showcase of what makes ViCell unique:
+primitive, Hypha is a useful app *and* a showcase of what makes Cellos unique:
 
 - **Capability-isolated tools** — each tool is a separate Cell whose manifest declares exactly
   its authority; kernel-enforced. The agent core holds no dangerous capability and delegates all
@@ -16,7 +16,7 @@ primitive, Hypha is a useful app *and* a showcase of what makes ViCell unique:
 
 ## Strategic role
 
-Building Hypha **surfaces the missing modules of ViCell**. It is both the deliverable and the
+Building Hypha **surfaces the missing modules of Cellos**. It is both the deliverable and the
 forcing function for maturing the OS — each phase reveals gaps that get filled incrementally.
 
 ## Status

@@ -1,6 +1,6 @@
-# ViCell App Development Guide
+# Cellos App Development Guide
 
-> How to choose a development model and write applications for ViCell.
+> How to choose a development model and write applications for Cellos.
 > For syscall reference, see [api-reference.md](api-reference.md);
 > for kernel internals, see [system-architecture.md](system-architecture.md).
 
@@ -10,7 +10,7 @@
 
 ## What is a Cell App?
 
-A ViCell application runs as a **Cell** — a language-isolated unit in a single address space (SAS). There is no process fork; instead, you declare which language and isolation tier you want. The kernel and type system enforce boundaries, not the MMU.
+A Cellos application runs as a **Cell** — a language-isolated unit in a single address space (SAS). There is no process fork; instead, you declare which language and isolation tier you want. The kernel and type system enforce boundaries, not the MMU.
 
 ---
 

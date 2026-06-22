@@ -20,4 +20,4 @@ labels: question
 - OS: <!-- e.g. Ubuntu 24.04, macOS 14.5, Windows 11 -->
 - Rust toolchain: <!-- output of `rustup show active-toolchain` -->
 - QEMU version: <!-- output of `qemu-system-riscv64 --version` -->
-- ViCell branch/commit: <!-- output of `git rev-parse --short HEAD` -->
+- Cellos branch/commit: <!-- output of `git rev-parse --short HEAD` -->

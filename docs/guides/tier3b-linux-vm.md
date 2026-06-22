@@ -33,7 +33,7 @@ Tier 3b lets you run a full Linux kernel (e.g., Alpine, Busybox) inside a lightw
 
 ```
 ┌─────────────────────────────────┐
-│ ViCell Kernel (S-mode / VMX host)
+│ Cellos Kernel (S-mode / VMX host)
 │                                 │
 │  ┌──────────────────────────┐   │
 │  │ Hypervisor (custom ~9K LOC)
@@ -46,8 +46,8 @@ Tier 3b lets you run a full Linux kernel (e.g., Alpine, Busybox) inside a lightw
 │  └──────────────────────────┘   │
 │                                 │
 │  VirtIO devices:                │
-│    disk  → ViCell VFS           │
-│    net   → ViCell Net           │
+│    disk  → Cellos VFS           │
+│    net   → Cellos Net           │
 │    console → kernel log         │
 └─────────────────────────────────┘
 ```
@@ -86,11 +86,11 @@ vm exit <vm_id>
 
 ## Guest Filesystem Access
 
-The guest mounts ViCell's VFS as a VirtIO block device. By default, the root filesystem is read-only FAT32 (from kernel build). You can:
+The guest mounts Cellos's VFS as a VirtIO block device. By default, the root filesystem is read-only FAT32 (from kernel build). You can:
 
 1. **Create an overlay** (writable tmpfs on top)
 2. **Mount a writable partition** (future: FAT32 RW)
-3. **Write to /tmp** (ramdisk, shared with ViCell)
+3. **Write to /tmp** (ramdisk, shared with Cellos)
 
 ---
 
@@ -103,13 +103,13 @@ The hypervisor exposes a VirtIO net device. Guest sees a standard Linux NIC:
 ip addr show
 eth0: inet 10.0.2.15
 
-# Connect to host services (ViCell net cell runs at 10.0.2.2)
+# Connect to host services (Cellos net cell runs at 10.0.2.2)
 curl -v http://10.0.2.2:8080/
 
 # Or use sockets normally
 ```
 
-Network traffic is routed through ViCell's kernel; no direct hardware access.
+Network traffic is routed through Cellos's kernel; no direct hardware access.
 
 ---
 
@@ -118,7 +118,7 @@ Network traffic is routed through ViCell's kernel; no direct hardware access.
 | Device | Status | Notes |
 |--------|--------|-------|
 | Block (disk) | ✅ | Read-only FAT32 (kernel.img); no write yet |
-| Network | ✅ | Full NIC; routed via ViCell net cell |
+| Network | ✅ | Full NIC; routed via Cellos net cell |
 | Console | ✅ | Serial output to kernel log |
 | Entropy (RNG) | ✅ | `/dev/urandom` works |
 | Clock (MMIO) | ✅ | `clock_gettime()` accurate |
@@ -131,7 +131,7 @@ Network traffic is routed through ViCell's kernel; no direct hardware access.
 # Prerequisites
 scripts/build-kernel-alpine.sh  # one-time, downloads/builds Alpine rootfs
 
-# Start ViCell
+# Start Cellos
 ./run-arm64.ps1
 
 # From shell
@@ -156,7 +156,7 @@ g++ -o myapp main.cpp
 # Fork works!
 for i in {1..10}; do (sleep 1 & echo "background job $i") done
 
-# exit to return to ViCell shell
+# exit to return to Cellos shell
 exit
 ```
 
@@ -178,7 +178,7 @@ exit
 ## Limits & Constraints
 
 ❌ **No nested VMs** — guest cannot create sub-VMs.  
-❌ **No direct hardware access** — I/O goes through ViCell drivers.  
+❌ **No direct hardware access** — I/O goes through Cellos drivers.  
 ❌ **No DMA to host memory** — disk/network buffers are copied.  
 ⚠️ **Slow boot** — 2–10 seconds for full Linux init.  
 ✅ **Full fork() / pthreads** — anything Unix-like works.  
@@ -243,7 +243,7 @@ For a full Alpine Linux VM, see kernel build logs (`scripts/build-kernel-alpine.
 → Rootfs is read-only FAT32 (mounted via VirtIO). Write to `/tmp` (tmpfs) or request writable partition.
 
 **Network unreachable?**  
-→ ViCell net cell may not be running. Check `net-tools` in `/bin/`. Guest IP should be 10.0.2.15, ViCell host at 10.0.2.2.
+→ Cellos net cell may not be running. Check `net-tools` in `/bin/`. Guest IP should be 10.0.2.15, Cellos host at 10.0.2.2.
 
 **Slow network?**  
 → VirtIO performance is ~90% native on QEMU. Real hardware faster. No tuning levers exposed yet.

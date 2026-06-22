@@ -1,4 +1,4 @@
-# ViCell UI Toolkit: ViUI
+# Cellos UI Toolkit: ViUI
 **Version**: 1.0 (Definitive — supersedes Slint standard in specs/06-graphics.md §4)
 **Status**: Architectural Decision — awaiting G2 implementation
 **Last Updated**: 2026-06-07
@@ -11,13 +11,13 @@
 
 | Library | Lý do loại |
 |---------|-----------|
-| **Slint** | GPL-3 viral hoặc $1+/device commercial. Không thể xây ViCell ecosystem trên license này — mọi App Cell downstream bị ảnh hưởng. |
+| **Slint** | GPL-3 viral hoặc $1+/device commercial. Không thể xây Cellos ecosystem trên license này — mọi App Cell downstream bị ảnh hưởng. |
 | **iced** | `iced_runtime` cần std async executor; `iced_winit` coupling không tách được clean cho bare-metal. |
 | **egui (port)** | Pipeline: widget → tessellate triangles → rasterize → pixels. Tessellation là overhead không cần thiết cho software renderer. Per-frame heap alloc. |
 
-### ViUI: Custom toolkit, ViCell-native
+### ViUI: Custom toolkit, Cellos-native
 
-ViUI được thiết kế từ đầu cho ViCell's constraints:
+ViUI được thiết kế từ đầu cho Cellos's constraints:
 - `#![no_std] + alloc` — native, không patch
 - Direct pixel rendering (không có triangle/path intermediate)
 - Event-driven, không game-loop (0 CPU khi idle)
@@ -96,7 +96,7 @@ pub trait ViApp: 'static {
 }
 ```
 
-`Message` types map tự nhiên sang ViCell IPC messages — không cần adapter layer.
+`Message` types map tự nhiên sang Cellos IPC messages — không cần adapter layer.
 
 ---
 
@@ -142,7 +142,7 @@ impl Response {
 }
 ```
 
-Developer biết egui có thể dùng ViUI với zero learning curve. Khác biệt duy nhất: không có `eframe::App` — thay bằng `ViApp` trait; không có backend setup — ViCell lo thay.
+Developer biết egui có thể dùng ViUI với zero learning curve. Khác biệt duy nhất: không có `eframe::App` — thay bằng `ViApp` trait; không có backend setup — Cellos lo thay.
 
 ### Elm Facade (iced-compatible)
 

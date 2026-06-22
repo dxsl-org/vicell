@@ -38,7 +38,7 @@ Không có specs chính thức nào được publish: không có core count, clo
 
 H-ext (CoVE): được list trong C930 extension nhưng shipping status chưa confirmed.
 
-**ViCell implication**: Loại C930 khỏi G2 hardware roadmap gần hạn. Cân nhắc làm G2 target xa hạn (2027+) nếu SoC cuối cùng xuất hiện với H-ext.
+**Cellos implication**: Loại C930 khỏi G2 hardware roadmap gần hạn. Cân nhắc làm G2 target xa hạn (2027+) nếu SoC cuối cùng xuất hiện với H-ext.
 
 **Sources**: [The Register](https://www.theregister.com/2025/03/05/china_alibaba_risc_v_c930/) · [Tom's Hardware](https://www.tomshardware.com/pc-components/cpus/alibaba-launches-risc-v-based-xuantie-c930-server-cpu-ai-hpc-chip-ships-this-month-more-designs-to-follow)
 
@@ -66,9 +66,9 @@ Dual-core C908 (RVV 1.0, VLEN=128b), 6 TOPS INT8 KPU, 128MB embedded LPDDR4.
 
 **⚠️ CRITICAL CORRECTION**: RKNN = Rockchip NPU SDK cho RK3588 ARM chips. K230 dùng **nncase** (Canaan's own framework). Đây là hai ecosystems hoàn toàn khác nhau.
 
-KPU operates on physical addresses → compatible với ViCell grant-based DMA architecture về nguyên tắc (cần hands-on validation).
+KPU operates on physical addresses → compatible với Cellos grant-based DMA architecture về nguyên tắc (cần hands-on validation).
 
-**ViCell implication**: K230D là hardware lý tưởng để validate G3 ViAccelerator API design với chi phí thấp nhất. Sửa tất cả references "RKNN trên K230" trong docs.
+**Cellos implication**: K230D là hardware lý tưởng để validate G3 ViAccelerator API design với chi phí thấp nhất. Sửa tất cả references "RKNN trên K230" trong docs.
 
 **Sources**: [CNX-Software K230D](https://www.cnx-software.com/2024/11/18/29-banana-pi-bpi-canmv-k230d-zero-features-kendryte-k230d-risc-v-soc-for-aiot-applications/) · [kendryte/nncase](https://github.com/kendryte/nncase/releases)
 
@@ -83,7 +83,7 @@ KPU operates on physical addresses → compatible với ViCell grant-based DMA a
 
 BPI-F3 available ~$100; Milk-V Jupiter (same SoC) sold out trong 3 tháng.
 
-**ViCell implication**: BPI-F3 là cheapest way để validate ViCell vector IPC performance trên real RVV 1.0 hardware. Llama inference latency là good proxy cho ViCell RT Cell scheduling overhead.
+**Cellos implication**: BPI-F3 là cheapest way để validate Cellos vector IPC performance trên real RVV 1.0 hardware. Llama inference latency là good proxy cho Cellos RT Cell scheduling overhead.
 
 **Sources**: [10xEngineers benchmark](https://10xengineers.ai/llm-inference-with-codebook-based-q4x-quantization-using-the-llama-cpp-framework-on-risc-v-vector-cpus/) · [RVV benchmark site](https://camel-cdr.github.io/rvv-bench-results/bpi_f3/index.html)
 
@@ -92,7 +92,7 @@ BPI-F3 available ~$100; Milk-V Jupiter (same SoC) sold out trong 3 tháng.
 ### F5 — H-ext (Hypervisor extension): KHÔNG có trong BẤT KỲ chip shipping nào — blocks Tier 3b
 **Confidence: HIGH** | Systematic search + arXiv RISC-V production paper
 
-RISC-V H-ext là ratified spec nhưng chưa có commercial RISC-V chip nào implement và ship. Đây là hard blocker cho ViCell G2's Tier 3b Linux VM management plane trên RISC-V.
+RISC-V H-ext là ratified spec nhưng chưa có commercial RISC-V chip nào implement và ship. Đây là hard blocker cho Cellos G2's Tier 3b Linux VM management plane trên RISC-V.
 
 **Software ecosystem gaps measured** (SG2042 production deployment):
 - CoreMark: 2.7× slower than Intel Xeon
@@ -105,7 +105,7 @@ RISC-V H-ext là ratified spec nhưng chưa có commercial RISC-V chip nào impl
 - Option A: Tier 3b trên separate ARM64/x86 management node (thực tế nhất hiện tại)
 - Option B: Defer Tier 3b đến khi H-ext ship (SG2044 successor, 2026-2027?)
 
-**ViCell implication**: Redesign G2 two-plane architecture — data plane RISC-V native; management plane cần separate node hoặc được defer.
+**Cellos implication**: Redesign G2 two-plane architecture — data plane RISC-V native; management plane cần separate node hoặc được defer.
 
 **Sources**: [arXiv RISC-V production 2505.02650](https://arxiv.org/html/2505.02650) · [IREE RISC-V paper 2508.14899](https://arxiv.org/html/2508.14899)
 
@@ -114,7 +114,7 @@ RISC-V H-ext là ratified spec nhưng chưa có commercial RISC-V chip nào impl
 ### F6 — Software ecosystem: gaps đo được, không chỉ anecdotal
 **Confidence: HIGH** | Multiple peer-reviewed sources
 
-| Gap | Status | Severity cho ViCell |
+| Gap | Status | Severity cho Cellos |
 |---|---|---|
 | GCC/LLVM RISC-V backend | ✅ Mature | Not blocking |
 | RVV 1.0 codegen | ✅ Works | Not blocking |
@@ -136,13 +136,13 @@ Window driven bởi US export controls → China không mua được NVIDIA H100
 - SiFive X100 Gen 2: 64 TFLOPS FP8, Q2 2026 first silicon → RISC-V AI inference trên Linux viable cho generic workloads
 - Ventana Veyron V2 (acquired by Qualcomm Dec 2025) → mainstream RISC-V server cores sắp đến hyperscalers
 
-**ViCell's real moat** (không thay đổi sau khi Linux catches up): Not "RISC-V OS" mà **"zero-copy OS-level pipeline với guaranteed P99 latency bounds."** Linux + managed runtimes (PyTorch + ONNX) unlikely deliver comparable P99 latency trước 2027.
+**Cellos's real moat** (không thay đổi sau khi Linux catches up): Not "RISC-V OS" mà **"zero-copy OS-level pipeline với guaranteed P99 latency bounds."** Linux + managed runtimes (PyTorch + ONNX) unlikely deliver comparable P99 latency trước 2027.
 
 **Sources**: [Tom's Hardware ARM 90%](https://www.tomshardware.com/pc-components/cpus/report-claims-arm-chips-will-power-90-percent-of-ai-servers-based-on-custom-processors-in-2029-x86-and-risc-v-on-the-outside-looking-in) · [RISC-V Annual Report 2025](https://riscv.org/wp-content/uploads/2026/01/RISC-V-Annual-Report-2025.pdf)
 
 ---
 
-## Hardware Roadmap Thực tế cho ViCell G2
+## Hardware Roadmap Thực tế cho Cellos G2
 
 | Phase | Board | Price | Purpose | Status |
 |---|---|---|---|---|

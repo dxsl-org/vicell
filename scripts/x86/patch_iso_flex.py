@@ -6,7 +6,7 @@ as long as it fits within the SAME allocated sector count (ceil(size/2048)).
 The directory entry's data-length field is updated to match the new size.
 
 Usage: python patch_iso_flex.py <iso_file> <iso_path> <replacement_file>
-Example: python patch_iso_flex.py vicell-x86.iso /boot/kernel.elf new_kernel.elf
+Example: python patch_iso_flex.py Cellos-x86.iso /boot/kernel.elf new_kernel.elf
 """
 import sys
 import struct

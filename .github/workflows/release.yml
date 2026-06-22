@@ -31,7 +31,7 @@ jobs:
       - name: Update full CHANGELOG.md
         run: |
           git-cliff --output CHANGELOG.md
-          git config user.name "ViOS Team"
+          git config user.name "DXSL"
           git config user.email "ci@vios"
           git add CHANGELOG.md
           git commit -m "chore(release): update CHANGELOG" || true

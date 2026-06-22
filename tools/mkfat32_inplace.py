@@ -112,7 +112,7 @@ def main():
     boot[65]    = 0x00                                   # Reserved1
     boot[66]    = 0x29                                   # BootSig
     struct.pack_into('<I', boot, 67, 0x56494F44)        # VolID "VIOD"
-    boot[71:82] = b'ViCell DATA'                        # VolLab (11 bytes)
+    boot[71:82] = b'Cellos DATA'                        # VolLab (11 bytes)
     boot[82:90] = b'FAT32   '                           # FilSysType (8 bytes)
     boot[510:512] = b'\x55\xAA'
 

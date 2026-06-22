@@ -52277,7 +52277,7 @@ pub fn open_v2(&self, path: &str, mode: OpenMode) -> ViResult<Box<dyn ViFile>>;
 
 **Last Updated**: 2026-01-07
 **Version**: 0.2.0
-**Maintainer**: ViOS Team
+**Maintainer**: DXSL
 </file>
 
 <file path="docs/ARCHITECTURE.md">
@@ -53521,7 +53521,7 @@ When working on the architecture:
 
 **Last Updated**: 2026-01-07
 **Version**: 0.2.0
-**Maintainer**: ViOS Team
+**Maintainer**: DXSL
 </file>
 
 <file path="docs/CODING_GUIDE.md">
@@ -54450,7 +54450,7 @@ cargo build -p app-shell
 
 **Last Updated**: 2026-01-07
 **Version**: 0.2.0
-**Maintainer**: ViOS Team
+**Maintainer**: DXSL
 </file>
 
 <file path="docs/INSTALLATION.md">
@@ -55192,7 +55192,7 @@ After successful installation:
 
 **Last Updated**: 2026-01-07
 **Version**: 0.2.0
-**Maintainer**: ViOS Team
+**Maintainer**: DXSL
 </file>
 
 <file path="docs/ONBOARDING.md">
@@ -55975,7 +55975,7 @@ You've completed the onboarding guide. You're now ready to contribute to ViOS!
 
 **Last Updated**: 2026-01-07
 **Version**: 0.2.0
-**Maintainer**: ViOS Team
+**Maintainer**: DXSL
 
 ---
 
@@ -56796,7 +56796,7 @@ Follow these patterns and your code will fit naturally into the ViOS ecosystem.
 
 **Last Updated**: 2026-01-07
 **Version**: 0.2.0
-**Maintainer**: ViOS Team
+**Maintainer**: DXSL
 </file>
 
 <file path="docs/TECH_STACK.md">
@@ -57473,7 +57473,7 @@ riscv64-unknown-elf-nm -S --size-sort kernel.elf | tail -20
 
 **Last Updated**: 2026-01-07
 **Version**: 0.2.0
-**Maintainer**: ViOS Team
+**Maintainer**: DXSL
 </file>
 
 <file path="gen_disk.ps1">
@@ -67799,7 +67799,7 @@ members = [
 [workspace.package]
 version = "0.2.0"
 edition = "2021"
-authors = ["ViOS Team"]
+authors = ["DXSL"]
 
 [workspace.dependencies]
 spin = { version = "0.9", default-features = false, features = ["spin_mutex"] }

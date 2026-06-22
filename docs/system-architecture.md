@@ -1,6 +1,6 @@
-# ViCell System Architecture
+# Cellos System Architecture
 
-**Audience**: Developers new to ViCell  
+**Audience**: Developers new to Cellos  
 **Level**: High-level (conceptual + key components)  
 **Version**: 0.2.1-dev (Mycelium Era)  
 **Last Updated**: 2026-06-05 (Phase X-3 complete)
@@ -9,7 +9,7 @@
 
 ## Core Philosophy
 
-ViCell is **NOT** a traditional Linux-style OS. It uses:
+Cellos is **NOT** a traditional Linux-style OS. It uses:
 
 - **Cellular Architecture**: Software organized as **Cells** (not processes), all sharing one address space
 - **Language-Based Isolation**: Rust's type system (not hardware MMU) provides isolation
@@ -399,7 +399,7 @@ A **Cell** is an isolated execution context (like a process) but:
 - Communicates via syscalls (IPC, filesystem, logging)
 - Has its own task control block, page table, and message queue
 
-### ViCell App SDK (L1 Platform Layer)
+### Cellos App SDK (L1 Platform Layer)
 
 **Purpose**: Eliminate boilerplate and unlock real native applications without kernel expertise.
 
@@ -420,7 +420,7 @@ use api::{app_entry, CellRuntime};
 app_entry!(handler = run);
 
 async fn run() {
-    println!("Hello from ViCell App SDK!");
+    println!("Hello from Cellos App SDK!");
 }
 ```
 
@@ -453,7 +453,7 @@ cells/demos/pwm-demo/        — PWM servo control
 cells/demos/adc-demo/        — ADC analog input
 cells/demos/can-demo/        — CAN bus messaging
 cells/demos/robot-demo/      — End-to-end sensor→compute→actuator (GPIO ownership cycling, MQTT)
-cells/demos/sdk-demo/        — ViCell App SDK patterns
+cells/demos/sdk-demo/        — Cellos App SDK patterns
 cells/demos/https-demo/      — TLS 1.3 HTTPS client to example.com
 cells/demos/viui-demo/       — ViUI v2 DSL → Rust codegen pipeline (Counter.vi)
 cells/demos/audio-demo/      — VirtIO sound test tone (A4-C#5-E5 arpeggio, S16LE/2ch/44100)
@@ -530,7 +530,7 @@ libs/viui/             — ViUI toolkit (no_std + alloc, MIT)
 
 ## ViUI Architecture (G2 Target)
 
-ViUI v2 targets the constraints of ViCell's no_std Cell environment while matching the ergonomics of modern native UI toolkits.
+ViUI v2 targets the constraints of Cellos's no_std Cell environment while matching the ergonomics of modern native UI toolkits.
 
 ### Dual-Layer Design
 
@@ -674,7 +674,7 @@ Design brief: [.agents/brainstorms/260608-viui-nextgen-architecture.md](.agents/
                ↓
 ┌─────────────────────────────────────────────────┐
 │ cells/apps/shell/src/main.rs: main()            │
-│ 15. Print prompt: "ViCellh> "                     │
+│ 15. Print prompt: "Cellosh> "                     │
 │ 16. Read user input (async)                     │
 │ 17. Parse command (echo, cat, ls, etc.)         │
 │ 18. Send IPC to vfs/config services             │

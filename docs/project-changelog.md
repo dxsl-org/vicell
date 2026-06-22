@@ -1,4 +1,4 @@
-# ViCell Project Changelog
+# Cellos Project Changelog
 
 **Format**: [YYYY-MM-DD] Brief summary of changes, versioned by phase.
 
@@ -35,7 +35,7 @@ keep cells link-time zero-cost if unused.
 - **Hypha P0 (llm-gateway) unblocked** — HTTP/HTTPS client now available; no more hand-rolled socket manipulation.
 - **No_std ecosystem access** — cells can now link serde_json + popular embedded HTTP crates (http-body, etc.)
   without pulling in full std.
-- **App SDK L2 (Middleware)** — foundation for HTTP server native ViCell (L2 middleware layer in roadmap).
+- **App SDK L2 (Middleware)** — foundation for HTTP server native Cellos (L2 middleware layer in roadmap).
 
 ---
 
@@ -71,7 +71,7 @@ Without the bake, the kernel finds no `/POLICY.BIN` → `PolicyAbsent` → dev-p
 
 ### Verification (local, with the bake applied)
 - Both arches: boot logs `[policy] loaded + verified (4 entries)` (vs "absent"),
-  reach `ViCell >`, services up, no faults — the loaded dev policy (vfs=block_io,
+  reach `Cellos >`, services up, no faults — the loaded dev policy (vfs=block_io,
   net=network, shell=spawn; unlisted → dev-permissive) is non-breaking.
 - Integration boot tests green both arches (`boots_to_shell_prompt`,
   `aarch64_boots_to_shell_prompt`) with policy active.
@@ -105,7 +105,7 @@ dev-permissive in G1; `policy-required` flips it fail-closed for a real fleet.
 - `kernel/src/audit.rs` — `CapNarrowedByPolicy = 19`.
 
 ### Verification
-- Both arches build clean under PIC; boot reaches `ViCell >`, services up, no
+- Both arches build clean under PIC; boot reaches `Cellos >`, services up, no
   faults; boot logs "policy verify+parse self-test PASS" — now covering the
   narrowing + recovery rule end-to-end (policy absent at boot → dev-permissive →
   caps unchanged, as expected).
@@ -181,7 +181,7 @@ this G1 build, fail-closed only under the `policy-required` feature).
 - `kernel/src/task.rs` — POLICY lock added to fault-path force-unlock list.
 
 ### Verification
-- Both arches build clean under PIC; boot reaches `ViCell >` logging policy
+- Both arches build clean under PIC; boot reaches `Cellos >` logging policy
   "absent" (no blob baked yet), VFS/services up, no faults — confirms the load
   path + fail-safe + boot ordering without breaking boot.
 
@@ -209,7 +209,7 @@ build risk; jedisct1/libsodium-authored, enforces canonical encodings.
   primitive at boot (logs PASS/FAIL) before it is trusted for policy.
 
 ### Verification
-- Both arches: `cargo build --release` clean under PIC; boot reaches `ViCell >`
+- Both arches: `cargo build --release` clean under PIC; boot reaches `Cellos >`
   and logs "ed25519 verify self-test PASS (RFC 8032 + tamper)".
 
 ### Decision unblocked
@@ -239,7 +239,7 @@ hardfloat cells still get full setjmp and the softfloat kernel builds.
 
 ### Verification
 - aarch64: `cargo build --release` now clean (was 8 fp-armv8 errors); `aarch64_boots_to_shell_prompt`
-  integration test green; direct QEMU boot reaches `ViCell >` with VFS/shell up, no faults — this is
+  integration test green; direct QEMU boot reaches `Cellos >` with VFS/shell up, no faults — this is
   also the first functional verification of **P2 on aarch64** (init root authority logged).
 - riscv64: build + boot smoke still green (riscv64 setjmp path unchanged).
 
@@ -306,7 +306,7 @@ give "measured + verified launch". SHA-256 is a self-contained, zero-dependency 
 - `kernel/src/task.rs` — added `measurement_log::force_unlock_locks()` to the fault-path teardown.
 
 ### Verification
-- `cargo check --release -p vicell-kernel` clean on riscv64 (default) + `aarch64-unknown-none-softfloat`.
+- `cargo check --release -p Cellos-kernel` clean on riscv64 (default) + `aarch64-unknown-none-softfloat`.
 - SHA-256 correctness: identical logic run on host against 4 NIST vectors → ALL PASS.
 
 ### Docs Updated
@@ -337,7 +337,7 @@ no broker cell), so device-class is the granularity the kernel can actually enfo
 - `kernel/src/task/syscall.rs` — `RequestMmio` handler reads `mmio_devices` and passes it to `request_mmio`.
 
 ### Verification
-- `cargo check --release -p vicell-kernel` clean on riscv64 (default) + `aarch64-unknown-none-softfloat`.
+- `cargo check --release -p Cellos-kernel` clean on riscv64 (default) + `aarch64-unknown-none-softfloat`.
 - No cell regression: every cell declaring `gpio`/`uart` requests only its declared device's window
   (driver cells, periph-demo/test declare both; sensor/spi/pwm/robot demos declare gpio only).
 
@@ -496,7 +496,7 @@ DOOM scale trades size for TCG responsiveness.
 
 ### Summary
 After fullscreen + focus fixes, keystrokes still had no effect in DOOM. Root
-cause: ViCell IPC is a **rendezvous with no queue**, and the kernel's
+cause: Cellos IPC is a **rendezvous with no queue**, and the kernel's
 `dispatch_pending` (virtio-keyboard → input service) *popped* each event and
 dropped it whenever the input service wasn't parked in `Recv` — which it almost
 never is, because it block-sends each event to the focused app and that app
@@ -600,11 +600,11 @@ I_InitGraphics (320×200) → `DG_DrawFrame` first frame, with zero CPU faults.
 ## [2026-06-17] Feature: mlibc Tier B C library integration (sysdeps + Cargo shim + smoke cell)
 
 ### Summary
-Integrated [mlibc](https://github.com/managarm/mlibc) (MIT) as opt-in full-POSIX C library (Tier B) alongside the existing posix.rs shim (Tier A). All ViCell-specific sysdeps authored in C++ (~230 LOC); Cargo feature-gate prevents symbol conflicts; smoke-test cell proves the build graph. Manual step required: `bash scripts/build-mlibc.sh` in WSL2 to produce `libc.a` from the mlibc upstream clone.
+Integrated [mlibc](https://github.com/managarm/mlibc) (MIT) as opt-in full-POSIX C library (Tier B) alongside the existing posix.rs shim (Tier A). All Cellos-specific sysdeps authored in C++ (~230 LOC); Cargo feature-gate prevents symbol conflicts; smoke-test cell proves the build graph. Manual step required: `bash scripts/build-mlibc.sh` in WSL2 to produce `libc.a` from the mlibc upstream clone.
 
 ### Changes
-- **`third_party/mlibc/sysdeps/vicell/`** — NEW ViCell sysdeps port tree:
-  - `include/vicell/syscall.h` — inline-asm syscall helper for riscv64 + aarch64 with ViCell's non-Linux ABI (x0=nr on aarch64, NOT x8)
+- **`third_party/mlibc/sysdeps/Cellos/`** — NEW Cellos sysdeps port tree:
+  - `include/Cellos/syscall.h` — inline-asm syscall helper for riscv64 + aarch64 with Cellos's non-Linux ABI (x0=nr on aarch64, NOT x8)
   - `include/mlibc/sysdeps.hpp` — function declarations for all 17 mandatory sysdeps
   - `include/abi-bits/` — errno, stat, signal, fcntl, seek-whence, vm-flags headers
   - `generic/generic.cpp` — all 17 mandatory sysdeps + isatty: file I/O, clock, 4MB bump arena, TcbSet, Futex spin stubs
@@ -625,7 +625,7 @@ Integrated [mlibc](https://github.com/managarm/mlibc) (MIT) as opt-in full-POSIX
 - **AnonAllocate:** 4MB static bump arena; AnonFree = no-op (G2). Overflow returns ENOMEM + kernel Log.
 - **Futex:** spin-loop stubs (single-threaded G2, `-Dposix_option=disabled`).
 - **TcbSet:** riscv64 `mv tp`; aarch64 `msr tpidr_el0`.
-- **aarch64 footgun documented:** ViCell x0=nr ABI (NOT Linux x8=nr) — centralized in one file (`syscall.h`).
+- **aarch64 footgun documented:** Cellos x0=nr ABI (NOT Linux x8=nr) — centralized in one file (`syscall.h`).
 
 ### Deferred
 - Actual `meson setup && ninja` WSL2 build (manual step by developer)
@@ -669,7 +669,7 @@ Completed G1 C Runtime milestone — all 9 focused sub-modules of `posix.rs` shi
 ## [2026-06-17] Architectural Decision: C Runtime Strategy + Tier Boundary Clarification
 
 ### Decisions Made
-Analysis of C runtime options (Approach A: port libc vs Approach B: native shim) confirmed ViCell's existing `posix.rs` approach is correct and the only viable path given SAS constraints. Defined two-phase roadmap for C runtime completion.
+Analysis of C runtime options (Approach A: port libc vs Approach B: native shim) confirmed Cellos's existing `posix.rs` approach is correct and the only viable path given SAS constraints. Defined two-phase roadmap for C runtime completion.
 
 ### C Runtime Status (`libs/api/src/posix.rs`)
 ~75% complete (759 lines, feature flag `posix`). Working: malloc/free (AllocHeader 16-byte), string ops, file I/O via VFS IPC, BSD sockets (slots 10–17, atomic FD table), entropy, time. Missing: stdio buffering, libm (math functions), setjmp/longjmp (~200 lines additional work).
@@ -679,7 +679,7 @@ Analysis of C runtime options (Approach A: port libc vs Approach B: native shim)
 
 ### Two-Phase C Runtime Roadmap
 - **G1 — picolibc libm cherry-pick**: Link only `picolibc libm.a` (math functions, self-contained, no `_sbrk`). Add minimal stdio buffering + setjmp stubs to `posix.rs`. Effort: ~1 day. Enables DOOM, codec libs, MicroPython math.
-- **G2 — mlibc migration**: Replace posix.rs surface with mlibc (MIT, purpose-built for new OSes). Implement ~20 `sysdeps/` functions mapping ViCell IPC. posix.rs code reused as sysdeps — not a rewrite. Provides correct printf (Grisu3), full stdio, pthread stubs. Effort: ~1–2 weeks.
+- **G2 — mlibc migration**: Replace posix.rs surface with mlibc (MIT, purpose-built for new OSes). Implement ~20 `sysdeps/` functions mapping Cellos IPC. posix.rs code reused as sysdeps — not a rewrite. Provides correct printf (Grisu3), full stdio, pthread stubs. Effort: ~1–2 weeks.
 - **picolibc ≠ mlibc**: picolibc is for embedded bare-metal (no OS); mlibc is for new OSes. Cherry-picking picolibc components and adopting mlibc are sequential steps, not alternatives.
 
 ### Tier Boundary Clarification (permanent rule)
@@ -757,10 +757,10 @@ ViUI v2 reached 100% completion for G1 target: all 7 phases shipped, system is p
 
 ---
 
-## [2026-06-16] ViCell App SDK L1 — CellRuntime, app_entry!, typed clients (VfsClient/NetClient/InputClient)
+## [2026-06-16] Cellos App SDK L1 — CellRuntime, app_entry!, typed clients (VfsClient/NetClient/InputClient)
 
 ### Summary
-Shipped the ViCell App SDK (L1 platform layer) — the foundational framework unlocking real native applications without boilerplate. `libs/ostd/` now provides: `CellRuntime` builder pattern for unified app startup, declarative `app_entry!` and `service_entry!` macros eliminating manifest/dispatch boilerplate, typed client facades (`VfsClient`, `NetClient`, `InputClient`) for ergonomic service access, lifecycle event support (`ShutdownReason`, `ShutdownWith` event), lazy service accessors, and `arm_heartbeat()` with `run_with_lifecycle()` for graceful shutdown coordination. Reference app: `cells/apps/hello-cell/` (17 lines, zero boilerplate).
+Shipped the Cellos App SDK (L1 platform layer) — the foundational framework unlocking real native applications without boilerplate. `libs/ostd/` now provides: `CellRuntime` builder pattern for unified app startup, declarative `app_entry!` and `service_entry!` macros eliminating manifest/dispatch boilerplate, typed client facades (`VfsClient`, `NetClient`, `InputClient`) for ergonomic service access, lifecycle event support (`ShutdownReason`, `ShutdownWith` event), lazy service accessors, and `arm_heartbeat()` with `run_with_lifecycle()` for graceful shutdown coordination. Reference app: `cells/apps/hello-cell/` (17 lines, zero boilerplate).
 
 ### Changes
 - **`libs/ostd/src/runtime.rs`** — NEW: `CellRuntime` builder, `app_syscall_set()`, `service_syscall_set()` const fns enabling minimal permission sets per app type
@@ -783,7 +783,7 @@ Shipped the ViCell App SDK (L1 platform layer) — the foundational framework un
 ## [2026-06-16] Tier 3a Security Silo — 4/4 phases complete (G1-optional key isolation)
 
 ### Summary
-Completed Tier 3a Security Silo implementation — a bare-metal Rust `no_std` guest running in Stage-2 fenced memory. Provides cryptographic key isolation at the hardware level: even if the ViCell kernel is compromised, private keys stored in the Silo remain inaccessible due to ARM64 Stage-2 page tables. First practical application: robot TLS handshakes with embedded private keys. All phases (P01–P04) shipped, including integration tests; Phase 3B (Net Cell HsmCryptoProvider) deferred pending TLS plan Phase 03 completion.
+Completed Tier 3a Security Silo implementation — a bare-metal Rust `no_std` guest running in Stage-2 fenced memory. Provides cryptographic key isolation at the hardware level: even if the Cellos kernel is compromised, private keys stored in the Silo remain inaccessible due to ARM64 Stage-2 page tables. First practical application: robot TLS handshakes with embedded private keys. All phases (P01–P04) shipped, including integration tests; Phase 3B (Net Cell HsmCryptoProvider) deferred pending TLS plan Phase 03 completion.
 
 ### Changes
 - **Phase P01** — Guest binary (`cells/guests/silo-guest/`):
@@ -802,7 +802,7 @@ Completed Tier 3a Security Silo implementation — a bare-metal Rust `no_std` gu
 - **Phase P03A** — ostd SiloHandle API (`libs/ostd/src/silo.rs`):
   - Stable userspace API: `SiloHandle::connect()`, `init_key()`, `sign()`, `ecdh()`, `get_public_key()`
   - Wire format: `SiloRequest`/`SiloResponse` structs in `libs/types/src/silo.rs`
-  - IPC abstraction: 128-byte message fits in ViCell IPC buffer
+  - IPC abstraction: 128-byte message fits in Cellos IPC buffer
   - Zero knowledge of Stage-2, VMs, or kernel hypervisor implementation
 
 - **Phase P03B** — HsmCryptoProvider: DEFERRED
@@ -836,14 +836,14 @@ Completed Tier 3a Security Silo implementation — a bare-metal Rust `no_std` gu
 ## [2026-06-16] Tier 3b ARM64 EL2 VMM — 10/10 phases complete (Alpine Linux boots)
 
 ### Summary
-Completed all 10 phases of the Tier 3b ARM64 EL2 hypervisor stack. The ViCell kernel can now boot as EL1 (kernel) with the ability to spawn EL2 virtual machine guests. Shipped a full end-to-end demo: QEMU q35 with cortex-a72 cores → ViCell EL1 kernel + init/vfs/shell → minimal VMM boots Alpine Linux 3.21.3 aarch64 (netboot). RISC-V and x86_64 receive ENOSYS stubs (H-ext absent from shipping RISC-V; Tier 3b not planned for x86). Architecture-aware exception handling validated on all three targets.
+Completed all 10 phases of the Tier 3b ARM64 EL2 hypervisor stack. The Cellos kernel can now boot as EL1 (kernel) with the ability to spawn EL2 virtual machine guests. Shipped a full end-to-end demo: QEMU q35 with cortex-a72 cores → Cellos EL1 kernel + init/vfs/shell → minimal VMM boots Alpine Linux 3.21.3 aarch64 (netboot). RISC-V and x86_64 receive ENOSYS stubs (H-ext absent from shipping RISC-V; Tier 3b not planned for x86). Architecture-aware exception handling validated on all three targets.
 
 ### Changes
 - **Phase P01–P10 (all shipped 2026-06-16)**:
   - EL2 boot + exception routing (stay-at-EL2 path, lower-to-EL1 path)
   - Minimal VMM scaffold (syscalls 220–225 for VM lifecycle)
   - VM exit handlers (pagetable faults, MMIO, HVC)
-  - VirtIO device emulation (blk/net/console backends forward to ViCell IPC)
+  - VirtIO device emulation (blk/net/console backends forward to Cellos IPC)
   - Alpine Linux netboot artifact fetch + integration test (180s boot, reaches `/ #` prompt)
   - `docs/specs/05-application.md` v0.8 updated
   
@@ -856,7 +856,7 @@ Completed all 10 phases of the Tier 3b ARM64 EL2 hypervisor stack. The ViCell ke
 
 ### Architecture
 **Two-plane design** (G2 graduation target):
-- **DATA PLANE**: ViCell EL1 kernel + RT cells (inference, control loops) — native, deterministic
+- **DATA PLANE**: Cellos EL1 kernel + RT cells (inference, control loops) — native, deterministic
 - **MANAGEMENT PLANE**: Alpine Linux VM (EL2) → Prometheus, SSH, packet forwarding — ecosystem comfort, zero-downtime admin
 
 **VM Exit Handling**:
@@ -875,7 +875,7 @@ Completed all 10 phases of the Tier 3b ARM64 EL2 hypervisor stack. The ViCell ke
 - Single vCPU per guest (SMP future work)
 - No nested virt (Level 2)
 - Stage-2 IOMMU unmapped (bare passthrough; real DMA devices block VM)
-- TLB shootdown overhead (no direct VM-to-VM communication; all goes through ViCell)
+- TLB shootdown overhead (no direct VM-to-VM communication; all goes through Cellos)
 
 ---
 
@@ -1497,7 +1497,7 @@ Phân tích ViUI v1 (Elm model) và chốt kiến trúc mới cho ViUI v2 (G2). 
 ## [2026-06-07] ViUI Toolkit — P01–P07 Complete (P03 deferred)
 
 ### Summary
-Implemented `libs/viui` — ViCell's native no_std UI toolkit with Elm/iced-compatible API and direct pixel rendering (no GPU/tessellation required). All 6 phases done (P03 GlyphAtlas deferred — fontdue 0.9 is not no_std compatible); bitmap 8×8 font used for G1. Compiles cleanly for `riscv64gc-unknown-none-elf` with zero warnings.
+Implemented `libs/viui` — Cellos's native no_std UI toolkit with Elm/iced-compatible API and direct pixel rendering (no GPU/tessellation required). All 6 phases done (P03 GlyphAtlas deferred — fontdue 0.9 is not no_std compatible); bitmap 8×8 font used for G1. Compiles cleanly for `riscv64gc-unknown-none-elf` with zero warnings.
 
 ### Changes
 - **P01 — Core Engine**: `ViWidget` trait, `WidgetId` (FNV-1a hash), `Length`/`Constraints`/`LayoutNode`, `WidgetStateStore`/`FocusManager`, `ViApp` trait, `PaintCx`/`EventCx`
@@ -1580,7 +1580,7 @@ Reference robot demonstration completed: sensor read (GPIO input) → compute (c
   - Creates FAT32 `disk_arm_virt.img` with cell table
 
 ### Architecture
-- **Manifest-Based Caps**: `declare_manifest!(gpio=true, network=true)` embeds `__ViCell_manifest` ELF section; kernel grant logic at spawn checks manifest + privilege gate (Phase 30)
+- **Manifest-Based Caps**: `declare_manifest!(gpio=true, network=true)` embeds `__Cellos_manifest` ELF section; kernel grant logic at spawn checks manifest + privilege gate (Phase 30)
 - **HAL Traits**: `ViGpio` + `PinDir` (Input/Output); driver-gpio implements `Pl061Gpio::open()` for QEMU PL061 device
 - **Safe MMIO**: `ostd::mmio::MmioRegion` wraps direct register access; forbids unsafe in Cells
 - **Resource Registry**: Kernel `sys_request_mmio(213)` gates exclusive GPIO access per Task
@@ -1611,10 +1611,10 @@ Reference robot demonstration completed: sensor read (GPIO input) → compute (c
 ## [2026-06-07] RT Latency Benchmark — QEMU boot verified (M4.4 G1 complete)
 
 ### Summary
-RT latency benchmark (`cells/apps/bench`) now boots in QEMU and prints `[bench] ALL BENCHMARKS PASS`. Fixed a silent bug in all 7 cell linker scripts where the `__ViCell_manifest` ELF section (capability grants) was being renamed to `.vicell_manifest` by the linker, making the capability manifest system non-functional for all cells.
+RT latency benchmark (`cells/apps/bench`) now boots in QEMU and prints `[bench] ALL BENCHMARKS PASS`. Fixed a silent bug in all 7 cell linker scripts where the `__Cellos_manifest` ELF section (capability grants) was being renamed to `.Cellos_manifest` by the linker, making the capability manifest system non-functional for all cells.
 
 ### Changes
-- **All 7 cell linker scripts** (`bench.ld`, `app.ld`, `shell.ld`, `vfs.ld`, `config.ld`, `input.ld`, `net.ld`, `compositor.ld`): renamed output section `.vicell_manifest` → `__ViCell_manifest` so `get_section("__ViCell_manifest")` in the kernel loader actually finds the section. Previously ALL capability grants via `declare_manifest!` were silently ignored and fell through to legacy hardcoded path grants (`/bin/vfs`, `/bin/net`, `/bin/shell`, `/bin/init`); cells not in that list (including bench) got no caps from manifest.
+- **All 7 cell linker scripts** (`bench.ld`, `app.ld`, `shell.ld`, `vfs.ld`, `config.ld`, `input.ld`, `net.ld`, `compositor.ld`): renamed output section `.Cellos_manifest` → `__Cellos_manifest` so `get_section("__Cellos_manifest")` in the kernel loader actually finds the section. Previously ALL capability grants via `declare_manifest!` were silently ignored and fell through to legacy hardcoded path grants (`/bin/vfs`, `/bin/net`, `/bin/shell`, `/bin/init`); cells not in that list (including bench) got no caps from manifest.
 - **`cells/apps/bench/src/main.rs`**: added `api::declare_manifest!(spawn = true)` so bench gets `spawn_cap`; raised `TARGET_SYSCALL_NS` to 40µs for QEMU TCG (real-HW target remains 10µs in documentation).
 - **QEMU verified**: ctx_switch p99=39µs ✅, ipc_send_recv p99=3.2µs ✅, syscall_yield p99=19.8µs ✅, memory_footprint ✅. RT scenarios SKIP (SAS VA collision on same-binary re-spawn — PIE is future work).
 
@@ -1654,7 +1654,7 @@ Complete protocol hardening trilogy: **Phase 27-1** refactored net service to ty
 - **`kernel/src/task/tcb.rs`** — `syscall_allowlist: u64` field added to Task (default 0)
   
 - **`kernel/src/loader.rs`** — ELF manifest + syscall allowlist reading
-  - Parses `__ViCell_syscalls` ELF section during `spawn_from_path()`
+  - Parses `__Cellos_syscalls` ELF section during `spawn_from_path()`
   - Section format: bit-set flags (8 bytes) of permitted syscalls
   - Default: 0 (no syscalls) unless explicitly declared
   
@@ -1665,7 +1665,7 @@ Complete protocol hardening trilogy: **Phase 27-1** refactored net service to ty
 - **`declare_syscalls!` macro** — Cell declares permitted syscalls in ELF section
   - e.g., `declare_syscalls!(Send, Recv, Log, LookupService, Heartbeat)` → bit-set
   - Compiler verifies all declared syscalls exist (syntax safety)
-  - All 7 cell linker scripts updated with `KEEP(*(__ViCell_syscalls))`
+  - All 7 cell linker scripts updated with `KEEP(*(__Cellos_syscalls))`
 
 #### Phase 27-3 — Direct-IPC Vtable
 - **`libs/api/src/fast_ipc.rs`** — NEW: `TrustedHandle<T>` ZST + cell marker traits (⚠️ Law 1)
@@ -1758,9 +1758,9 @@ Added POSIX C library shims to `libs/api/src/posix.rs`: `getentropy()` for crypt
 - POSIX layer is C-only (C++ compatibility not tested; expected to work)
 
 ### Impact
-- Enables porting standard C network libraries (OpenSSL, TLS stacks, HTTP clients) to ViCell
+- Enables porting standard C network libraries (OpenSSL, TLS stacks, HTTP clients) to Cellos
 - `getentropy()` provides portable entropy source for cryptographic libraries
-- BSD socket API allows unmodified C code from Linux/BSD systems to run on ViCell
+- BSD socket API allows unmodified C code from Linux/BSD systems to run on Cellos
 - Foundation for Phase TLS-01+ (TLS libraries using getentropy + socket API)
 
 **Status**: Complete. All 4 bug fixes validated; syscalls reachable via shim layer.
@@ -1818,7 +1818,7 @@ Implemented full TLS 1.3 client-side handshake in the network service with hardw
 - `libs/ostd/src/tls.rs` — TLS convenience functions
 
 ### Impact
-- ViCell now supports encrypted network communication (TLS 1.3)
+- Cellos now supports encrypted network communication (TLS 1.3)
 - Hardware entropy eliminates reliance on weak time-based PRNG
 - Foundation for MQTT over TLS, secure device communication, IoT protocols
 - Enables real-world deployment scenarios requiring certificate validation
@@ -1909,10 +1909,10 @@ Completed zero-copy storage stack enabling large file transfers without chunking
 - QSTRs (stat/listdir/remove) were pre-generated — no header regen needed
 
 ### Architecture
-MicroPython (C) → modvfs.c extern calls → ViCell_vfs_*(vfs_bridge.rs) → typed postcard IPC
+MicroPython (C) → modvfs.c extern calls → Cellos_vfs_*(vfs_bridge.rs) → typed postcard IPC
 
 **Implementation Details**:
-- `vfs_bridge.rs` (NEW): 7 ViCell_vfs_* exports (read/write/append/mkdir/stat/listdir/remove) with `#[no_mangle] extern "C"` signatures
+- `vfs_bridge.rs` (NEW): 7 Cellos_vfs_* exports (read/write/append/mkdir/stat/listdir/remove) with `#[no_mangle] extern "C"` signatures
 - `modvfs.c`: complete rewrite removing raw opcodes (OP_READ=8, OP_WRITE=4, …) + adding stat/listdir/remove C functions
 - `main.rs`: vfs_read_to_buf now uses vfs_bridge::vfs_get_file_into (owned buffer pattern)
 - QSTRs already present in generated header — no regen needed
@@ -1921,7 +1921,7 @@ MicroPython (C) → modvfs.c extern calls → ViCell_vfs_*(vfs_bridge.rs) → ty
 ### Files Modified
 - `cells/runtimes/micropython/src/vfs_bridge.rs` — NEW: C-callable Rust bridge for typed VFS IPC
 - `cells/runtimes/micropython/src/main.rs` — vfs_read_to_buf rewired to bridge
-- `cells/runtimes/micropython/src/c/ViCell/modvfs.c` — full rewrite, raw opcodes → typed IPC
+- `cells/runtimes/micropython/src/c/Cellos/modvfs.c` — full rewrite, raw opcodes → typed IPC
 
 **Status**: Complete (3/3 phases). MicroPython runtime now fully functional with typed VFS IPC.
 
@@ -1957,7 +1957,7 @@ MicroPython (C) → modvfs.c extern calls → ViCell_vfs_*(vfs_bridge.rs) → ty
 - `main.rs`: `vfs_read_to_buf` → `vfs_read_to_vec` using `vfs_get_file_vec`
 
 **Phase 02 — io.open/io.write (COMPLETE)**:
-- `bindings_io.rs`: Added `ViCell_io_write` C primitive (writes to serial console)
+- `bindings_io.rs`: Added `Cellos_io_write` C primitive (writes to serial console)
 - Removed broken `io.open`/`io.read`/`io.close` kernel-FS stubs
 - `main.rs`: `inject_io_setup(L)` runs a Lua chunk overriding `io.open`, `io.write`, `os.execute`
 - `io.open(path, "r")` → VFS-backed handle with `:read("*a")`/`:read("*l")`/`:close()`
@@ -2055,13 +2055,13 @@ MicroPython (C) → modvfs.c extern calls → ViCell_vfs_*(vfs_bridge.rs) → ty
 - `kernel/src/loader.rs`: manifest-driven capability grant system; privilege gate rejects user cells (non-/bin/) declaring any privileged cap
 - `BLOCK_IO_REGISTERED: AtomicBool` in loader: tracks VFS fast-IPC handler registration; logs warning on hot-swap re-registration (graceful, not assert)
 - `CellSpawnDenied = 10` audit event for manifest-denied spawns
-- `KEEP(*(__ViCell_manifest))` section in all 7 cell linker scripts (prevents GC under release LTO)
+- `KEEP(*(__Cellos_manifest))` section in all 7 cell linker scripts (prevents GC under release LTO)
 - 6 boot-time unit tests for `CellManifest` parsing in `kernel/src/loader/elf_tests.rs`
 
 ### Changed
 - `/bin/vfs`, `/bin/net`, `/bin/shell`, `/bin/init` now declare capabilities via ELF manifest (`declare_manifest!`) instead of relying on hardcoded kernel path grants
 - `cells/services/vfs/src/access.rs`: updated module doc to reflect Phase 30 complete
-- Cells without `__ViCell_manifest` section fall back to legacy hardcoded path grants (backward compatible)
+- Cells without `__Cellos_manifest` section fall back to legacy hardcoded path grants (backward compatible)
 
 ### Security
 - Privilege gate in `spawn_from_path` rejects user cells (path not under `/bin/`) that declare any privileged capability (block_io/network/spawn)
@@ -2074,13 +2074,13 @@ MicroPython (C) → modvfs.c extern calls → ViCell_vfs_*(vfs_bridge.rs) → ty
 - `kernel/src/audit.rs` — added `CellSpawnDenied = 10`
 - `kernel/src/loader.rs` — manifest read + privilege gate + BLOCK_IO_REGISTERED guard; manifest-or-legacy cap grant block
 - `kernel/src/loader/elf_tests.rs` — 6 new boot-time tests
-- `cells/services/vfs/vfs.ld` — added `.vicell_manifest : ALIGN(8) { KEEP(*(__ViCell_manifest)) }`
-- `cells/services/net/net.ld` — added `.vicell_manifest` section
-- `cells/apps/shell/shell.ld` — added `.vicell_manifest` section
-- `cells/apps/app.ld` — added `.vicell_manifest` section
-- `cells/services/config/config.ld` — added `.vicell_manifest` section
-- `cells/services/input/input.ld` — added `.vicell_manifest` section
-- `cells/services/compositor/compositor.ld` — added `.vicell_manifest` section
+- `cells/services/vfs/vfs.ld` — added `.Cellos_manifest : ALIGN(8) { KEEP(*(__Cellos_manifest)) }`
+- `cells/services/net/net.ld` — added `.Cellos_manifest` section
+- `cells/apps/shell/shell.ld` — added `.Cellos_manifest` section
+- `cells/apps/app.ld` — added `.Cellos_manifest` section
+- `cells/services/config/config.ld` — added `.Cellos_manifest` section
+- `cells/services/input/input.ld` — added `.Cellos_manifest` section
+- `cells/services/compositor/compositor.ld` — added `.Cellos_manifest` section
 - `cells/services/vfs/src/main.rs` — `api::declare_manifest!(block_io = true, ...)`
 - `cells/services/net/src/main.rs` — `api::declare_manifest!(network = true, ...)`
 - `cells/apps/shell/src/main.rs` — `api::declare_manifest!(spawn = true, ...)`
@@ -2105,7 +2105,7 @@ MicroPython (C) → modvfs.c extern calls → ViCell_vfs_*(vfs_bridge.rs) → ty
   - `mqtt publish host:port topic payload` — connects, sends PUBLISH, closes connection
   - `mqtt subscribe host:port topic` — connects, sends SUBSCRIBE, waits for PUBLISH from broker
 - **Key Implementation Details**:
-  - Fixed allocator exhaustion: ostd's bump allocator (dealloc=no-op) gets exhausted by nested IPC polling loops in ViCell SAS
+  - Fixed allocator exhaustion: ostd's bump allocator (dealloc=no-op) gets exhausted by nested IPC polling loops in Cellos SAS
   - Solution: single-poll-per-iteration with outer yield loop to prevent heap starvation
   - Proper MQTT frame encoding (CONNECT, PUBLISH, SUBSCRIBE, remaining-length calculations)
 - **Integration Tests Added**: 2 new tests
@@ -2120,7 +2120,7 @@ MicroPython (C) → modvfs.c extern calls → ViCell_vfs_*(vfs_bridge.rs) → ty
 **Status**: Complete. 65/65 integration tests pass (61 previous + 4 mqtt-related, including X-5).
 
 **Impact**:
-- ViCell now has native IoT connectivity: publish/subscribe over MQTT
+- Cellos now has native IoT connectivity: publish/subscribe over MQTT
 - Demonstrates proper resource management in nested IPC + polling patterns
 - Foundation for Phase X-6+ (multi-topic subscription, QoS-1/2, retained messages)
 
@@ -2263,7 +2263,7 @@ MicroPython (C) → modvfs.c extern calls → ViCell_vfs_*(vfs_bridge.rs) → ty
 - `tests/integration/tests/boot.rs` — 2 new integration tests
 
 **Integration Tests Added**:
-- `network_tcp_send_recv` — CONNECT→SEND "HELLO_ViCell\n"→RECV echo→CLOSE with host TCP echo server
+- `network_tcp_send_recv` — CONNECT→SEND "HELLO_Cellos\n"→RECV echo→CLOSE with host TCP echo server
 - `network_curl_http_get` — HTTP GET to host server, verifies response contains "200" + "HELLO"
 
 **Status**: Complete. All 23 integration tests pass (21 FAT16 + 2 network).
@@ -2274,7 +2274,7 @@ MicroPython (C) → modvfs.c extern calls → ViCell_vfs_*(vfs_bridge.rs) → ty
 - TCP server (LISTEN/ACCEPT) not yet implemented
 
 **Impact**:
-- ViCell can fetch HTTP responses from external servers via curl utility
+- Cellos can fetch HTTP responses from external servers via curl utility
 - TCP data-path validated end-to-end with host server integration
 - Network tooling now usable from shell (`nc`, `curl`)
 - Foundation for Phase C (VFS-backed persistent HTTP responses)
@@ -2562,7 +2562,7 @@ MicroPython (C) → modvfs.c extern calls → ViCell_vfs_*(vfs_bridge.rs) → ty
 - **Integration Test**:
   - `tests/integration/tests/boot.rs` — new `network_tcp_listen_accept` test
     - Guest: nc -l on port 9090
-    - Host: connects via SLIRP hostfwd, sends "PING_ViCell\n"
+    - Host: connects via SLIRP hostfwd, sends "PING_Cellos\n"
     - Guest: echoes response to serial
     - Validates bidirectional TCP server functionality
 
@@ -2584,7 +2584,7 @@ MicroPython (C) → modvfs.c extern calls → ViCell_vfs_*(vfs_bridge.rs) → ty
 - SEND handler still sends full buffer regardless of actual payload length (pre-existing, tracked in code review)
 
 **Impact**:
-- ViCell can accept incoming TCP connections via guest server (`nc -l`)
+- Cellos can accept incoming TCP connections via guest server (`nc -l`)
 - Host can connect to guest via SLIRP hostfwd + forwarded port
 - Bidirectional echo validation end-to-end
 - Foundation for Phase D (active queue ACCEPT, socket acceptance protocol)
@@ -2769,7 +2769,7 @@ MicroPython (C) → modvfs.c extern calls → ViCell_vfs_*(vfs_bridge.rs) → ty
   - Added `sys_blk_read(sector, &mut [u8;512]) -> bool` and `sys_blk_write(sector, &[u8;512]) -> bool` to ostd
   - Added `Syscall::BlkRead` and `Syscall::BlkWrite` variants to kernel (internal enum only)
   - Added kernel handlers in `handle_syscall` with `validate_user_buf` checks
-  - Mapped 500/501 in numeric fallback of `ViCell_syscall_dispatch`
+  - Mapped 500/501 in numeric fallback of `Cellos_syscall_dispatch`
   - Verified against `viVirtIOBlk.read_sector()`/`write_sector()` trait methods
 - **Phase 2 (FAT16 Format)**: Created disk formatter for LBA 0–81919 (before cell table at LBA 82000)
   - Created `tools/mkfat16.py`: in-place FAT16 formatter with 81920 sectors, 8 sec/cluster, 10225 clusters
@@ -2845,7 +2845,7 @@ MicroPython (C) → modvfs.c extern calls → ViCell_vfs_*(vfs_bridge.rs) → ty
 
 **Status**: Phase A + B complete. Phase C (VFS write for persistent responses) planned.
 
-**Impact**: ViCell can now fetch HTTP responses from external servers; network tooling usable from shell.
+**Impact**: Cellos can now fetch HTTP responses from external servers; network tooling usable from shell.
 
 ---
 

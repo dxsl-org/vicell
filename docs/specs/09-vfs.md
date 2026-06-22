@@ -1,4 +1,4 @@
-# ViCell Architecture: VFS & Filesystems
+# Cellos Architecture: VFS & Filesystems
 **Version**: 0.5 (Mount-Table Layered Backends — thay thế Dual-VFS)
 **Status**: Definitive
 **Changed 2026-06-10**: Bỏ chiến lược Dual-VFS (viFS1 RedoxFS fork / viFS2 TFS — TFS upstream đã ngừng phát triển từ ~2018). Thay bằng mô hình MountTable một VFS service + nhiều backend cắm song song. Plan chi tiết: `.agents/260610-1202-vfs-mount-table-backends/`.
@@ -6,10 +6,10 @@
 
 ## 1. VFS Contract (The Interface)
 
-Trong ViCell, VFS là một bộ các **Traits** định nghĩa trong `libs/api` để đảm bảo tính hoán đổi giữa các bản Implementation.
+Trong Cellos, VFS là một bộ các **Traits** định nghĩa trong `libs/api` để đảm bảo tính hoán đổi giữa các bản Implementation.
 
 * **Stable ABI**: Các Trait được bọc trong `#[repr(C)]` để đảm bảo ứng dụng không bị vỡ khi nâng cấp Cell hệ thống.
-* **Async by Design**: Mọi thao tác I/O đều trả về `Future`, tận dụng tối đa mô hình phi tập trung của ViCell.
+* **Async by Design**: Mọi thao tác I/O đều trả về `Future`, tận dụng tối đa mô hình phi tập trung của Cellos.
 
 ```rust
 pub trait ViFileSystem: Send + Sync {
@@ -58,7 +58,7 @@ VFS service (MountTable, longest-prefix match)
 
 
 ## 3. Cơ chế Direct I/O & Zero-Copy
-Nhờ lợi thế của Single Address Space (SAS), ViCell đạt được tốc độ đọc/ghi dữ liệu ở mức vật lý mà không cần memcpy.
+Nhờ lợi thế của Single Address Space (SAS), Cellos đạt được tốc độ đọc/ghi dữ liệu ở mức vật lý mà không cần memcpy.
 
 1. **Cấp phát**: App Cell cấp phát một buffer (`Box<[u8]>`) từ Global Heap.
 2. **Chuyển giao**: Khi gọi `read()`, quyền sở hữu buffer chuyển từ App sang VFS Cell, sau đó sang Disk Driver Cell thông qua cơ chế **Grant** trong Task TCB.
@@ -68,14 +68,14 @@ Nhờ lợi thế của Single Address Space (SAS), ViCell đạt được tốc
 
 ## 4. Global Page Cache & SAS Optimization
 
-Thay vì mỗi FS Cell tự giữ cache, ViCell dùng một Unified Page Cache nằm trong vùng nhớ dùng chung của SAS.
+Thay vì mỗi FS Cell tự giữ cache, Cellos dùng một Unified Page Cache nằm trong vùng nhớ dùng chung của SAS.
 
 * **Zero-copy Metadata**: backend native (G2) có thể trả về con trỏ trực tiếp đến cấu trúc metadata trong RAM, cho phép App đọc Metadata mà không cần syscall trung gian.
 * **LRU & OOM**: Chính sách thu hồi bộ nhớ (Eviction) được quản lý tập trung bởi Kernel để tránh xung đột tài nguyên giữa các Cell.
 
 
 ## 5. Large File Support (LFS) trên Multi-Arch
-Mặc dù hỗ trợ cả RV32, nhưng VFS của ViCell mặc định dùng 64-bit offsets (`u64`).
+Mặc dù hỗ trợ cả RV32, nhưng VFS của Cellos mặc định dùng 64-bit offsets (`u64`).
 
 * **RV32 (Robot Nano)**: Sử dụng các cặp thanh ghi (Register Pairs) để xử lý offsets > 4GB, đảm bảo robot có thể ghi video vào thẻ exFAT dung lượng lớn.
 * **RV64/RV128 (Jarvis)**: Tận dụng trực tiếp độ rộng thanh ghi tự nhiên cho hiệu suất tối đa.

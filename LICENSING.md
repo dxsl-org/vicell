@@ -1,8 +1,8 @@
-# ViCell Licensing
+# Cellos Licensing
 
 ## Core System: MPL 2.0
 
-The ViCell kernel and core libraries are licensed under the **Mozilla Public License 2.0 (MPL-2.0)**.
+The Cellos kernel and core libraries are licensed under the **Mozilla Public License 2.0 (MPL-2.0)**.
 
 ### Covered Components
 - **Kernel** (`kernel/`)
@@ -13,7 +13,7 @@ The ViCell kernel and core libraries are licensed under the **Mozilla Public Lic
 MPL 2.0 provides a balanced approach:
 - **File-level copyleft**: Modifications to MPL-licensed files must be shared
 - **Linking freedom**: Cells can link against MPL code without license restrictions
-- **Commercial friendly**: Companies can build proprietary Cells on top of ViCell
+- **Commercial friendly**: Companies can build proprietary Cells on top of Cellos
 - **Patent protection**: Includes explicit patent grants and retaliation clauses
 
 ## Cells: Author's Choice
@@ -51,4 +51,4 @@ The complete MPL 2.0 license text is available at:
 
 ## Questions?
 
-For licensing questions, please open an issue in the ViCell repository.
+For licensing questions, please open an issue in the Cellos repository.

@@ -55,7 +55,7 @@ boot[64] = 0x80  # Drive number
 boot[65] = 0  # Reserved
 boot[66] = 0x29  # Extended boot signature
 boot[67:71] = struct.pack('<I', 0x12345678)  # Volume ID
-boot[71:82] = b"ViCell_BOOT  "  # Volume label
+boot[71:82] = b"Cellos_BOOT  "  # Volume label
 boot[82:90] = b"FAT32   "  # Filesystem type
 boot[510:512] = bytes([0x55, 0xAA])  # Boot signature
 

@@ -1,12 +1,12 @@
 # Tier 1 Rust + ViUI — Building GUIs
 
-> Modern, reactive UI toolkit for ViCell apps. Signal-based architecture with a compile-time-checked DSL.
+> Modern, reactive UI toolkit for Cellos apps. Signal-based architecture with a compile-time-checked DSL.
 
 ---
 
 ## Overview
 
-ViUI is a **no_std Signal-based UI framework** designed for ViCell's constraints:
+ViUI is a **no_std Signal-based UI framework** designed for Cellos's constraints:
 
 - **Reactive signals**: `Signal<T>` observables for state management
 - **.vi DSL**: compile-time-checked UI layout (similar to JSX)

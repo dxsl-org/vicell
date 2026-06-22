@@ -11,9 +11,9 @@
 ## 1. Mục tiêu & Triết lý
 
 Robot/embedded điều khiển **sensor & actuator** qua bus phần cứng (GPIO/UART/I2C/SPI/CAN/PWM/ADC).
-ViCell hiện chỉ có VirtIO (block/input/net/gpu) — **thiếu hoàn toàn** lớp bus ngoại vi.
+Cellos hiện chỉ có VirtIO (block/input/net/gpu) — **thiếu hoàn toàn** lớp bus ngoại vi.
 
-**Quyết định kiến trúc (đúng triết lý ViCell):** driver ngoại vi là **true Driver Cells**
+**Quyết định kiến trúc (đúng triết lý Cellos):** driver ngoại vi là **true Driver Cells**
 (`#![forbid(unsafe_code)]`), KHÔNG nhồi vào kernel. Lý do:
 - **Nano-kernel**: kernel giữ <10K LOC; driver không phình TCB.
 - **LBI**: bug driver bị cô lập trong Cell, không deref được con trỏ ngoài vùng được cấp.
@@ -118,7 +118,7 @@ Ba lớp tín hiệu, ba cơ chế (chung một nền: RT Cell `spawn_pinned` + 
 > đang sửa. Implement sau khi kernel ổn định. Pinned-poll phủ được hard-RT chu kỳ mà gần như không đụng kernel.
 
 **Pinned-poll không cần IPC trong vòng nóng**: RT Cell sở hữu MMIO độc quyền → poke thẳng register
-qua safe-MMIO. IPC chỉ dùng lúc grant ban đầu. Đây là cách ViCell đạt **vừa cách ly vừa latency thấp**
+qua safe-MMIO. IPC chỉ dùng lúc grant ban đầu. Đây là cách Cellos đạt **vừa cách ly vừa latency thấp**
 mà KHÔNG cần direct-IPC vtable (Phase 27-3, vốn là G2).
 
 ---
@@ -150,7 +150,7 @@ pub enum PeriphResponse { Ok, Level(bool), Data(Box<[u8]>), Err(ViError) }
 - **Thiết kế đầy đủ: ZST cap tokens** (`GpioCap(())`, `UartCap(())` — constructor kernel-only,
   như `BlockIoCap` của Phase 26). Gate `request_mmio` + `map_mmio` theo cap.
 - **v1 gate tạm qua ELF manifest (Phase 30 ✅ đã xong)**: Cell khai báo cap `gpio`/`uart` trong
-  `__ViCell_manifest`; `spawn_from_path` enforce. **KHÔNG phụ thuộc Phase 26** (đang chạy session khác).
+  `__Cellos_manifest`; `spawn_from_path` enforce. **KHÔNG phụ thuộc Phase 26** (đang chạy session khác).
 - Chuyển sang ZST cap khi Phase 26 land. Granularity: per-bus (v1), cân nhắc per-pin (v2).
 
 ---

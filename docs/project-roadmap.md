@@ -1,6 +1,6 @@
-# ViCell Project Roadmap
+# Cellos Project Roadmap
 
-**Project**: ViCell (Jarvis Hybrid OS)  
+**Project**: Cellos (Jarvis Hybrid OS)  
 **Current Version**: 0.2.1-dev (Mycelium Era)  
 **Current Phase**: Phase 1 - Core Stability (Phase 23 complete) · **Active Stage**: G1 (Robot & Embedded)
 **Last Updated**: 2026-06-21 (Added §First Real App = **Hypha** — native Tier-1 AI agent Cell chosen as the first real app + forcing function for the Application Platform Gaps; P0 `llm-gateway` started. Plan: .agents/260621-1433-hypha-ai-agent/. · Earlier 2026-06-21: §G Security Platform expanded with TWO deep dives: hardware-isolation — CFI/MPK-PKS/WorldGuard-Smmtt/IOMMU-IOPMP/confidential-computing + 🔴 IOMMU-passthrough DMA gap; and §G.2 permission-model + attestation — parameterized caps/delegation/revocation/operator-policy/DICE/OpenTitan. See docs/research/research-hardware-isolation.md + research-cell-security-permissions.md)
@@ -9,7 +9,7 @@
 
 ## Overview
 
-ViCell development is organized into 4 major **technical phases** (Core Stability → System Services → Apps/Runtimes → Advanced) plus hardening Phases 24–32. This document tracks progress, blockers, and next steps.
+Cellos development is organized into 4 major **technical phases** (Core Stability → System Services → Apps/Runtimes → Advanced) plus hardening Phases 24–32. This document tracks progress, blockers, and next steps.
 
 **On top of that technical numbering, work is now framed by 2 product stages by target hardware / use-case** (overlay — see next section). Technical phase IDs (Phase 24–32, M2.x–M4.x) and all `.agents/` cross-references are preserved; the `[G1]`/`[G2]` labels are a use-case overlay, NOT a renumbering.
 
@@ -17,7 +17,7 @@ ViCell development is organized into 4 major **technical phases** (Core Stabilit
 
 ## 🎯 Two Use-Case Stages (Overlay)
 
-ViCell ships in two product stages defined by target hardware. The mapping principle: **architecture maturity matches use-case** — ARM64/RV64 (with MMU) → robot SBC `[G1]`; x86_64 → server/PC `[G2]`; RV32 → MCU deeply-embedded (sub-track at end of G1).
+Cellos ships in two product stages defined by target hardware. The mapping principle: **architecture maturity matches use-case** — ARM64/RV64 (with MMU) → robot SBC `[G1]`; x86_64 → server/PC `[G2]`; RV32 → MCU deeply-embedded (sub-track at end of G1).
 
 ### 🤖 Stage G1 — Robot & Embedded
 > **"Done" means**: never-die · bounded real-time · bounded per-Cell memory · fault isolation · fast boot · peripheral I/O · small footprint.
@@ -61,7 +61,7 @@ ViCell ships in two product stages defined by target hardware. The mapping princ
 | HMI feature-gate (compositor/input, optional) | M2.2/M2.4 subset | 📋 | G1 (opt) |
 | Minimal utilities (embedded debug) | M3.2 subset | ✅ DONE 2026-06-16 — standalone /bin/{ls,cat,echo,ps,kill} in sys-tools; embedded in kernel_fs.img + disk | G1 |
 | RT latency benchmark | M4.4 subset | ✅ QEMU verified "ALL BENCHMARKS PASS" (2026-06-07) | G1 |
-| 🆕 Tier B sub-track (end G1): RV32 HAL + ViCell-Nano + CHERIoT | M4.3 + Phase 31 | ✅ QEMU boot verified (2026-06-07) | **G1** (sub-track) |
+| 🆕 Tier B sub-track (end G1): RV32 HAL + Cellos-Nano + CHERIoT | M4.3 + Phase 31 | ✅ QEMU boot verified (2026-06-07) | **G1** (sub-track) |
 | 🆕 Reference robot demo (sensor→compute→actuator + MQTT) | *new* | ✅ COMPLETE (2026-06-16) — full SHT3x I2C + GPIO actuator + MQTT pipeline; `robot-demo-e2e` integration test passes on QEMU ARM64 in 9.83s | **G1** (graduation) |
 | Direct-IPC vtable (raw perf) | Phase 27-3 | ✅ | G2 |
 | WASM Tier-2 MVP (wasmi + 4 vi.* imports + fuel) | Phase 28 | ⚠️ experimental only — DROPPED from official stack 2026-06-06; revisit G2 multi-tenant only | G1 (legacy) |
@@ -123,11 +123,11 @@ End-to-end loop: sensor read → compute → actuator write over GPIO/CAN, with 
 
 #### Tier 3: Hypervisor / Virtualization `[G1-prep + G2]`
 **Status**: 🆕 DESIGNED — spec at [specs/05-application.md §4](specs/05-application.md)
-**VMM**: Custom **minimal VMM** (~9K LOC Rust, built from scratch as Tier 1 cell). microvm profile — MMIO bus, no PCI. VirtIO blk/net/console backends forward to ViCell VFS/Net IPC. No tokio, no mmap — SAS-native. (crosvm fork rejected: ~75K LOC, tokio+mmap incompatible with SAS cell constraints.)
+**VMM**: Custom **minimal VMM** (~9K LOC Rust, built from scratch as Tier 1 cell). microvm profile — MMIO bus, no PCI. VirtIO blk/net/console backends forward to Cellos VFS/Net IPC. No tokio, no mmap — SAS-native. (crosvm fork rejected: ~75K LOC, tokio+mmap incompatible with SAS cell constraints.)
 
 Two sub-items (Silo reclassified — see Hardware Key Isolation entry above):
 - **Tier 3 kernel prep** `[G1-prep, non-breaking]`: RISC-V H-extension detect + HS-mode boot path (`hal/arch/riscv/hypervisor.rs`, ~200 LOC). `HypervisorCap` ZST token gates hypervisor syscalls (follows existing BlockIoCap/NetworkCap pattern). Transparent fallback to S-mode if H-ext absent.
-- **Tier 3b Linux VM** `[G2, Phase 31]`: minimal VMM, boot Alpine Linux, VirtIO → ViCell IPC. Enables `apt install nginx`. CPU overhead ~5-10% (H-extension hardware virt), disk I/O ~20-40% (VirtIO roundtrip) — acceptable for management plane.
+- **Tier 3b Linux VM** `[G2, Phase 31]`: minimal VMM, boot Alpine Linux, VirtIO → Cellos IPC. Enables `apt install nginx`. CPU overhead ~5-10% (H-extension hardware virt), disk I/O ~20-40% (VirtIO roundtrip) — acceptable for management plane.
 
 > See [specs/05-application.md §6](specs/05-application.md) for wrong-path list (no QEMU-as-cell, no Type-1 hyp, no crosvm fork, no Android in G2).
 
@@ -140,7 +140,7 @@ Two sub-items (Silo reclassified — see Hardware Key Isolation entry above):
 4. ⚠️ Peripheral I/O: GPIO/I2C/SPI/UART work on QEMU ✅ + ≥1 real board (pending hardware acquisition).
 5. ✅ Instant-On boot under target threshold.
 6. ⚠️ Runs on real RV64 + ARM64 SBC: QEMU full bring-up ✅, real SBC pending hardware acquisition.
-7. ✅ Sub-track: ViCell-Nano minimal profile boots on RV32 (QEMU verified).
+7. ✅ Sub-track: Cellos-Nano minimal profile boots on RV32 (QEMU verified).
 8. ✅ Reference robot demo runs end-to-end (`robot-demo-e2e` passes on QEMU ARM64, 2026-06-16).
 
 **G2 — Server/PC is "done" when:**
@@ -153,7 +153,7 @@ SMP scales across N cores · windowed desktop + mouse · hot migration with no d
 ## 🧩 Application Platform Gaps (backlog — brainstorm+plan pending)
 
 > Added 2026-06-06 after a first-app feasibility study ([researcher-260606-1041-first-app-candidates.md](../.agents/reports/researcher-260606-1041-first-app-candidates.md)).
-> **Finding:** ViCell today is a solid kernel + thin userspace; the *application-platform* layer is missing,
+> **Finding:** Cellos today is a solid kernel + thin userspace; the *application-platform* layer is missing,
 > so candidate apps come out as toys or narrow plumbing. The gaps below are what unlocks **real** apps.
 > Each is a backlog item to be brainstormed + planned individually. Status 📋 = not yet planned.
 
@@ -161,9 +161,9 @@ SMP scales across N cores · windowed desktop + mouse · hot migration with no d
 
 > Decided 2026-06-21. Plan: [.agents/260621-1433-hypha-ai-agent/](../.agents/260621-1433-hypha-ai-agent/) (plan.md · architecture.md · **os-gaps.md** · phase-00). App home: `cells/apps/hypha/`.
 
-**Hypha** (sợi nấm — one thread of the *Mycelium*) is ViCell's first **real** application: a native
+**Hypha** (sợi nấm — one thread of the *Mycelium*) is Cellos's first **real** application: a native
 Tier-1 Rust **AI agent Cell**. Unlike the demos (which each prove one primitive), Hypha is useful
-*and* showcases what is unique to ViCell:
+*and* showcases what is unique to Cellos:
 - **Capability-isolated tools** — each tool is a separate Cell; manifest declares its exact authority,
   kernel-enforced. The agent core holds no dangerous capability and delegates all side-effects.
 - **Never-die** — kill the LLM gateway mid-conversation → supervisor respawns → agent reconnects via
@@ -219,7 +219,7 @@ showcase)** → P5 persistence/memory → P6 ViUI chat → P7 G3 NPU backend.
 
 ### D. App SDK / ergonomics `[shared]`
 
-> **Decision (2026-06-14):** `ostd` IS ViCell's std — do NOT build a `std` facade (std assumes Unix process model, contradicts SAS/LBI). The three gaps below are what unlock real native apps without false familiarity. See brainstorm `.agents/brainstorms/260614-native-app-std.md` (to be written).
+> **Decision (2026-06-14):** `ostd` IS Cellos's std — do NOT build a `std` facade (std assumes Unix process model, contradicts SAS/LBI). The three gaps below are what unlock real native apps without false familiarity. See brainstorm `.agents/brainstorms/260614-native-app-std.md` (to be written).
 
 - 🆕 **Name service** `[shared]` — 📋 service endpoint ids are spawn-order constants (vfs=3, net=6…), hard-coded everywhere. Replace with a registry/lookup.
 - ✅ **High-level cell libraries** `[shared, COMPLETE 2026-06-21]` — HTTP/1.1 + no_std JSON shipped. `libs/http-core` (pure, host-testable protocol) + `ostd::http`/`ostd::json` (feature-gated). `HttpClient<T>` generic over `embedded_io::Read+Write` (TcpStream/TlsStream); serde_json optional (zero link cost if unused). 51 host tests, `cells/demos/http-smoke` reference Cell. Known: HTTPS binary bodies unreliable (net-cell frame-length gap); cert verification deferred. Hypha P0 unblocked.
@@ -227,14 +227,14 @@ showcase)** → P5 persistence/memory → P6 ViUI chat → P7 G3 NPU backend.
 - 🆕 **Async runtime exposed to apps** `[shared]` — 📋 no app-facing async executor for concurrent I/O.
 - ✅ **`embedded-io` traits for ostd** `[shared, COMPLETE 2026-06-15]` — `embedded_io::Read` impl'd for `ostd::fs::File` + `Stdin`; `embedded_io::Write` impl'd for `Stdout` + `File` (via `VfsRequest::Append` IPC, chunked at 400B). Opens the no_std embedded-crate ecosystem. **Gate for high-level cell libraries: cleared.**
 - ✅ **`HashMap` in ostd prelude** `[shared, COMPLETE 2026-06-15]` — `hashbrown` already in `libs/ostd/Cargo.toml`; `ostd::collections::HashMap`/`HashSet` exported; re-exported in `ostd::prelude`. Was already shipped — roadmap was stale.
-- 🆕 **ViCell App SDK** `[shared, G1-tail]` — 📋 Apps today write raw syscall boilerplate (declare_manifest, sys_recv dispatch loop, manual service lookup). Need a structured application framework layer on top of `ostd`: `AppContext` (unified entry, service discovery, lifecycle), typed event loop (`AppEvent::Message/Shutdown`), ergonomic IPC patterns. The threading model (Cell spawn = Actor, not `std::thread`) must be documented clearly. This is the primary unlock for "real native apps" — equivalent to what SwiftUI/Android lifecycle did for mobile. Effort: ~2 weeks. Depends on: Name service (registry/lookup) + embedded-io traits.
+- 🆕 **Cellos App SDK** `[shared, G1-tail]` — 📋 Apps today write raw syscall boilerplate (declare_manifest, sys_recv dispatch loop, manual service lookup). Need a structured application framework layer on top of `ostd`: `AppContext` (unified entry, service discovery, lifecycle), typed event loop (`AppEvent::Message/Shutdown`), ergonomic IPC patterns. The threading model (Cell spawn = Actor, not `std::thread`) must be documented clearly. This is the primary unlock for "real native apps" — equivalent to what SwiftUI/Android lifecycle did for mobile. Effort: ~2 weeks. Depends on: Name service (registry/lookup) + embedded-io traits.
 - 🆕 **Cell `--help` / help UI** `[shared, G1-tail]` — 📋 No cell currently documents itself at runtime. Standard: CLI cells parse `--help` as the first spawn arg and print usage/description to stdout then exit; GUI cells (robot-dashboard, compositor) show a Help overlay or menu. Prerequisite: `ostd::args()` helper that reads the spawn-args buffer set by `sys_set_spawn_args` — currently a raw `[u8; 64]` with no typed accessor. Service cells (vfs, net, input) are not user-facing and do not need `--help`. Effort: ~1 day (ostd helper ~30 LOC; each CLI cell adds a `match args[0] { "--help" => { ... } }` guard).
 
 ### E. Ecosystem / distribution `[G2]`
-- ✅ **Tier 1b C library integration** `[shared, COMPLETE 2026-06-13]` — link vendor C/C++ libraries (NPU SDK, mbedTLS, SQLite, legacy firmware) into Rust cells via `vicell-libc` (Newlib + POSIX shim). Shim in `libs/api/src/posix.rs`: malloc/free, strings, file I/O, time → ViSyscall, getentropy → `ViSyscall::GetRandom` (op 214), socket/connect/send/recv/close → typed Net IPC (postcard). ARM64 `svc #0` ABI added; send() postcard decode bug fixed; `_time()` op code fixed (op=3 = epoch seconds). Integration tests: `posix_shim_getentropy` + `posix_shim_net` in `tests/integration/tests/boot.rs`. No `fork` by design. Primary use case: hardware NPU SDKs (RKNN/Hailo/K230). Plan: `.agents/260613-0520-tier1b-posix-shims/`. See [specs/05-application.md §3](specs/05-application.md).
-- 🆕 **Tier 1b Zig Support** `[G1/G2]` — 📋 Support compiling freestanding Zig binaries linking to `vicell-libc` (POSIX shim) via C-Interop. Validates the SAS architecture by running a modern memory-safe language natively alongside C/C++. First target: Tetris.zig port.
+- ✅ **Tier 1b C library integration** `[shared, COMPLETE 2026-06-13]` — link vendor C/C++ libraries (NPU SDK, mbedTLS, SQLite, legacy firmware) into Rust cells via `Cellos-libc` (Newlib + POSIX shim). Shim in `libs/api/src/posix.rs`: malloc/free, strings, file I/O, time → ViSyscall, getentropy → `ViSyscall::GetRandom` (op 214), socket/connect/send/recv/close → typed Net IPC (postcard). ARM64 `svc #0` ABI added; send() postcard decode bug fixed; `_time()` op code fixed (op=3 = epoch seconds). Integration tests: `posix_shim_getentropy` + `posix_shim_net` in `tests/integration/tests/boot.rs`. No `fork` by design. Primary use case: hardware NPU SDKs (RKNN/Hailo/K230). Plan: `.agents/260613-0520-tier1b-posix-shims/`. See [specs/05-application.md §3](specs/05-application.md).
+- 🆕 **Tier 1b Zig Support** `[G1/G2]` — 📋 Support compiling freestanding Zig binaries linking to `Cellos-libc` (POSIX shim) via C-Interop. Validates the SAS architecture by running a modern memory-safe language natively alongside C/C++. First target: Tetris.zig port.
 - ✅ **C Runtime: picolibc libm cherry-pick** `[G1, COMPLETE 2026-06-17]` — 9-module split of posix.rs (alloc/strings/sysio/entropy/net/math/stdio_fmt/stdio/setjmp), 96+ C99 math symbols via libm crate, full stdio family (FILE/fopen/fclose/fread/fwrite), naked-asm setjmp/longjmp for RV64/ARM64 (wasm32 stub). Zero picolibc dependency. Enables: DOOM, codec libs (zlib/libpng), MicroPython/Lua math. c-math-smoke cell (12 scenarios) verifies all three stacks end-to-end.
-- 🆕 **C Runtime: mlibc migration** `[G2]` — 📋 Replace `posix.rs` surface with [mlibc](https://github.com/managarm/mlibc) (MIT, purpose-built for new OSes). Implement ~20 mlibc `sysdeps/` functions mapping ViCell primitives (`vm_map` → frame allocator, `open/read/write` → VFS IPC, `clock_get` → sys_get_time, `socket` → Net IPC). posix.rs code is reused as sysdeps — not a rewrite. mlibc provides: correct printf/scanf (Grisu3 float), full stdio, pthread stubs, locale. **Does NOT unlock fork-based software** — nginx/PostgreSQL/CPython full → always Tier 3 VM (fork is architecturally incompatible with SAS). Unlocks: broader single-process C apps, C-native ViCell app development. Effort: ~1–2 weeks.
+- 🆕 **C Runtime: mlibc migration** `[G2]` — 📋 Replace `posix.rs` surface with [mlibc](https://github.com/managarm/mlibc) (MIT, purpose-built for new OSes). Implement ~20 mlibc `sysdeps/` functions mapping Cellos primitives (`vm_map` → frame allocator, `open/read/write` → VFS IPC, `clock_get` → sys_get_time, `socket` → Net IPC). posix.rs code is reused as sysdeps — not a rewrite. mlibc provides: correct printf/scanf (Grisu3 float), full stdio, pthread stubs, locale. **Does NOT unlock fork-based software** — nginx/PostgreSQL/CPython full → always Tier 3 VM (fork is architecturally incompatible with SAS). Unlocks: broader single-process C apps, C-native Cellos app development. Effort: ~1–2 weeks.
 - **WASM Tier-2** — Phase 28 MVP ✅ (wasmi + 4 imports). **Tier 2 dropped from official stack** (2026-06-06). Phase 28 code retained under `feature = "wasm-experimental"` only — Phase 28-5 and WASI 2.0 migration cancelled. Revisit only if G2 becomes multi-tenant platform (Cloudflare Workers–style) after WASI 1.0 freezes (late 2026/early 2027).
 - 🆕 **Package manager / app distribution** `[G2]` — 📋 no install/update mechanism beyond baking into the disk image.
 
@@ -249,7 +249,7 @@ showcase)** → P5 persistence/memory → P6 ViUI chat → P7 G3 NPU backend.
 Primary graduation target: **Radxa ROCK 5B+ 16GB (~$149)** — Rockchip RK3588.
 - NPU: 6 TOPS INT8, RKNN SDK v2.3.2 (mature, C API `rknn_init`/`rknn_run`/`rknn_query` → Tier 1b FFI)
 - Tier 3b: Alpine Linux VM via KVM EL2 (confirmed, 4 vCPU limit) — ARM64 EL2 works NOW; RISC-V H-ext does NOT exist yet
-- ViCell = first custom OS with deterministic NPU inference on RK3588 (Zephyr = UART-only; Redox = no port)
+- Cellos = first custom OS with deterministic NPU inference on RK3588 (Zephyr = UART-only; Redox = no port)
 
 Parallel track: Milk-V Pioneer (SG2042, ~$600) for RISC-V P99 latency story — no NPU needed there.
 
@@ -267,7 +267,7 @@ MANAGEMENT PLANE (ecosystem, Tier 3b):
 
 **Value vs Linux + nginx:**
 
-| | Linux | ViCell G2 |
+| | Linux | Cellos G2 |
 |---|---|---|
 | Inference P99 latency | Best-effort | RT-bounded per cell |
 | NPU cell crash | System hung / cold restart | Supervisor respawn (never-die) |
@@ -275,7 +275,7 @@ MANAGEMENT PLANE (ecosystem, Tier 3b):
 | Security (model weights, keys) | Process isolation | Stage-2 Security Silo |
 
 **G2 graduation criteria (updated):**
-- ARM64 bring-up on RK3588: U-Boot → ViCell EL1 → Cell ecosystem running
+- ARM64 bring-up on RK3588: U-Boot → Cellos EL1 → Cell ecosystem running
 - RKNN inference Cell: HTTP request → NPU → response, P99 latency bounded
 - Tier 3b Alpine VM: KVM, boots, runs real workload (Prometheus/SSH)
 - Never-die: NPU cell crash → supervisor auto-restart, inference continues
@@ -325,7 +325,7 @@ Layer 3 — Silo / VM (Stage-2 hw)    → Key/VM isolation from kernel    [DONE,
 - 📋 **Forward-edge CFI (BTI / CET-IBT)** `[G2, prerequisite for MPK]` — Spatial protection doesn't stop a corrupted indirect branch. PAC covers backward edge only; pair with **BTI** (ARM `+bti,+pac-ret`) / **CET IBT+Shadow Stack** (x86 `CONFIG_X86_KERNEL_IBT`) / **Zicfilp+Zicfiss** (RISC-V, ratified 2024, await silicon). ⚠️ **MPK is NOT a security boundary without CFI**: `WRPKRU` is unprivileged; a JOP gadget defeats all keys (ERIM / PKU-Pitfalls). Enable CFI *before* any MPK domain.
 - 📋 **ARM64 MTE (Memory Tagging Extension)** `[G2]` — Pointer tags detect use-after-free. Requires RK3588/ARMv8.5-A. HAL trait `ViMte::tag_region(vaddr, color)` + kernel integration. No virtualization — Tier 1. ⚠️ **Hardening only, not a boundary** — probabilistic (1/16) and defeated by speculative gadgets (TikTag 2024). Prior art: SPARC ADI (2015).
 - 📋 **x86 MPK/PKU + PKS** `[G2]` — Coarse **tier** domains (3 keys: kernel-trusted / service / app), NOT per-Cell (16-key hard limit → use tiers or libmpk multiplexing). `WRPKRU` ~20 cycle, no TLB flush. **PKS** (Intel Ice Lake+) protects kernel metadata (Cell Registry, Frame Allocator). AMD has no PKS → feature-gate. Requires CFI (above).
-- 📋 **RISC-V PMP / Smepmp** `[G1-ext / G2]` — Under `satp=Bare` (ViCell SAS), PMP writes need **no** `sfence.vma` → SAS-safe; cost is O(N) CSR writes/switch. Smepmp (ratified) adds M-mode self-protection (MML/MMWP). Per-Cell PMP for C-tier (Tock/Hubris dual-tier model: Rust Cells = no PMP, C-tier = PMP-gated).
+- 📋 **RISC-V PMP / Smepmp** `[G1-ext / G2]` — Under `satp=Bare` (Cellos SAS), PMP writes need **no** `sfence.vma` → SAS-safe; cost is O(N) CSR writes/switch. Smepmp (ratified) adds M-mode self-protection (MML/MMWP). Per-Cell PMP for C-tier (Tock/Hubris dual-tier model: Rust Cells = no PMP, C-tier = PMP-gated).
 - 📋 **RISC-V WorldGuard / Smmtt** `[G2 future, watch]` — Beyond PMP, both isolate domains in one address space **without TLB flush**. **WorldGuard** (SiFive→RISC-V Int'l, QEMU 4/2025): 1 WID CSR write/switch, ≤32 worlds, propagates to bus fabric (covers DMA too). **Smmtt/Smsdid** (draft): per-SDID physical-page access control, SDID switch + MTT-fence (lighter than SATP). Design Cell scheduling + grant API to be SDID/WID-aware now. Available when SiFive P/E-series silicon ships.
 - 📋 **Confidential computing for Tier 3** `[G2/G3]` — TDX/SEV-SNP (x86), **ARM CCA/RME/GPT** (ARMv9.3, Fujitsu Monaka ~FY2027) protect against a *compromised kernel/hypervisor* — a threat LBI does NOT cover. Make the Tier 3 `VmHandle` ABI CC-neutral now so attested multi-tenant slots in without protocol redesign (extends the Silo "safe even if kernel compromised" principle).
 - 📋 **Cell binary signing** `[G2]` — Ed25519/P-256 signature per Cell ELF verified by loader before spawn. `kernel/src/loader.rs` is the gate. Signing key management via Key Management Service (KMS) Cell using Silo API.
@@ -343,8 +343,8 @@ Layer 3 — Silo / VM (Stage-2 hw)    → Key/VM isolation from kernel    [DONE,
   - 📋 BLOCK_IO `lba_range` — partly present (`block_regions` partition bitmask + `check_block_access`); extend to arbitrary LBA ranges if needed.
   - 📋 NETWORK `proto_mask + host/port allowlist` — enforced in the net **service** cell (not kernel — net is a service), so it ships with net-cell work, not here.
   - ⚠️ **GPIO per-pin is NOT kernel-enforceable** — cells own the GPIO MMIO directly (app-owns-MMIO, no broker), so the kernel cannot gate individual pins without a GPIO broker cell (deliberately rejected). Device-class is the enforceable granularity.
-  - 📋 General `__ViCell_cap_args` ELF section — only needed for params the kernel can't derive from existing flags; deferred until a concrete case appears.
-- ✅ **Spawn-time cap intersection (delegation) (2026-06-21)** `[G1]` — `spawn_from_path(path, Spawner)` grants `manifest ∩ spawner_caps`; a Cell cannot hand a child a cap it lacks (Fuchsia/Genode monotonic downgrade; kills confused-deputy). New `CapSet`/`Spawner` in `kernel/src/task/cap.rs` (intersect unit-tested). **init = root authority `CapSet::ALL`** via direct main.rs TCB write (NOT manifest — init spawns via `spawn_from_mem`, manifest never read); HotSwap passes the replaced cell's caps as ceiling (not the Root exemption). Red-teamed + validated (plan `.agents/260621-0830-cell-perms-p2-p5/`). riscv64 boots to `ViCell >`, "init granted root authority" logged, vfs/net/shell receive full caps, no faults/denials. (Phases P5 — Ed25519 + operator policy — deferred pending the Phase 02 crypto spike.)
+  - 📋 General `__Cellos_cap_args` ELF section — only needed for params the kernel can't derive from existing flags; deferred until a concrete case appears.
+- ✅ **Spawn-time cap intersection (delegation) (2026-06-21)** `[G1]` — `spawn_from_path(path, Spawner)` grants `manifest ∩ spawner_caps`; a Cell cannot hand a child a cap it lacks (Fuchsia/Genode monotonic downgrade; kills confused-deputy). New `CapSet`/`Spawner` in `kernel/src/task/cap.rs` (intersect unit-tested). **init = root authority `CapSet::ALL`** via direct main.rs TCB write (NOT manifest — init spawns via `spawn_from_mem`, manifest never read); HotSwap passes the replaced cell's caps as ceiling (not the Root exemption). Red-teamed + validated (plan `.agents/260621-0830-cell-perms-p2-p5/`). riscv64 boots to `Cellos >`, "init granted root authority" logged, vfs/net/shell receive full caps, no faults/denials. (Phases P5 — Ed25519 + operator policy — deferred pending the Phase 02 crypto spike.)
 - 📋 **Runtime revocation** `[G1/G2]` — `CapHandle` kernel object; `sys_cap_revoke(handle)` clears `task.cap`; next syscall → `ViError::CapRevoked`; Cell gets `AppEvent::CapRevoked`. Simpler than seL4 CDT (no cap-to-cap derivation yet).
 - 🟡 **Operator-policy consent (G1)** `[G1]` — Operator signs a policy blob (Ed25519) at fleet provision; kernel verifies vs fleet root key + spawns with `manifest ∩ spawner ∩ policy`. SROS2 semantics at the kernel level; no dialog.
   - ✅ **Crypto (P5a, 2026-06-21)** — in-kernel `ed25519::verify` (`ed25519-compact`, no_std, PIC-clean both arches); RFC 8032 + tamper self-test at boot.
@@ -363,10 +363,10 @@ Layer 3 — Silo / VM (Stage-2 hw)    → Key/VM isolation from kernel    [DONE,
 
 > Added 2026-06-21. Chỉ triển khai khi có khách hàng doanh nghiệp/chính phủ cam kết với contract. Đây là compliance bridge, không phải product feature. Cả hai track đều gated trên `virtio-gpu` (G2) và G2 graduation.
 
-**Nguyên lý cốt lõi:** App nguy hiểm/không tin tưởng chạy trong VM Cell. Nếu app crash hoặc bị exploit → chỉ VM Cell đó chết, ViCell kernel và các Cell khác hoàn toàn không bị ảnh hưởng. Hardware EPT/Stage-2 MMU bảo vệ — đây là hardware isolation thực sự, không phải LBI.
+**Nguyên lý cốt lõi:** App nguy hiểm/không tin tưởng chạy trong VM Cell. Nếu app crash hoặc bị exploit → chỉ VM Cell đó chết, Cellos kernel và các Cell khác hoàn toàn không bị ảnh hưởng. Hardware EPT/Stage-2 MMU bảo vệ — đây là hardware isolation thực sự, không phải LBI.
 
 ```
-[ViCell kernel]
+[Cellos kernel]
   └── [VM Cell — hardware EPT boundary]
         └── [Linux guest + Wine/Proton]   (Track H1)
               └── [Windows app]
@@ -421,7 +421,7 @@ Layer 3 — Silo / VM (Stage-2 hw)    → Key/VM isolation from kernel    [DONE,
 
 #### Extended Hardware Testing (Post-Primary Boards)
 
-After validation on the primary boards, ViCell will expand testing to the following hardware to ensure maximum portability and community adoption:
+After validation on the primary boards, Cellos will expand testing to the following hardware to ensure maximum portability and community adoption:
 
 | Stage | CPU arch | Target Board | Purpose |
 |-------|----------|--------------|---------|
@@ -456,7 +456,7 @@ CAN → industrial robot bus (ROS2 CAN bridge)  [low priority, defer]
 
 > ⚠️ RISC-V IOMMU (ratified 2023) is **non-optional** before NIC: in SAS, an unguarded NIC DMA can write to kernel memory. Implement before step 4.
 
-**G2 PCIe strategy:** Port Redox OS PCIe ECAM enumeration logic (~40-60% reuse for BAR parsing / capability walk); rewrite MMIO access layer to use ViCell's `MmioRegion` safe-MMIO + Resource Registry. Do NOT port Redox's `mmap`-based driver model.
+**G2 PCIe strategy:** Port Redox OS PCIe ECAM enumeration logic (~40-60% reuse for BAR parsing / capability walk); rewrite MMIO access layer to use Cellos's `MmioRegion` safe-MMIO + Resource Registry. Do NOT port Redox's `mmap`-based driver model.
 
 #### G3 NPU path
 
@@ -487,7 +487,7 @@ G3 Level C  →  sys_grant_tensor + TensorBuffer       — needs sys_grant_pages
 
 ### J. G2 Application Platform Layers `[G2 — post-G1 foundation]`
 
-> **Context (2026-06-14):** Setelah G1 graduation, ViCell sẽ có kernel rất solid nhưng application platform gần như trống. Chỉ kernel team mới viết được app hiệu quả. G2 không chỉ là thêm tính năng kernel — mà là xây dựng toàn bộ platform layer, giống hành trình Linux từ 1991 (kernel) đến 2000 (LAMP stack).
+> **Context (2026-06-14):** Setelah G1 graduation, Cellos sẽ có kernel rất solid nhưng application platform gần như trống. Chỉ kernel team mới viết được app hiệu quả. G2 không chỉ là thêm tính năng kernel — mà là xây dựng toàn bộ platform layer, giống hành trình Linux từ 1991 (kernel) đến 2000 (LAMP stack).
 >
 > **Rule:** Không có L1 → không ai viết được app. Không có L2 → chỉ toy apps. Không có L3 → không distribute/maintain được. Không có L4 → không operate production được. **Không skip layer.**
 
@@ -495,11 +495,11 @@ G3 Level C  →  sys_grant_tensor + TensorBuffer       — needs sys_grant_pages
 |-------|---------|-------------------|-----------|--------|
 | **L0 — Mental model** | Docs dạy Cell/Actor thinking; migration patterns từ Linux (`thread→cell`, `blocking→async/IPC`) | Unix philosophy, man pages | — | 📋 |
 | **L1 — App Framework** | `CellRuntime` (builder), `app_entry!`/`service_entry!` macros, typed clients (VfsClient/NetClient/InputClient), lifecycle hooks | glibc + POSIX | Name service (205/206 done), embedded-io traits (✅ both done) | ✅ COMPLETE (2026-06-16) |
-| **L2 — Middleware** | HTTP server native ViCell (zero-copy từ đầu), auth/JWT, pub-sub, DB access (SQLite via Tier 1b) | Express, Django, Spring | L1 |📋 |
-| **L3 — Tooling** | Package manager, cell image format, cell-aware debugger, `cargo-vicell` | apt/cargo, gdb, strace | L1 | 📋 |
+| **L2 — Middleware** | HTTP server native Cellos (zero-copy từ đầu), auth/JWT, pub-sub, DB access (SQLite via Tier 1b) | Express, Django, Spring | L1 |📋 |
+| **L3 — Tooling** | Package manager, cell image format, cell-aware debugger, `cargo-Cellos` | apt/cargo, gdb, strace | L1 | 📋 |
 | **L4 — Observability** | Cell metrics, distributed tracing cross-cells, kernel audit ring integration, Prometheus-compatible export | Prometheus, OpenTelemetry | L1 + L3 | 📋 |
 
-**Lợi thế thiết kế ViCell có thể tận dụng (không có ở Linux):**
+**Lợi thế thiết kế Cellos có thể tận dụng (không có ở Linux):**
 - HTTP server zero-copy ngay từ đầu — Grant API đã có; không phải patch sau như nginx
 - Service discovery type-safe qua cap system — không cần consul/etcd bolt-on
 - Observability baked-in — audit ring buffer đã có trong kernel; không retrofit như eBPF
@@ -525,18 +525,18 @@ G3 Level C  →  sys_grant_tensor + TensorBuffer       — needs sys_grant_pages
 | **Tetris-C (scaffold, G1 QEMU)** | 📋 SCAFFOLD DONE 2026-06-19 — Banaxi-Tech/Tetris-OS port via platform hooks (same as DOOM pattern); binary `/bin/tetris-c` (0x44000000 VA); awaits git clone of Tetris-OS source to build; gameplay blocked on source dependency |
 | **nginx / PostgreSQL / CPython full** | Tier 3: Linux VM only (fork/dlopen incompatible with SAS — no libc can fix this) |
 | **Single-process C apps (SQLite, curl, codecs)** | Tier 1b + picolibc libm (G1) or mlibc sysdeps (G2) |
-| **Single-process Zig apps (Games, utils)** | Tier 1b + vicell-libc (C-Interop) |
+| **Single-process Zig apps (Games, utils)** | Tier 1b + Cellos-libc (C-Interop) |
 
 ---
 
 ### K. Game Porting & OS Validation Strategy `[Testing]`
 
-Porting simple games using the **C → Lua → Rust** progression is the official strategy to stress-test different layers of the ViCell architecture: `vicell-libc` (Tier 1b), Scripting Runtime (Lua), and the Native App SDK (Rust).
+Porting simple games using the **C → Lua → Rust** progression is the official strategy to stress-test different layers of the Cellos architecture: `Cellos-libc` (Tier 1b), Scripting Runtime (Lua), and the Native App SDK (Rust).
 
 **Roadmap for Game Porting:**
 
 1. **Tetris / Snake (ASCII Terminal Game)**
-   - **Phase 1 (C)**: Port an ASCII version of Tetris or Snake. Tests `vicell-libc` POSIX shim, `stdio`, `malloc`, ANSI escape sequences, **and crucially: non-blocking input (`kbhit`) and timers (`usleep`)**.
+   - **Phase 1 (C)**: Port an ASCII version of Tetris or Snake. Tests `Cellos-libc` POSIX shim, `stdio`, `malloc`, ANSI escape sequences, **and crucially: non-blocking input (`kbhit`) and timers (`usleep`)**.
    - **Phase 2 (Lua)**: Rewrite in Lua. Tests VFS file loading, interpreter performance, and event loop polling on SAS.
    - **Phase 3 (Rust)**: Rewrite in Rust Native. Tests `ostd` and App SDK logic.
 2. **Flappy Bird (Framebuffer 2D)**
@@ -817,7 +817,7 @@ See `.agents/260605-0958-phase24-perf-kaslr/` for detailed phase reports.
 - `spawn_pinned(0)` succeeds; `spawn_pinned(n>0)` returns `NotSupported` (SMP future-compatible)
 
 **Verification:**
-- `cargo check -p vicell-kernel` — PASSED (1 pre-existing warning unrelated)
+- `cargo check -p Cellos-kernel` — PASSED (1 pre-existing warning unrelated)
 - All unit tests compile and link correctly
 - No ABI breakage; Law 1 gate confirmed (`TaskPriority` is `#[repr(u8)]`)
 
@@ -867,7 +867,7 @@ See `.agents/260605-0958-phase24-perf-kaslr/` for detailed phase reports.
 **Research findings (2026-06-05):**
 - Hermit vtable = function-pointer table, not true ring-bypass; real speedup is SAS = no privilege switch → direct `jalr` (~3 cycles vs ~100 ecall)
 - postcard crate recommended for typed enums into existing `[u8; 512]` buffer
-- Syscall filter: u64 bitset in TCB + `__ViCell_syscalls` ELF section (xmas-elf already supports arbitrary sections); check BEFORE handle_syscall to avoid SCHEDULER double-lock
+- Syscall filter: u64 bitset in TCB + `__Cellos_syscalls` ELF section (xmas-elf already supports arbitrary sections); check BEFORE handle_syscall to avoid SCHEDULER double-lock
 - Existing VFS 3-byte header needs version-gate on postcard migration
 - Raw opcodes 500-503 (BlkRead/Write) bypass ViSyscall::from() — need separate raw-id allowlist path
 
@@ -879,9 +879,9 @@ See `.agents/260605-0958-phase24-perf-kaslr/` for detailed phase reports.
 **Phase 27-2 — Syscall Allowlist (⚠️ Law 1 for allowlist_bit()):**
 - [x] Add `allowlist_bit() -> Option<u8>` to `ViSyscall` in libs/api
 - [x] Add `syscall_allowlist: u64` to Task TCB
-- [x] Read `__ViCell_syscalls` ELF section in `spawn_from_path()`
-- [x] Add check at top of `ViCell_syscall_dispatch` (lock-drop pattern to avoid double-lock)
-- [x] Add `KEEP(*(__ViCell_syscalls))` to linker scripts
+- [x] Read `__Cellos_syscalls` ELF section in `spawn_from_path()`
+- [x] Add check at top of `Cellos_syscall_dispatch` (lock-drop pattern to avoid double-lock)
+- [x] Add `KEEP(*(__Cellos_syscalls))` to linker scripts
 
 **Phase 27-3 — Direct IPC vtable (⚠️ Law 1 for TrustedHandle):**
 - [x] Create `TrustedHandle<T>` + `VfsCell`/`NetCell` markers in `libs/api/src/fast_ipc.rs`
@@ -950,8 +950,8 @@ Note: QEMU TCG VirtIO throughput ~30 MB/s. Sub-100 ms on QEMU requires memory-ba
 
 **Completed (2026-06-05):**
 - [x] Define `CellManifest` type: 8-byte `#[repr(C)]` struct with magic, version, capability flags
-- [x] Create `declare_manifest!` macro: embeds manifest into `__ViCell_manifest` ELF section
-- [x] Add `KEEP(*(__ViCell_manifest))` to all 7 cell linker scripts (prevents GC under release LTO)
+- [x] Create `declare_manifest!` macro: embeds manifest into `__Cellos_manifest` ELF section
+- [x] Add `KEEP(*(__Cellos_manifest))` to all 7 cell linker scripts (prevents GC under release LTO)
 - [x] Embed manifests in vfs (block_io), net (network), shell/init (spawn) — 4 cells updated
 - [x] Enforce at `spawn_from_path`: privilege gate rejects user cells (path not under `/bin/`) declaring privileged caps
 - [x] 6 unit tests for `CellManifest` parsing + validation; boot-time test pass
@@ -959,13 +959,13 @@ Note: QEMU TCG VirtIO throughput ~30 MB/s. Sub-100 ms on QEMU requires memory-ba
 
 **Security**: Manifest is `#[repr(C)]` and ABI-stable per Law 1. Gate runs BEFORE `spawn_from_mem` — no task created for rejected cell.
 
-### Phase 31 — RV32 HAL + ViCell-Nano Minimal Profile (P3) `[G1 sub-track]`
+### Phase 31 — RV32 HAL + Cellos-Nano Minimal Profile (P3) `[G1 sub-track]`
 **Target**: 2026-Q4 | **Effort**: ~2 weeks
 **Status**: ✅ COMPLETE (2026-06-07)
 **Learn from**: RV64 HAL design (phase 05), OpenSBI SBI specification, RISC-V S-mode architecture
 **Spec**: [.agents/260607-1500-rv32-hal-nano-profile/plan.md](.agents/260607-1500-rv32-hal-nano-profile/plan.md)
 
-> QEMU RV32 virt boots to `ViCell>` shell with bare-physical memory (SATP=0). Nano profile = no MMU, no drivers, foundation for embedded/MCU targets (sub-track at end of G1).
+> QEMU RV32 virt boots to `Cellos>` shell with bare-physical memory (SATP=0). Nano profile = no MMU, no drivers, foundation for embedded/MCU targets (sub-track at end of G1).
 
 **Completed (2026-06-07)**:
 - [x] RV32 context switch (switch.S) with sepc/sstatus/gp/tp/sscratch
@@ -979,7 +979,7 @@ Note: QEMU TCG VirtIO throughput ~30 MB/s. Sub-100 ms on QEMU requires memory-ba
 **Next iteration (Phase 31b, deferred to G1 tail):**
 - [ ] Sonata dev board (CHERIoT-IBEX) — hardware not yet available
 - [ ] CHERIoT-Platform/rust fork integration (toolchain fork risk, low priority)
-- [ ] ViCell-Nano profile variants (no WASM, minimal drivers)
+- [ ] Cellos-Nano profile variants (no WASM, minimal drivers)
 
 ### Phase 32 — SMP Multi-Core Scheduler (P3) `[G2]`
 **Target**: 2027-Q1 | **Effort**: ~4 weeks | **Status**: ✅ COMPLETE (2026-06-09)
@@ -1192,7 +1192,7 @@ Note: QEMU TCG VirtIO throughput ~30 MB/s. Sub-100 ms on QEMU requires memory-ba
 **Files Modified**:
 - `cells/runtimes/micropython/src/vfs_bridge.rs` — NEW: C-callable Rust bridge
 - `cells/runtimes/micropython/src/main.rs` — vfs_read_to_buf rewired to vfs_bridge
-- `cells/runtimes/micropython/src/c/ViCell/modvfs.c` — complete rewrite using typed IPC
+- `cells/runtimes/micropython/src/c/Cellos/modvfs.c` — complete rewrite using typed IPC
 
 ---
 
@@ -1254,7 +1254,7 @@ Note: QEMU TCG VirtIO throughput ~30 MB/s. Sub-100 ms on QEMU requires memory-ba
 - `perf.yml` RT gate: `p999`/`jitter`/`miss` regression detection in `compare-bench-results.sh`
 - Integration test `bench_all_pass` in `tests/integration/tests/boot.rs`
 - **QEMU boot verified**: `[bench] ALL BENCHMARKS PASS` (ctx_switch p99=39µs, syscall_yield p99=19.8µs, memory PASS)
-- Bug fixed: all 7 cell linker scripts `.vicell_manifest` → `__ViCell_manifest` (capability system was silently broken)
+- Bug fixed: all 7 cell linker scripts `.Cellos_manifest` → `__Cellos_manifest` (capability system was silently broken)
 - RT scenarios SKIP in QEMU — SAS VA collision prevents same-binary multi-instance; PIE = future work
 
 > ⚠️ **QEMU TCG caveat**: RT numbers are relative/regression-only — QEMU TCG timing is

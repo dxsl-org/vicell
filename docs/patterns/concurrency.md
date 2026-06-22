@@ -1,5 +1,5 @@
 # Concurrency Patterns
-> Part of [ViCell Patterns](../patterns.md)
+> Part of [Cellos Patterns](../patterns.md)
 
 ## Spinlock with Interrupt Safety
 
