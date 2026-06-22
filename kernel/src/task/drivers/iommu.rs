@@ -1,50 +1,66 @@
-//! IOMMU common API — bare/passthrough mode dispatcher.
+//! IOMMU common API — three-phase DMA isolation.
 //!
-//! Dispatches to the arch-specific backend (`iommu_riscv` or `iommu_x86`).
-//! In bare/passthrough mode IOVA == PA, so `map_dma` is a no-op identity
-//! function. All call sites are future-proof: switching to Sv39x4 page tables
-//! only requires filling in the arch backends, not changing callers.
+//! Phase 1 `init()`             — probe hardware, allocate page tables, stay passthrough.
+//! Phase 2 `map_dma()`          — drivers register each DMA buffer's physical range.
+//! Phase 3 `activate_isolation()` — switch from passthrough to enforced page-table mode.
 //!
-//! BARE MODE IS NOT SAFE ON REAL HARDWARE — full IOMMU page tables are
-//! required before multi-tenant G2.
+//! Call order in `main.rs`:
+//!   `iommu::init()` → driver DMA allocs (call `map_dma()`) → `iommu::activate_isolation()`
 
 use core::sync::atomic::{AtomicBool, Ordering};
 
-static IOMMU_ACTIVE: AtomicBool = AtomicBool::new(false);
+static IOMMU_ISOLATED: AtomicBool = AtomicBool::new(false);
 
-/// Initialise the arch-specific IOMMU backend.
+/// Phase 1: probe IOMMU hardware and allocate isolation data structures.
 ///
-/// Called from `main.rs` after `pcie_ecam::init()` and before NIC/NVMe drivers.
-/// Falls through silently when the IOMMU hardware is absent.
+/// Must be called after `pcie_ecam::init()` and before any DMA allocation.
+/// Does NOT enable enforcement yet — hardware stays in passthrough mode.
 pub fn init() {
     #[cfg(target_arch = "riscv64")]
-    super::iommu_riscv::init_riscv_iommu();
+    super::iommu_riscv::init_hw();
     #[cfg(target_arch = "x86_64")]
-    super::iommu_x86::init_vtd();
+    super::iommu_x86::init_hw();
 }
 
-/// Translate a DMA physical address to an IOVA.
+/// Phase 2: register a DMA physical range in the IOMMU page table.
 ///
-/// In bare/passthrough mode: IOVA == phys (identity). In future page-table
-/// mode this will allocate an IOMMU mapping and return the assigned IOVA.
+/// Must be called for every DMA buffer allocated between `init()` and
+/// `activate_isolation()`. Returns the IOVA (identity == phys for SAS).
 #[inline]
-pub fn map_dma(phys: u64, _size: usize) -> u64 {
+pub fn map_dma(phys: u64, size: usize) -> u64 {
+    if size == 0 { return phys; }
+    #[cfg(target_arch = "riscv64")]
+    super::iommu_riscv::map_range(phys, size);
+    #[cfg(target_arch = "x86_64")]
+    super::iommu_x86::map_range(phys, size);
     phys
 }
 
-/// Release a previously obtained IOVA.
-///
-/// No-op in bare/passthrough mode.
+/// No-op stub. Dynamic IOTLB invalidation (needed for full unmap) is G2 work.
 #[inline]
 pub fn unmap_dma(_iova: u64, _size: usize) {}
 
-/// Returns `true` after a successful `init()` call on the current arch.
-#[inline]
-pub fn is_active() -> bool {
-    IOMMU_ACTIVE.load(Ordering::Relaxed)
+/// Phase 3: switch IOMMU from passthrough to page-table enforcement.
+///
+/// On RISC-V: writes DDTP with MODE=1LVL + pre-built Sv39 DDT → faults any
+///   IOVA not in a registered DMA range.
+/// On x86_64: fills VT-d context entries with TT=TRANSLATED+SLPT, enables TE.
+///
+/// Call after all driver DMA buffers are registered via `map_dma()`.
+pub fn activate_isolation() {
+    #[cfg(target_arch = "riscv64")]
+    super::iommu_riscv::activate();
+    #[cfg(target_arch = "x86_64")]
+    super::iommu_x86::activate();
 }
 
-/// Mark the IOMMU as active. Called by arch backends on successful init.
+/// Returns `true` once `activate_isolation()` has completed successfully.
+#[inline]
+pub fn is_active() -> bool {
+    IOMMU_ISOLATED.load(Ordering::Relaxed)
+}
+
+/// Mark DMA isolation as active. Called by arch backends on successful activation.
 pub(super) fn set_active() {
-    IOMMU_ACTIVE.store(true, Ordering::Relaxed);
+    IOMMU_ISOLATED.store(true, Ordering::Relaxed);
 }

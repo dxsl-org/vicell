@@ -174,6 +174,7 @@ fn dma_alloc_pages(n: usize) -> (*mut u8, u64) {
     // SAFETY: ptr is non-null and points to `size` bytes.
     unsafe { core::ptr::write_bytes(ptr, 0, size); }
     let phys = dma_phys(ptr as usize);
+    super::iommu::map_dma(phys, size);
     (ptr, phys)
 }
 

@@ -162,6 +162,7 @@ fn dma_alloc(size: usize) -> *mut u8 {
     // SAFETY: layout is valid and non-zero.
     let ptr = unsafe { alloc_zeroed(layout) };
     assert!(!ptr.is_null(), "[e1000] OOM: failed to allocate DMA buffer");
+    super::iommu::map_dma(dma_phys(ptr as usize), size);
     ptr
 }
 

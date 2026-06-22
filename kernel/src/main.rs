@@ -380,10 +380,12 @@ pub extern "C" fn kmain(hartid: usize, dtb: usize) -> ! {
     #[cfg(any(target_arch = "riscv64", target_arch = "x86_64"))]
     {
         task::drivers::pcie_ecam::init();
-        // RISC-V virt only: IOMMU passthrough + NVMe + e1000 (PCIe endpoints).
+        // Phase 1: probe IOMMU hardware on both PCIe arches, allocate page tables.
+        // Stays passthrough until activate_isolation() — drivers register DMA ranges first.
+        task::drivers::iommu::init();
+        // RISC-V virt: NVMe + e1000 PCIe endpoints (allocate DMA → map_dma auto-called).
         #[cfg(target_arch = "riscv64")]
         {
-            task::drivers::iommu::init();
             task::drivers::blk_nvme::init_driver();
             task::drivers::nic_e1000::init_driver();
         }
@@ -391,6 +393,9 @@ pub extern "C" fn kmain(hartid: usize, dtb: usize) -> ! {
         // On x86_64 q35, VirtIO BLK/NET are PCIe devices; on RISC-V virt,
         // VirtIO is MMIO — virtio_pci::init() is a no-op there.
         task::drivers::virtio_pci::init();
+        // Phase 3: switch IOMMU from passthrough to enforcement.
+        // All PCIe DMA buffers registered via map_dma(); IOVA not in those ranges → fault.
+        task::drivers::iommu::activate_isolation();
     }
 
     // Attempt warm boot from snapshot before any cell initialization.
