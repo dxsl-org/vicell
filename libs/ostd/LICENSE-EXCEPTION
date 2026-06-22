@@ -1,0 +1,90 @@
+ViCell Cell Linking Exception
+Version 1.0, June 2026
+
+This Exception is an additional permission under the Mozilla Public License
+2.0 (MPL-2.0) as applied to the ViCell Standard Runtime ("ostd") located
+at libs/ostd/ in the ViCell repository.
+
+DEFINITIONS
+-----------
+
+"ViCell Standard Runtime" refers to the software in libs/ostd/.
+
+"Cell" means a self-contained software unit compiled independently from
+the ViCell Standard Runtime that interacts with ViCell ONLY through the
+public interfaces declared in libs/api/ (ABI traits) and the public API
+of the ViCell Standard Runtime, and does not incorporate source code
+copied from MPL-2.0 covered files.
+
+"Single Address Space (SAS)" means the runtime model in which one or more
+Cells and the ViCell kernel share a single virtual address space, with
+isolation provided by the Rust type system (Language-Based Isolation, LBI)
+rather than hardware memory management unit (MMU) boundaries.
+
+GRANT OF EXCEPTION
+------------------
+
+Subject to the terms and conditions of the MPL-2.0, you are granted a
+special permission to convey a Cell that:
+
+  (a) links statically or dynamically against the ViCell Standard Runtime,
+  (b) is loaded into the same virtual address space as the ViCell kernel,
+  (c) communicates with the ViCell kernel and Standard Runtime ONLY through
+      the public interfaces in libs/api/ and the public API of ostd/,
+
+under terms of your choosing, without such linking, loading, or address-space
+co-residence causing the Cell to be considered "Covered Software" or part of
+a "Larger Work" under the MPL-2.0, PROVIDED THAT the Cell does not
+incorporate any source code copied from MPL-2.0 covered files.
+
+CLARIFICATION ON SAS AND DERIVED WORKS
+---------------------------------------
+
+The fact that a Cell and the ViCell kernel share a virtual address space,
+or that the ViCell loader performs relocation placing Cell code in memory
+adjacent to kernel code, does NOT, by itself, make a Cell a derivative work
+of the ViCell Standard Runtime or the ViCell kernel under any applicable
+copyright law.
+
+The isolation of Cells via the Rust type system (Language-Based Isolation)
+is treated by all parties as legally equivalent, for purposes of determining
+derivative work status, to process isolation in conventional operating
+systems (as recognized in the Linux kernel syscall exception and the FSF's
+guidance on GPL and operating system interfaces).
+
+CONDITIONS AND LIMITS
+---------------------
+
+This Exception does NOT apply if:
+
+  1. The Cell incorporates source code copied or adapted from MPL-2.0
+     covered files (e.g., copy-pasting ostd internals into a Cell). In
+     that case, the copied portions remain MPL-2.0 covered.
+
+  2. The Cell is a modification of the ViCell Standard Runtime itself.
+     Such modifications remain MPL-2.0 covered.
+
+  3. The Cell communicates with the kernel through mechanisms other than
+     the declared public ABI (e.g., direct memory manipulation of kernel
+     data structures, unsafe pointer casts to kernel types not in
+     libs/api/).
+
+INTENT
+------
+
+The intent of this Exception is to ensure that:
+
+  1. The ViCell Standard Runtime (ostd) remains open — modifications to
+     ostd must be shared back under MPL-2.0.
+
+  2. Applications built on top of ViCell using the public ABI can be
+     distributed under any license the author chooses, including
+     proprietary licenses, without legal ambiguity arising from the SAS
+     architecture.
+
+  3. ViCell can build a diverse ecosystem of applications including
+     commercial software, matching the practical freedoms available to
+     application developers on conventional operating systems.
+
+This is the copyright holder's grant of permission under applicable
+copyright law.

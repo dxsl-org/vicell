@@ -2,6 +2,8 @@
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
+// Cell Linking Exception: see LICENSE-EXCEPTION for permission to ship
+// proprietary Cells that link against this crate.
 
 #![no_std]
 #![feature(alloc_error_handler)]
