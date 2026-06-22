@@ -8,14 +8,30 @@ This guide gets you from zero to your first merged PR.
 
 ## Table of Contents
 
-1. [Setup](#setup)
-2. [Code Standards](#code-standards)
-3. [Your First PR — Step by Step](#your-first-pr--step-by-step)
-4. [Commit Messages](#commit-messages)
-5. [Submitting a PR](#submitting-a-pr)
-6. [Review Checklist](#review-checklist)
-7. [Where to Start](#where-to-start)
-8. [Getting Help](#getting-help)
+1. [DCO Sign-off](#dco-sign-off)
+2. [Setup](#setup)
+3. [Code Standards](#code-standards)
+4. [Your First PR — Step by Step](#your-first-pr--step-by-step)
+5. [Commit Messages](#commit-messages)
+6. [Submitting a PR](#submitting-a-pr)
+7. [Review Checklist](#review-checklist)
+8. [Where to Start](#where-to-start)
+9. [Getting Help](#getting-help)
+
+---
+
+## DCO Sign-off
+
+All commits must include a `Signed-off-by:` line certifying you agree to the
+[Developer Certificate of Origin](DCO). This is a lightweight process — no CLA,
+no copyright assignment. **You keep full ownership of your contribution.**
+
+```bash
+git commit -s -m "feat(kernel): your message"
+# Automatically appends: Signed-off-by: Your Name <your@email.com>
+```
+
+A GitHub Actions check enforces this on every PR. See [DCO](DCO) for the full text.
 
 ---
 
@@ -128,7 +144,7 @@ cargo test -p types -p api --target x86_64-unknown-linux-gnu  # Linux
 
 ```bash
 git add <files>
-git commit -m "feat(shell): add my-command
+git commit -s -m "feat(shell): add my-command
 
 Brief explanation of what this does and why.
 
