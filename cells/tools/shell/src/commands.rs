@@ -4,7 +4,7 @@ use ostd::syscall;
 
 pub fn cmd_help() -> ViResult<()> {
     crate::executor::shell_println("ViCell Shell v0.2.1 — built-in commands:");
-    crate::executor::shell_println("  Files:   ls  cat  wc  head  tail  grep  find  uniq  sort  sed  mkdir  rmdir  rm");
+    crate::executor::shell_println("  Files:   ls  cat  wc  head  tail  grep  sed  awk  find  uniq  sort  mkdir  rmdir  rm");
     crate::executor::shell_println("  System:  ps  top  kill  pwd  uname  free  env  uptime  sleep  clear  exec");
     crate::executor::shell_println("  Shell:   help  echo  export  alias  unalias  jobs  source  .");
     crate::executor::shell_println("");
@@ -211,17 +211,39 @@ pub fn cmd_cat<'a>(mut args: core::str::SplitWhitespace<'a>) -> ViResult<()> {
     }
 }
 
-pub fn cmd_ps<'a>(_args: core::str::SplitWhitespace<'a>) -> ViResult<()> {
-    let mut buffer = [api::syscall::ProcessInfo::default(); 16];
+fn state_order(state: usize) -> usize {
+    match state { 1 => 0, 0 => 1, 2 => 2, 3 => 3, _ => 4 }
+}
+
+pub fn cmd_ps<'a>(mut args: core::str::SplitWhitespace<'a>) -> ViResult<()> {
+    let mut filter_tid: Option<usize> = None;
+    let mut sort_by_state = false;
+    loop {
+        match args.next() {
+            Some("-p") => { filter_tid = args.next().and_then(|s| s.parse().ok()); }
+            Some("-s") => sort_by_state = true,
+            Some(_)    => {}
+            None       => break,
+        }
+    }
+    let mut buffer = [api::syscall::ProcessInfo::default(); 64];
     match syscall::sys_get_procs(&mut buffer) {
         Ok(count) => {
-            crate::executor::shell_println("PID   STATE     NAME");
-            crate::executor::shell_println("------------------------");
-            for i in 0..count {
-                let info = &buffer[i];
+            let entries = &mut buffer[..count];
+            if sort_by_state {
+                entries.sort_unstable_by_key(|p| state_order(p.state));
+            }
+            crate::executor::shell_println("  PID  STATE      NAME");
+            crate::executor::shell_println("  ---  ---------  ----------------");
+            for info in entries.iter() {
+                if filter_tid.map(|t| t != info.id).unwrap_or(false) { continue; }
                 let name = core::str::from_utf8(&info.name).unwrap_or("???").trim_matches('\0');
-                let state_str = match info.state { 0 => "Ready", 1 => "Running", 2 => "Waiting", 3 => "Dead", _ => "???" };
-                crate::executor::shell_print(&alloc::format!("{}     {}   {}\n", info.id, state_str, name));
+                let state_str = match info.state {
+                    0 => "Ready", 1 => "Running", 2 => "Waiting", 3 => "Dead", _ => "???"
+                };
+                crate::executor::shell_print(&alloc::format!(
+                    "  {:<4} {:<10} {}\n", info.id, state_str, name
+                ));
             }
             Ok(())
         }
@@ -295,40 +317,51 @@ pub fn cmd_echo<'a>(args: core::str::SplitWhitespace<'a>) -> ViResult<()> {
 
 // ─── top ──────────────────────────────────────────────────────────────────────
 
-/// `top` — live process table, refreshed every second.
+/// `top [-a]` — live process table, refreshed every second.
 ///
-/// Shows PID/state/name only; CPU% is not available without per-task tick counters.
-/// Press any key to exit.
-pub fn cmd_top() -> ViResult<()> {
+/// Dead tasks are hidden by default; pass `-a` to show all tasks.
+/// CPU% is not available without per-task tick counters in `ProcessInfo`.
+/// Press `q` or `Q` to exit.
+pub fn cmd_top<'a>(mut args: core::str::SplitWhitespace<'a>) -> ViResult<()> {
+    let show_all = args.any(|a| a == "-a");
     loop {
         // Clear screen and home — always bypasses OutputSink (console control).
         ostd::io::print("\x1b[2J\x1b[1;1H");
-        crate::executor::shell_println("PID   STATE     NAME");
-        crate::executor::shell_println("---   --------  ----------------");
-        let mut buf = [api::syscall::ProcessInfo::default(); 16];
-        if let Ok(n) = syscall::sys_get_procs(&mut buf) {
-            for info in &buf[..n] {
-                let name = core::str::from_utf8(&info.name).unwrap_or("???").trim_matches('\0');
-                let state = match info.state { 0 => "Ready", 1 => "Running", 2 => "Waiting", 3 => "Dead", _ => "???" };
-                crate::executor::shell_print(&alloc::format!("{:<5} {:<9} {}\n", info.id, state, name));
-            }
+        let secs = syscall::sys_get_time() / 10_000_000;
+        let mut buf = [api::syscall::ProcessInfo::default(); 64];
+        let n = syscall::sys_get_procs(&mut buf).unwrap_or(0);
+        let visible = if show_all { n } else {
+            buf[..n].iter().filter(|p| p.state != 3).count()
+        };
+        ostd::io::print(&alloc::format!(
+            "uptime: {}s  tasks: {}  (q to quit)\n\n", secs, visible
+        ));
+        crate::executor::shell_println("  PID  STATE      NAME");
+        crate::executor::shell_println("  ---  ---------  ----------------");
+        for info in &buf[..n] {
+            if !show_all && info.state == 3 { continue; }
+            let name = core::str::from_utf8(&info.name).unwrap_or("???").trim_matches('\0');
+            let state = match info.state {
+                0 => "Ready", 1 => "Running", 2 => "Waiting", 3 => "Dead", _ => "???"
+            };
+            crate::executor::shell_print(&alloc::format!(
+                "  {:<4} {:<10} {}\n", info.id, state, name
+            ));
         }
-        ostd::io::print("\n(press any key to exit)");
 
-        // Poll for a keypress during the 1-second sleep; break on any byte.
+        // Poll for 1 second; exit only on 'q' or 'Q'.
         const HZ: u64 = 10_000_000;
         let deadline = syscall::sys_get_time().saturating_add(HZ);
-        let mut got_key = false;
+        let mut quit = false;
         while syscall::sys_get_time() < deadline {
             let mut c = [0u8; 1];
             if let Ok(n) = ostd::syscall::sys_read(0, &mut c) {
-                if n > 0 { got_key = true; break; }
+                if n > 0 && (c[0] == b'q' || c[0] == b'Q') { quit = true; break; }
             }
             ostd::task::yield_now();
         }
-        if got_key {
-            // Drain any remaining buffered bytes (key-repeat, escape sequences)
-            // so they don't leak into the next shell prompt.
+        if quit {
+            // Drain buffered bytes (key-repeat, escape sequences).
             let mut drain = [0u8; 1];
             while let Ok(n) = ostd::syscall::sys_read(0, &mut drain) { if n == 0 { break; } }
             break;

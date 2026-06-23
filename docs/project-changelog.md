@@ -4,6 +4,69 @@
 
 ---
 
+## [2026-06-23] Shell utilities — awk/grep/sed/ps/top built-ins complete (all 4 phases done)
+
+### Summary
+Completed all 4 shell utility phases. Built-in text processors (awk, grep, sed) and system introspection (ps, top) now fully functional in the shell, eliminating gaps in embedded workflows. All utilities live as shell built-ins (no standalone cells) to enable pipeline integration via the OutputSink mechanism.
+
+### Changes
+- **Phase 01 (awk):** `cmd_awk` added to `cells/tools/shell/src/cmd_fs.rs` — field extractor with `-F` separator, pattern matching (`/literal/`, `NR==N`, `END`), print action. Stack-allocated field array (max ~32 fields), no regex, no BEGIN block in v1.0. Supports pipeline input via `shell_stdin()`.
+- **Phase 02 (grep):** Extended `cmd_grep` in `cells/tools/shell/src/cmd_fs.rs` with `-v` (invert match), `-n` (line numbers), `-c` (count only), `-r` (recursive directory walk). Maintains literal substring matching (no regex engine).
+- **Phase 03 (sed):** Extended `cmd_sed` in `cells/tools/shell/src/cmd_fs.rs` with `/PAT/d` (delete lines), `-n` flag (suppress default print), `/PAT/p` (print matching lines). Preserves existing `s/PAT/REP/[g]` substitution.
+- **Phase 04 (ps/top):** Overhauled `cells/tools/shell/src/commands.rs` — `cmd_ps` and `cmd_top` now support multi-page output (64-task buffer vs prior 16), better formatting (PID/name/state alignment), `top` no-longer exits on any keystroke (waits for 'q'). `executor.rs` awk dispatch wired.
+
+### Impacts
+- **Text processing pipeline complete:** `cat | grep | awk | sed` chains now fully functional
+- **Embedded diagnostics:** `ps` and `top` scale to real workloads (64 tasks vs 16)
+- **Zero Law 1 changes:** All work in userspace shell cell, no ABI/syscall changes
+- **#![forbid(unsafe_code)]:** Shell cell remains safety-preserved
+
+### Architecture Notes
+- All utilities use stack-allocated fixed-size buffers (no heap allocation in hot loops)
+- Field separator parsing (awk) and pattern matching (grep/sed) use literal substring semantics
+- Pipeline integration via `shell_stdin()` and `OutputSink` (built-ins only; standalone cells cannot pipe)
+
+---
+
+## [2026-06-22] Security: Per-Cell DMA isolation — IOMMU multi-phase overhaul (all 5 phases complete)
+
+### Summary
+Upgraded IOMMU from shared global page tables to per-Cell isolation, closing the **🔴 passthrough DMA gap** identified in hardware-isolation research (docs/research/research-hardware-isolation.md). All 5 phases landed in a single commit: RISC-V 3-level DDT + x86 VT-d per-domain, Cell exit cleanup, and a new `sys_grant_dma` syscall for userspace Driver Cells. Kernel enforces BDF ownership, DMA quota (1× memory quota), and page alignment. Security model: peripherals pinned to kernel domain at boot; Driver Cells request DMA via syscall with capability + quota checks.
+
+### Changes
+- **`kernel/src/task/drivers/iommu_riscv.rs`** — per-Cell Sv39 IOMMU domains (unique PSCIDs); 3-level DDT tree (MODE=3LVL via `ensure_child_table()` + `get_dc_slot()`) eliminating 1LVL DDT bus-collision bug; PSCID free-list; CQ management (IOTINVAL.VMA/IOFENCE.C/IODIR.INVAL_DDT).
+- **`kernel/src/task/drivers/iommu_x86.rs`** — per-Cell VtdSlpt + DID; ECAP.IRO-computed IOTLB offsets; PSI/DSI IOTLB flush; context-cache DSI invalidation; DID write-order per spec; 305 LOC rewrite.
+- **`kernel/src/task/drivers/blk_nvme.rs` + `nic_e1000.rs`** — pass BDF to `map_dma_for_cell()` for IOMMU device tracking.
+- **`kernel/src/task.rs`** — `cleanup_cell()` in Exit/ForceExit/watchdog paths; IOFENCE/IVT flush before frame reclaim.
+- **`kernel/src/memory/cell_quota.rs`** — DMA quota tracking (per-cell byte counters); `can_map_dma()` quota enforcement; lock-free `record_dma_mapped/unmapped()`.
+- **`kernel/src/resource_registry.rs`** — PCIe BDF ownership registry; `register_bdf_owner(bdf, tid)` for Driver Cells.
+- **`kernel/src/task/syscall.rs` (op=233)** — `sys_grant_dma(bdf, offset, size)` syscall; BDF/quota/alignment checks; allowlist bit 48.
+- **`libs/api/src/syscall.rs` + `libs/ostd/src/syscall.rs`** — `sys_grant_dma` ABI + wrapper.
+- **`libs/api/src/syscall_tests.rs`** — op=233 ABI tests pass.
+
+### Impact
+- **G2 Storage/NIC security unblocked**: peripherals isolated per-Cell; zero DMA attack surface.
+- **Zero G1 breakage**: kernel drivers still kernel-local; user Driver Cells use `sys_grant_dma`.
+- **Hardware isolation gap closed**: passthrough → page-table enforcement; IOMMU is now a real security boundary.
+
+---
+
+## [2026-06-22] Fix: Net service TLS transport detects connection close (no 30-second hangs)
+
+### Summary
+SmoltcpTlsTransport read/write spin loops had no exit for TCP connection close (FIN/RST). Remote-closed connections caused 30-second spin-to-timeout, making HTTPS hang. Fixed: Read detects EOF via `!may_recv() && !can_recv()`; Write detects close via `!may_send()` BEFORE spin. Both return error immediately (ConnectionReset/BrokenPipe). Added per-alert TLS error logging (HandshakeFailure/CertificateUnknown/UnknownCa/other) so diagnostics are visible.
+
+### Changes
+- **`cells/services/net/src/tls/transport.rs`** — Read checks EOF after poll, returns `ConnectionReset` on close + drained RX; Write checks `!may_send()` before spin, returns `BrokenPipe`.
+- **`cells/services/net/src/handlers.rs`** — Added `ConnectionClosed` to I/O error arm; `HandshakeAborted` logs per-alert lines for server cert issues.
+- **Embedded cell artifacts** (config, init, shell, vfs) rebuilt.
+
+### Impact
+- **HTTPS responsiveness fixed**: no 30-second hangs on closed connections.
+- **TLS diagnostics improved**: per-alert logs aid debug (CA, cert mismatch, etc.).
+
+---
+
 ## [2026-06-21] Platform: HTTP/1.1 + JSON libraries close app SDK gaps (no_std + feature-gated)
 
 ### Summary

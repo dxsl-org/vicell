@@ -95,7 +95,7 @@ pub fn shell_stdin() -> &'static [u8] {
 
 /// All recognized shell built-in names, used by tab completion.
 pub const BUILTINS: &[&str] = &[
-    "alias", "bg", "blktest", "break", "cat", "clear", "continue", "echo", "env",
+    "alias", "awk", "bg", "blktest", "break", "cat", "clear", "continue", "echo", "env",
     "exec", "exit", "export", "fg", "find", "free", "grep", "head", "help", "jobs",
     "kill", "ls", "mkdir", "ps", "pwd", "read", "rm", "rmdir", "sed", "shutdown",
     "sleep", "snapshot", "sort", "source", "tail", "tee", "test", "top", "unalias",
@@ -704,7 +704,8 @@ fn dispatch_builtin(prog: &str, args: &[&str], jobs: &mut Jobs) -> i32 {
         "vcat"    => crate::cmd_fs::cmd_vcat(make_parts(args)),
         "vwrite"  => crate::cmd_fs::cmd_vwrite(make_parts(args)),
         "vappend" => crate::cmd_fs::cmd_vappend(make_parts(args)),
-        "top"  => crate::commands::cmd_top(),
+        "awk"  => crate::cmd_fs::cmd_awk(make_parts(args)),
+        "top"  => crate::commands::cmd_top(make_parts(args)),
         "kill" => crate::commands::cmd_kill(make_parts(args)),
         // ── Snapshot ────────────────────────────────────────────────────
         "snapshot" => {
