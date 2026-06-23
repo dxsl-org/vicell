@@ -34,6 +34,12 @@ pub fn run_all() {
     test_manifest_network_false_grants_no_network_cap();
     test_force_exit_opcode_mapped();
     test_force_exit_allowlist_bit_none();
+    // Cell signing tests.
+    test_signing_self_test_passes();
+    test_signing_extract_sig_none_for_empty_slice();
+    test_signing_extract_sig_none_for_non_elf();
+    test_signing_extract_sig_some_from_constructed_elf();
+    test_signing_required_flag_off_in_dev_build();
     log::info!("=== ELF Loader Tests PASSED ===");
 }
 
@@ -246,4 +252,141 @@ fn test_manifest_network_false_grants_no_network_cap() {
     assert!(!m.has_spawn(),     "spawn=false must NOT set spawn flag");
     assert!(m.declares_any_privilege(), "block_io alone is still a privilege");
     log::info!("  [ok] network=false → no NetworkCap granted");
+}
+
+// ─── Cell signing tests ───────────────────────────────────────────────────────
+
+fn test_signing_self_test_passes() {
+    assert!(crate::signing::self_test(), "signing::self_test must pass at boot");
+    log::info!("  [ok] signing::self_test() passed");
+}
+
+fn test_signing_extract_sig_none_for_empty_slice() {
+    assert!(
+        crate::signing::extract_sig(&[]).is_none(),
+        "extract_sig on empty slice must return None"
+    );
+    log::info!("  [ok] extract_sig(&[]) → None");
+}
+
+fn test_signing_extract_sig_none_for_non_elf() {
+    // 64 bytes that do NOT start with the ELF magic — should return None gracefully.
+    let garbage = [0x42u8; 64];
+    assert!(
+        crate::signing::extract_sig(&garbage).is_none(),
+        "extract_sig on non-ELF bytes must return None"
+    );
+    log::info!("  [ok] extract_sig(non-elf) → None");
+}
+
+/// Verify that `extract_sig` correctly finds a `__ViCell_sig` section in a
+/// handcrafted minimal RISC-V ELF64 binary.
+///
+/// Layout (408 bytes total):
+///   [0..64]    ELF64 header (e_phnum=1, e_shnum=3, e_shstrndx=2)
+///   [64..120]  PT_LOAD program header  (p_offset=120, p_filesz=8)
+///   [120..128] "code" bytes            (8 zero bytes)
+///   [128..192] Section header 0: NULL
+///   [192..256] Section header 1: __ViCell_sig  (sh_offset=320, sh_size=64)
+///   [256..320] Section header 2: .shstrtab     (sh_offset=384, sh_size=24)
+///   [320..384] Signature bytes         (64 × 0xAB — sentinel value for test)
+///   [384..408] String table            (\0__ViCell_sig\0.shstrtab\0)
+fn test_signing_extract_sig_some_from_constructed_elf() {
+    let elf = build_minimal_signed_elf([0xABu8; 64]);
+    let result = crate::signing::extract_sig(&elf);
+    assert!(result.is_some(), "extract_sig must find __ViCell_sig in minimal ELF");
+    let extracted = result.unwrap();
+    assert!(
+        extracted.iter().all(|&b| b == 0xAB),
+        "extracted signature bytes must match embedded sentinel (0xAB×64)"
+    );
+    log::info!("  [ok] extract_sig(constructed elf) → Some([0xAB; 64])");
+}
+
+fn test_signing_required_flag_off_in_dev_build() {
+    // In dev builds (default features) `signing-required` must be off so that
+    // unsigned cell binaries can still boot. This ensures the dev build stays
+    // permissive while `signing-required` in CI is explicit and deliberate.
+    assert!(
+        !crate::signing::signing_required(),
+        "signing_required() must be false in dev builds (feature `signing-required` not set)"
+    );
+    log::info!("  [ok] signing_required() → false in dev build");
+}
+
+/// Build a 408-byte minimal RISC-V ELF64 with one PT_LOAD segment and a
+/// `__ViCell_sig` section carrying `sig` as its data. Used only by tests.
+fn build_minimal_signed_elf(sig: [u8; 64]) -> alloc::vec::Vec<u8> {
+    // String table: \0__ViCell_sig\0.shstrtab\0 (24 bytes)
+    //   strtab[1]  = "__ViCell_sig\0"  → sh_name for section 1
+    //   strtab[14] = ".shstrtab\0"     → sh_name for section 2 (itself)
+    const STRTAB: &[u8] = b"\x00__ViCell_sig\x00.shstrtab\x00";
+    let mut v = alloc::vec![0u8; 384 + STRTAB.len()]; // 384 + 24 = 408
+
+    // ── ELF64 header (offset 0, 64 bytes) ────────────────────────────────────
+    v[0..4].copy_from_slice(b"\x7fELF");
+    v[4] = 2; // ELFCLASS64
+    v[5] = 1; // ELFDATA2LSB
+    v[6] = 1; // EV_CURRENT
+    // e_type=2 (ET_EXEC), e_machine=0xF3 (EM_RISCV)
+    v[16..18].copy_from_slice(&2u16.to_le_bytes());
+    v[18..20].copy_from_slice(&0xF3u16.to_le_bytes());
+    // e_version=1
+    v[20..24].copy_from_slice(&1u32.to_le_bytes());
+    // e_entry=0x1000, e_phoff=64, e_shoff=128
+    v[24..32].copy_from_slice(&0x1000u64.to_le_bytes());
+    v[32..40].copy_from_slice(&64u64.to_le_bytes());
+    v[40..48].copy_from_slice(&128u64.to_le_bytes());
+    // e_flags=5 (RVC + double-float ABI), e_ehsize=64, e_phentsize=56, e_phnum=1
+    v[48..52].copy_from_slice(&5u32.to_le_bytes());
+    v[52..54].copy_from_slice(&64u16.to_le_bytes());
+    v[54..56].copy_from_slice(&56u16.to_le_bytes());
+    v[56..58].copy_from_slice(&1u16.to_le_bytes());
+    // e_shentsize=64, e_shnum=3, e_shstrndx=2
+    v[58..60].copy_from_slice(&64u16.to_le_bytes());
+    v[60..62].copy_from_slice(&3u16.to_le_bytes());
+    v[62..64].copy_from_slice(&2u16.to_le_bytes());
+
+    // ── PT_LOAD program header (offset 64, 56 bytes) ─────────────────────────
+    // ELF64 Phdr: p_type(4), p_flags(4), p_offset(8), p_vaddr(8), p_paddr(8),
+    //             p_filesz(8), p_memsz(8), p_align(8)
+    v[64..68].copy_from_slice(&1u32.to_le_bytes());       // p_type = PT_LOAD
+    v[68..72].copy_from_slice(&5u32.to_le_bytes());       // p_flags = R|X
+    v[72..80].copy_from_slice(&120u64.to_le_bytes());     // p_offset = 120
+    v[80..88].copy_from_slice(&0x1000u64.to_le_bytes());  // p_vaddr
+    v[88..96].copy_from_slice(&0x1000u64.to_le_bytes());  // p_paddr
+    v[96..104].copy_from_slice(&8u64.to_le_bytes());      // p_filesz = 8
+    v[104..112].copy_from_slice(&8u64.to_le_bytes());     // p_memsz = 8
+    v[112..120].copy_from_slice(&0x1000u64.to_le_bytes()); // p_align
+
+    // [120..128]: code bytes, already zero.
+
+    // ── Section header 0: NULL (offset 128, 64 bytes) — all zero ─────────────
+
+    // ── Section header 1: __ViCell_sig (offset 192, 64 bytes) ────────────────
+    // ELF64 Shdr: sh_name(4), sh_type(4), sh_flags(8), sh_addr(8), sh_offset(8),
+    //             sh_size(8), sh_link(4), sh_info(4), sh_addralign(8), sh_entsize(8)
+    v[192..196].copy_from_slice(&1u32.to_le_bytes());   // sh_name = strtab[1]
+    v[196..200].copy_from_slice(&1u32.to_le_bytes());   // sh_type = SHT_PROGBITS
+    // sh_flags = 0 (no ALLOC — sig section must never be mapped), already zero
+    // sh_offset = 320 (sig data starts there)
+    v[216..224].copy_from_slice(&320u64.to_le_bytes());
+    v[224..232].copy_from_slice(&64u64.to_le_bytes());  // sh_size = 64
+    v[240..248].copy_from_slice(&1u64.to_le_bytes());   // sh_addralign = 1
+
+    // ── Section header 2: .shstrtab (offset 256, 64 bytes) ───────────────────
+    v[256..260].copy_from_slice(&14u32.to_le_bytes());  // sh_name = strtab[14]
+    v[260..264].copy_from_slice(&3u32.to_le_bytes());   // sh_type = SHT_STRTAB
+    // sh_offset = 384
+    v[280..288].copy_from_slice(&384u64.to_le_bytes());
+    v[288..296].copy_from_slice(&(STRTAB.len() as u64).to_le_bytes()); // sh_size
+    v[304..312].copy_from_slice(&1u64.to_le_bytes());   // sh_addralign = 1
+
+    // ── Signature bytes (offset 320, 64 bytes) ────────────────────────────────
+    v[320..384].copy_from_slice(&sig);
+
+    // ── String table (offset 384, 24 bytes) ───────────────────────────────────
+    v[384..384 + STRTAB.len()].copy_from_slice(STRTAB);
+
+    v
 }

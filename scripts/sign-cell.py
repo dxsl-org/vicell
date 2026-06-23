@@ -6,9 +6,11 @@ matches CELL_SIGNER_PUBKEY in kernel/src/signing.rs (`dev-signing-key` feature).
 Production signing uses --seed-hex or a KMS; never the hardcoded dev seed.
 
 Signed payload (MUST match kernel/src/signing.rs::verify_cell_with_key):
-  1. ELF header bytes [0..64]
-  2. PT_LOAD segments sorted by (p_offset, p_filesz, phdr_index)
-  3. __ViCell_manifest section bytes (if present)
+  1. PT_LOAD segments sorted by (p_offset, p_filesz, phdr_index)
+  2. __ViCell_manifest section bytes (if present)
+
+  NOTE: The ELF header is NOT signed — objcopy mutates e_shnum/e_shoff when
+  embedding __ViCell_sig, so including the header would break verification.
 
 The signature is embedded as a non-loadable ELF section `__ViCell_sig` (64 bytes)
 via `objcopy`. The section must not have the ALLOC flag — it must never be in PT_LOAD.

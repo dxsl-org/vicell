@@ -93,7 +93,11 @@ foreach ($line in $zig_output) {
 # gen_disk — so signing is never accidentally skipped (a separate wrapper could
 # be bypassed; this cannot). The dev seed [0x43]*32 is fixed so rebuilds are
 # reproducible and no key paste is required.
-Write-Host "Signing cell binaries (Ed25519 dev key)..."
+#
+# sign-cell.py reads $env:OBJCOPY to select the correct cross-objcopy binary.
+# Default to the xpack RISC-V toolchain; override before invoking this script.
+if (-not $env:OBJCOPY) { $env:OBJCOPY = "riscv-none-elf-objcopy" }
+Write-Host "Signing cell binaries (Ed25519 dev key, objcopy=$($env:OBJCOPY))..."
 $sign_script = "scripts\sign-cell.py"
 if (-not (Test-Path $sign_script)) {
     Write-Host "ERROR: $sign_script not found — run from the Cellos repo root." -ForegroundColor Red
