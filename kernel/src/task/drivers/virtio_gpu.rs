@@ -20,9 +20,32 @@ unsafe impl Send for GpuContext {}
 
 pub static GPU_CONTEXT: Spinlock<Option<GpuContext>> = Spinlock::new(None);
 
+/// Resource ID used by the framebuffer resource inside the vendored virtio-drivers.
+/// Mirrors `RESOURCE_ID_FB` in kernel/third_party/virtio_drivers/src/device/gpu.rs.
+/// Must stay in sync with that constant on any upstream bump.
+const RESOURCE_ID_FB: u32 = 0xbabe;
+
 impl GpuContext {
     pub fn framebuffer(&mut self) -> &mut [u8] {
         unsafe { core::slice::from_raw_parts_mut(self.fb_ptr, self.fb_len) }
+    }
+
+    /// Flush only the dirty sub-rectangle to the GPU, reducing DMA cost.
+    ///
+    /// Falls back to a full flush on error so the display is never left stale.
+    pub fn flush_rect(&mut self, x: u32, y: u32, w: u32, h: u32) {
+        // Bounds-check: clamp to framebuffer dimensions to prevent out-of-range transfers.
+        let x = x.min(self.width);
+        let y = y.min(self.height);
+        let w = w.min(self.width.saturating_sub(x));
+        let h = h.min(self.height.saturating_sub(y));
+        if w == 0 || h == 0 { return; }
+        // offset = byte position of top-left corner in the backing store.
+        let offset = (y as u64 * self.width as u64 + x as u64) * 4;
+        if self.gpu.flush_rect(x, y, w, h, offset).is_err() {
+            // Fallback: full flush so the display is never left stale.
+            let _ = self.gpu.flush();
+        }
     }
 }
 

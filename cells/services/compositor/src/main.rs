@@ -24,7 +24,7 @@ mod z_order;
 use api::display::{AttachGrant, DamageNotify, PixelFormat, compositor_ops, Rect};
 use input_handler::{InputState, connect_to_input, handle_input_event};
 use ostd::io::println;
-use ostd::syscall::{sys_gpu_cursor, sys_grant_slice, sys_recv, sys_send, SyscallResult};
+use ostd::syscall::{sys_get_resolution, sys_get_time, sys_gpu_cursor, sys_grant_slice, sys_recv, sys_send, SyscallResult};
 use render::{render_frame, ScreenFb};
 use surface_table::SurfaceTable;
 use z_order::ZOrder;
@@ -89,6 +89,8 @@ pub fn main() {
     }
 
     let mut buf = [0u8; 512];
+    // Resolution hotplug: check every 5 s; reconstruct ScreenFb on change.
+    let mut last_res_check_ms: u64 = 0;
 
     loop {
         match sys_recv(0, &mut buf) {
@@ -118,6 +120,21 @@ pub fn main() {
                 pending_dirty.take(),
                 input.mouse_x, input.mouse_y,
             );
+        }
+
+        // Display hotplug: poll GPU resolution every 5 s; if it changed, rebuild ScreenFb
+        // and mark the full screen dirty so all surfaces are re-blended at the new size.
+        let now_ms = sys_get_time();
+        if now_ms.wrapping_sub(last_res_check_ms) >= 5_000 {
+            last_res_check_ms = now_ms;
+            let (new_w, new_h) = sys_get_resolution();
+            if new_w != fb.width || new_h != fb.height {
+                println("[compositor] resolution changed — rebuilding framebuffer");
+                fb = ScreenFb::new(new_w, new_h);
+                // Repaint entire screen so all surfaces are composited at the new size.
+                let full = api::display::Rect { x: 0, y: 0, w: new_w, h: new_h };
+                pending_dirty = Some(full);
+            }
         }
     }
 }

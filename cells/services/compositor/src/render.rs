@@ -4,8 +4,8 @@
 extern crate alloc;
 
 use alloc::vec;
-use api::display::{Rect, FALLBACK_WIDTH, FALLBACK_HEIGHT};
-use ostd::syscall::sys_gpu_flush;
+use api::display::Rect;
+use ostd::syscall::{sys_gpu_flush, sys_get_resolution};
 use crate::cursor_sprite::{CURSOR_H, CURSOR_W, cursor_pixel};
 use crate::surface_table::SurfaceTable;
 use crate::z_order::ZOrder;
@@ -22,6 +22,8 @@ pub struct ScreenFb {
 impl ScreenFb {
     /// Allocate a zeroed framebuffer of the given dimensions.
     pub fn new(width: u32, height: u32) -> Self {
+        assert!(width > 0 && height > 0 && width <= 4096 && height <= 4096,
+            "ScreenFb dimensions out of range: {}x{}", width, height);
         let full = (width * height * 4) as usize;
         Self {
             pixels:  vec![0u8; full],
@@ -191,7 +193,10 @@ pub fn render_frame(
     Some(dirty)
 }
 
-/// Return the default screen dimensions (probed from GPU at startup).
+/// Return the screen dimensions from the GPU's actual scanout resolution.
+///
+/// Calls `GpuGetResolution` syscall so all callers (ScreenFb alloc, GET_SCREEN_SIZE
+/// replies, etc.) always agree with the hardware — no hardcoded fallback constants.
 pub fn default_screen_size() -> (u32, u32) {
-    (FALLBACK_WIDTH, FALLBACK_HEIGHT)
+    sys_get_resolution()
 }
